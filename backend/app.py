@@ -6,6 +6,7 @@ from celery.result import AsyncResult
 import json
 from pathlib import Path
 from datetime import datetime, timezone
+from sqlalchemy.orm import Session
 
 # Import celery app instance from root
 from celery_app import celery_app
@@ -14,12 +15,22 @@ import tasks
 # Import utils from backend package
 from . import utils_elevenlabs
 from . import utils_fs
+from . import models # Import the models module
 
 # Load environment variables from .env file for local development
 # Within Docker, env vars are passed by docker-compose
 load_dotenv()
 
 app = Flask(__name__)
+
+# Initialize Database
+try:
+    models.init_db()
+except Exception as e:
+    # Log the error but allow app to continue if possible?
+    # Or should failure to init DB be fatal?
+    print(f"CRITICAL: Database initialization failed: {e}")
+    # Depending on requirements, might exit here: sys.exit(1)
 
 # Configure CORS if needed, for example:
 # from flask_cors import CORS
@@ -52,45 +63,94 @@ def ping():
 
 @app.route('/api/voices', methods=['GET'])
 def get_voices():
-    """Endpoint to get available voices from ElevenLabs."""
+    """Endpoint to get available voices, supports filtering/sorting."""
+    search = request.args.get('search', None)
+    category = request.args.get('category', None)
+    voice_type = request.args.get('voice_type', None)
+    sort = request.args.get('sort', None)
+    sort_direction = request.args.get('sort_direction', None)
+    page_size = request.args.get('page_size', 100, type=int)
+    next_page_token = request.args.get('next_page_token', None)
+    print(f"API Route /api/voices received search='{search}'")
+
     try:
-        # TODO: Add caching for this endpoint
-        voices = utils_elevenlabs.get_available_voices()
-        # Simplify the response to only include id and name
-        voice_list = [
-            {"id": v.get('voice_id'), "name": v.get('name')}
-            for v in voices if v.get('voice_id') and v.get('name')
-        ]
-        return make_api_response(data=voice_list)
+        voices = utils_elevenlabs.get_available_voices(
+            search=search,
+            category=category,
+            voice_type=voice_type,
+            sort=sort,
+            sort_direction=sort_direction,
+            page_size=page_size,
+            next_page_token=next_page_token
+        )
+        # V2 response includes more details, potentially filter/map here if needed
+        # For now, return the full voice objects from V2
+        return make_api_response(data=voices)
     except utils_elevenlabs.ElevenLabsError as e:
-        print(f"Error fetching voices: {e}")
+        print(f"Error fetching voices via API route: {e}")
         return make_api_response(error=str(e), status_code=500)
     except Exception as e:
-        print(f"Unexpected error fetching voices: {e}")
+        print(f"Unexpected error in /api/voices route: {e}")
         return make_api_response(error="An unexpected error occurred", status_code=500)
 
 @app.route('/api/generate', methods=['POST'])
 def start_generation():
-    """Endpoint to start an asynchronous generation task."""
+    """Endpoint to start an asynchronous generation task and record it."""
     if not request.is_json:
         return make_api_response(error="Request must be JSON", status_code=400)
 
     config_data = request.get_json()
+    config_data_json = json.dumps(config_data) # For storing and passing
 
-    # Basic validation (can be expanded)
     required_keys = ['skin_name', 'voice_ids', 'script_csv_content', 'variants_per_line']
     if not all(key in config_data for key in required_keys):
         missing = [key for key in required_keys if key not in config_data]
         return make_api_response(error=f'Missing required configuration keys: {missing}', status_code=400)
 
+    db: Session = next(models.get_db()) # Get DB session
+    db_job = None
     try:
-        # Call the task function directly via the imported module
-        task = tasks.run_generation.delay(json.dumps(config_data))
-        print(f"Enqueued generation task with ID: {task.id}")
-        return make_api_response(data={'task_id': task.id}, status_code=202)
+        # 1. Create Job record in DB
+        db_job = models.GenerationJob(
+            status="PENDING",
+            parameters_json=config_data_json
+            # submitted_at is default
+        )
+        db.add(db_job)
+        db.commit()
+        db.refresh(db_job)
+        db_job_id = db_job.id
+        print(f"Created GenerationJob record with DB ID: {db_job_id}")
+
+        # 2. Enqueue Celery task, passing DB ID
+        # Note: Pass primitive types to Celery tasks if possible
+        task = tasks.run_generation.delay(db_job_id, config_data_json)
+        print(f"Enqueued generation task with Celery ID: {task.id} for DB Job ID: {db_job_id}")
+
+        # 3. Update Job record with Celery task ID
+        db_job.celery_task_id = task.id
+        db.commit()
+
+        # 4. Return IDs to frontend
+        return make_api_response(data={'task_id': task.id, 'job_id': db_job_id}, status_code=202)
+
     except Exception as e:
-        print(f"Error enqueueing generation task: {e}")
+        print(f"Error during job submission/enqueueing: {e}")
+        # Attempt to rollback DB changes if job was created but task failed?
+        # (Complex, maybe just mark DB job as FAILED here?)
+        if db_job and db_job.id:
+            try:
+                 # Mark DB job as failed if Celery enqueue failed
+                 db_job.status = "SUBMIT_FAILED"
+                 db_job.result_message = f"Failed to enqueue Celery task: {e}"
+                 db.commit()
+            except Exception as db_err:
+                 print(f"Failed to update job status after enqueue error: {db_err}")
+                 db.rollback() # Rollback any partial changes
+
         return make_api_response(error="Failed to start generation task", status_code=500)
+    finally:
+        db.close() # Ensure session is closed
 
 @app.route('/api/generate/<task_id>/status', methods=['GET'])
 def get_task_status(task_id):
@@ -126,6 +186,39 @@ def get_task_status(task_id):
     except Exception as e:
         print(f"Error checking task status for {task_id}: {e}")
         return make_api_response(error="Failed to retrieve task status", status_code=500)
+
+# --- Job History API Endpoint --- #
+
+@app.route('/api/jobs', methods=['GET'])
+def list_generation_jobs():
+    """Lists previously submitted generation jobs from the database."""
+    db: Session = next(models.get_db())
+    try:
+        # Query jobs, order by most recent submission
+        jobs = db.query(models.GenerationJob).order_by(models.GenerationJob.submitted_at.desc()).all()
+        
+        # Convert SQLAlchemy objects to dictionaries for JSON response
+        # Handle potential JSON parsing for results/params if needed on frontend
+        job_list = [
+            {
+                "id": job.id,
+                "celery_task_id": job.celery_task_id,
+                "status": job.status,
+                "submitted_at": job.submitted_at.isoformat() if job.submitted_at else None,
+                "started_at": job.started_at.isoformat() if job.started_at else None,
+                "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+                "parameters_json": job.parameters_json, # Keep as string for now
+                "result_message": job.result_message,
+                "result_batch_ids_json": job.result_batch_ids_json # Keep as string for now
+            }
+            for job in jobs
+        ]
+        return make_api_response(data=job_list)
+    except Exception as e:
+        print(f"Error listing jobs: {e}")
+        return make_api_response(error="Failed to list generation jobs", status_code=500)
+    finally:
+        db.close()
 
 # --- Ranking API Endpoints --- #
 

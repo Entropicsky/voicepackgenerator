@@ -5,8 +5,21 @@ import {
   GenerationStartResponse,
   TaskStatus,
   BatchInfo,
-  BatchMetadata
+  BatchMetadata,
+  GenerationJob,
+  BatchDetailInfo
 } from './types';
+
+// Define options for filtering/sorting voices
+interface GetVoicesOptions {
+    search?: string;
+    category?: string;
+    voice_type?: string;
+    sort?: 'name' | 'created_at_unix';
+    sort_direction?: 'asc' | 'desc';
+    page_size?: number;
+    next_page_token?: string;
+}
 
 // Helper to handle API responses and errors
 async function handleApiResponse<T>(response: Response): Promise<T> {
@@ -34,12 +47,28 @@ async function handleApiResponse<T>(response: Response): Promise<T> {
 const API_BASE = ''; // Using Vite proxy, so relative path works
 
 export const api = {
-  // --- Generation --- //
-  getVoices: async (): Promise<VoiceOption[]> => {
-    const response = await fetch(`${API_BASE}/api/voices`);
+  // --- Generation & Jobs --- //
+  getVoices: async (options?: GetVoicesOptions): Promise<VoiceOption[]> => {
+    const queryParams = new URLSearchParams();
+    if (options) {
+        if (options.search) queryParams.append('search', options.search);
+        if (options.category) queryParams.append('category', options.category);
+        if (options.voice_type) queryParams.append('voice_type', options.voice_type);
+        if (options.sort) queryParams.append('sort', options.sort);
+        if (options.sort_direction) queryParams.append('sort_direction', options.sort_direction);
+        if (options.page_size) queryParams.append('page_size', String(options.page_size));
+        if (options.next_page_token) queryParams.append('next_page_token', options.next_page_token);
+    }
+    const queryString = queryParams.toString();
+    const url = `${API_BASE}/api/voices${queryString ? '?' + queryString : ''}`;
+    console.log("Fetching voices from URL:", url); // Debugging
+
+    const response = await fetch(url);
+    // V2 returns full voice objects, ensure VoiceOption type matches or adjust mapping
     return handleApiResponse<VoiceOption[]>(response);
   },
 
+  // Returns { task_id, job_id } now
   startGeneration: async (config: GenerationConfig): Promise<GenerationStartResponse> => {
     const response = await fetch(`${API_BASE}/api/generate`, {
       method: 'POST',
@@ -48,20 +77,26 @@ export const api = {
       },
       body: JSON.stringify(config),
     });
-    // Expects { data: { task_id: "..." } }
     return handleApiResponse<GenerationStartResponse>(response);
   },
 
+  // Kept for optional live polling, but DB is primary source
   getTaskStatus: async (taskId: string): Promise<TaskStatus> => {
     const response = await fetch(`${API_BASE}/api/generate/${taskId}/status`);
     // Expects { data: { task_id: "...", status: "...", info: ... } }
     return handleApiResponse<TaskStatus>(response);
   },
 
+  // New endpoint for getting job history
+  getJobs: async (): Promise<GenerationJob[]> => {
+      const response = await fetch(`${API_BASE}/api/jobs`);
+      return handleApiResponse<GenerationJob[]>(response);
+  },
+
   // --- Ranking --- //
-  listBatches: async (): Promise<BatchInfo[]> => {
+  listBatches: async (): Promise<BatchDetailInfo[]> => {
     const response = await fetch(`${API_BASE}/api/batches`);
-    return handleApiResponse<BatchInfo[]>(response);
+    return handleApiResponse<BatchDetailInfo[]>(response);
   },
 
   getBatchMetadata: async (batchId: string): Promise<BatchMetadata> => {

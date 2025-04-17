@@ -10,31 +10,36 @@ import './App.css'
 
 // Assuming placeholder pages exist
 import GenerationPage from './pages/GenerationPage';
-import BatchListPage from './pages/BatchListPage';
+import JobsPage from './pages/JobsPage';
+import BatchesPage from './pages/BatchesPage';
 import RankingPage from './pages/RankingPage';
 
 function App() {
   // Basic layout with navigation
   return (
     <Router>
-      <div>
+      <div style={{ padding: '10px 20px' }}>
         <h1>Voice Generation & Ranking Tool</h1>
         <nav>
-          <ul>
+          <ul style={{ listStyle: 'none', padding: 0, display: 'flex', gap: '15px' }}>
             <li>
               <Link to="/generate">Generate</Link>
             </li>
             <li>
-              <Link to="/batches">Rank Batches</Link>
+              <Link to="/jobs">Jobs</Link>
+            </li>
+            <li>
+              <Link to="/batches">Batches</Link>
             </li>
           </ul>
         </nav>
 
-        <hr />
+        <hr style={{ margin: '15px 0' }} />
 
         <Routes>
           <Route path="/generate" element={<GenerationPage />} />
-          <Route path="/batches" element={<BatchListPage />} />
+          <Route path="/jobs" element={<JobsPage />} />
+          <Route path="/batches" element={<BatchesPage />} />
           <Route path="/batch/:batchId" element={<RankingPage />} />
           {/* Default route redirects to generate page */}
           <Route path="*" element={<Navigate to="/generate" replace />} />

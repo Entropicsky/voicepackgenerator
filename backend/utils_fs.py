@@ -83,37 +83,61 @@ def lock_batch(batch_dir: str | Path) -> None:
         raise FilesystemError(f"Error creating LOCK file: {e}") from e
 
 def find_batches(root_dir: str | Path) -> list[dict]:
-    """Scans the filesystem under root_dir for valid batch structures."""
+    """Scans the filesystem for batches and extracts key metadata."""
     batches = []
     root = Path(root_dir)
     if not root.is_dir():
         print(f"Warning: Audio root directory not found: {root_dir}")
         return []
 
-    # Structure: <root>/<skin>/<voice>/<batch_id_folder>/
     for skin_dir in root.iterdir():
-        if not skin_dir.is_dir() or skin_dir.name.startswith('.'):
-            continue
+        if not skin_dir.is_dir() or skin_dir.name.startswith('.'): continue
         for voice_dir in skin_dir.iterdir():
-            if not voice_dir.is_dir() or voice_dir.name.startswith('.'):
-                continue
+            if not voice_dir.is_dir() or voice_dir.name.startswith('.'): continue
             for batch_dir in voice_dir.iterdir():
-                if not batch_dir.is_dir() or batch_dir.name.startswith('.'):
-                    continue
-                # Check for metadata.json as marker of a valid batch
+                if not batch_dir.is_dir() or batch_dir.name.startswith('.'): continue
                 meta_path = batch_dir / 'metadata.json'
                 if meta_path.is_file():
                     try:
-                        # Optionally load metadata here to get more details,
-                        # but for now just use folder names
-                        # meta = load_metadata(batch_dir)
+                        metadata = load_metadata(batch_dir) # Load the metadata
+                        takes = metadata.get('takes', [])
+                        params = metadata.get('generation_params', {})
+                        
+                        num_lines = len(set(t.get('line') for t in takes))
+                        # Get variants from params, fallback to calculating max from takes
+                        variants_per_line = params.get('variants_per_line', 0)
+                        if variants_per_line == 0 and takes:
+                             takes_by_line_count = {}
+                             for t in takes:
+                                 takes_by_line_count[t.get('line', '')] = takes_by_line_count.get(t.get('line', ''), 0) + 1
+                             if takes_by_line_count:
+                                 variants_per_line = max(takes_by_line_count.values())
+                             
+                        created_at_str = metadata.get('generated_at_utc')
+                        # Attempt to parse date from metadata, fallback to batch ID name
+                        created_at_sortable = None
+                        try:
+                            if created_at_str:
+                                created_at_sortable = datetime.fromisoformat(created_at_str.replace('Z', '+00:00')).timestamp()
+                            else: # Fallback: try parsing YYYYMMDD-HHMMSS from batch ID
+                                dt_part = batch_dir.name.split('-')[0]
+                                created_at_sortable = datetime.strptime(dt_part, "%Y%m%d").timestamp() # Only date part if time missing
+                        except ValueError:
+                           pass # Could not parse date
+
                         batches.append({
+                            "batch_id": batch_dir.name,
                             "skin": skin_dir.name,
                             "voice": voice_dir.name,
-                            "batch_id": batch_dir.name # Use folder name as ID
+                            "num_lines": num_lines,
+                            "takes_per_line": variants_per_line, # Max/Configured takes per line
+                            "num_takes": len(takes),
+                            "created_at": created_at_str, # ISO string for display
+                            "created_at_sortkey": created_at_sortable or 0, # Timestamp for sorting, fallback 0
+                            "status": "Locked" if is_locked(batch_dir) else "Unlocked"
                         })
                     except Exception as e:
-                        print(f"Warning: Skipping batch {batch_dir.name} due to metadata load error: {e}")
+                        print(f"Warning: Skipping batch {batch_dir.name} due to metadata load/parse error: {e}")
 
     return batches
 

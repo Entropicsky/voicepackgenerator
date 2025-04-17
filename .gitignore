@@ -23,4 +23,9 @@ Thumbs.db
 # IDE / Editor specific
 .idea/
 .vscode/
-*.swp 
+*.swp
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3 

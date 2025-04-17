@@ -45,54 +45,94 @@
 
 ## Phase 3: Backend - Ranking API (Milestone: Ranking works via API in Docker)
 
-- [x] Implement Flask API endpoint: `GET /api/batches` (using `utils_fs.find_batches`)
-- [x] Implement Flask API endpoint: `GET /api/batch/{batch_id}` (using `utils_fs.load_metadata`)
-- [x] Implement Flask API endpoint: `PATCH /api/batch/{batch_id}/take/{filename}` (using `utils_fs`)
-- [x] Implement Flask API endpoint: `POST /api/batch/{batch_id}/lock` (using `utils_fs`)
-- [x] Implement Flask API endpoint: `GET /audio/<path:relpath>` (using `send_file`)
+- [x] Implement Flask API endpoint: `GET /api/batches`
+- [x] Implement Flask API endpoint: `GET /api/batch/{batch_id}`
+- [x] Implement Flask API endpoint: `PATCH /api/batch/{batch_id}/take/{filename}`
+- [x] Implement Flask API endpoint: `POST /api/batch/{batch_id}/lock`
+- [x] Implement Flask API endpoint: `GET /audio/<path:relpath>`
 - [x] Ensure ranking endpoints handle `LOCKED` state correctly (423 response).
-- [ ] **Testing:** Write integration tests for ranking API endpoints (`test_api_ranking.py`, using `pyfakefs` or mocking `utils_fs`). (Deferred - Pytest issues)
-- [ ] **Testing:** Run tests inside container: `docker-compose exec backend pytest` (Deferred - Pytest issues)
-- [x] **Checkpoint Test:** Manually test ranking API endpoints (curl to `http://localhost:5000`) using pre-prepared batch data in `./output`. Verified metadata updates and symlink creation/deletion. Verified locking. Verified audio streaming.
+- [ ] **Testing:** Integration tests for ranking API (Deferred)
+- [ ] **Testing:** Run backend tests (Deferred)
+- [x] **Checkpoint Test:** Manually tested ranking API endpoints.
 
 ## Phase 4: Frontend - Setup & Shared Components (Milestone: Basic app structure renders via Docker)
 
-- [x] Ensure frontend project created in Phase 0 is correctly configured (Vite, TS, React).
-- [x] Set up React Router (`frontend/src/App.tsx`)
-- [x] Define main page components (`GenerationPage`, `BatchListPage`, `RankingPage`)
-- [x] Implement API wrapper functions (`frontend/src/api.ts`)
-- [x] Define shared TypeScript types (`frontend/src/types.ts`)
-- [ ] Implement basic shared components (`Button`, `Modal`, etc.) # Deferred
-- [x] Verify Vite proxy to Flask backend works (`frontend/vite.config.ts`)
-- [ ] **Testing:** Set up Vitest/React Testing Library. (Deferred)
-- [ ] **Testing:** Run tests inside container: `docker-compose exec frontend npm run test` (Deferred)
-- [x] **Checkpoint Test:** Run `docker-compose up`, navigate between placeholder pages (`http://localhost:5173`). Verified basic loading.
+- [x] Ensure frontend project created
+- [x] Set up React Router
+- [x] Define main page components
+- [x] Implement API wrapper functions
+- [x] Define shared TypeScript types
+- [ ] Implement basic shared components (Deferred)
+- [x] Verify Vite proxy
+- [ ] **Testing:** Set up Vitest/React Testing Library (Deferred)
+- [ ] **Testing:** Run frontend tests (Deferred)
+- [x] **Checkpoint Test:** Verified basic loading & navigation.
 
 ## Phase 5: Frontend - Generation UI (Milestone: User can configure & start generation via UI)
 
-- [x] Implement `VoiceSelector` component (fetches voices from API).
-- [x] Implement `GenerationForm` component (inputs, validation, CSV upload).
-- [x] Implement `TaskMonitor` component (polling status API using `usePolling` hook).
-- [x] Connect components in `GenerationPage.tsx`.
-- [x] Implement logic to call `POST /api/generate` on form submission.
-- [x] Display task status updates in `TaskMonitor`.
-- [ ] **Testing:** Write component tests for `VoiceSelector`, `GenerationForm`, `TaskMonitor` (mocking API calls). (Deferred)
-- [ ] **Testing:** Run tests inside container: `docker-compose exec frontend npm run test` (Deferred)
-- [x] **Checkpoint Test:** Used the UI to configure and start a generation job. Monitored its progress. Verified task completes successfully and output folder created.
+- [x] Implement `VoiceSelector` (with V2 API, filtering/sorting)
+- [x] Implement `GenerationForm`
+- [x] Remove `TaskMonitor` component.
+- [x] Connect components in `GenerationPage`
+- [x] Implement form submission logic (calls API, navigates to Jobs page)
+- [ ] **Testing:** Component tests for Generation UI (Deferred)
+- [ ] **Testing:** Run frontend tests (Deferred)
+- [x] **Checkpoint Test:** Verified generation submission.
 
 ## Phase 6: Frontend - Ranking UI (Milestone: User can rank takes via UI)
 
-- [ ] Implement `BatchListPage` (fetches and displays batches).
-- [ ] Implement `RankingContext` (`frontend/src/contexts/`).
-- [ ] Implement `RankingPage` (fetches batch data, sets up context).
-- [ ] Implement `LineList` component (virtualized).
-- [ ] Implement `TakeRow` component (playback button, waveform).
-- [ ] Implement `AudioPlayer` component (Web Audio API).
-- [ ] Implement `RankSlots` component (DnD, hotkeys, rank update logic).
-- [ ] Implement debounced PATCH call in `RankingContext.updateRank`.
-- [ ] Implement "Lock Batch" button and confirmation modal.
-- [ ] Implement read-only state for locked batches.
-- [ ] **Testing:** Write component tests for ranking components (mocking context/API). (Deferred)
-- [ ] **Testing:** Write integration tests for the ranking page flow. (Deferred)
-- [ ] **Testing:** Run tests inside container: `docker-compose exec frontend npm run test` (Deferred)
-- [ ] **Checkpoint Test:** Navigate from batch list to a completed batch (`http://localhost:5173`). Rank several takes. Verify UI updates, `metadata.json` changes, and `ranked/` symlinks are correct in `./output`. Lock the batch and verify UI becomes read-only.
+- [ ] Implement `JobsPage` (replaces BatchListPage, fetches /api/jobs). (Done in Phase 7)
+- [x] Implement `RankingContext` (line-scoped state, fetch, update, cascade).
+- [x] Implement `RankingPage` (uses context, 3-panel layout).
+- [x] Implement `LineNavigation` component.
+- [x] Implement `CurrentLineTakes` component.
+- [x] Implement `TakeRow` component (playback, rank buttons).
+- [x] Implement `CurrentLineRankedPanel` component.
+- [x] Implement debounced PATCH call in `RankingContext`.
+- [x] Implement "Lock Batch" button and logic.
+- [x] Implement read-only state for locked batches.
+- [ ] Implement `AudioPlayer` component (Deferred)
+- [ ] Implement List Virtualization (Deferred)
+- [ ] Implement Waveform display (Deferred)
+- [ ] Implement Ranking Hotkeys (Deferred)
+- [ ] **Testing:** Component tests for Ranking UI (Deferred).
+- [ ] **Testing:** Integration tests for ranking flow (Deferred).
+- [ ] **Testing:** Run frontend tests (Deferred)
+- [x] **Checkpoint Test:** Manually tested line-scoped ranking, side panel.
+
+## Phase 7: Job Tracking & Refinement (Milestone: Job history persists & basic flows stable)
+
+- [x] Backend: Add SQLAlchemy dependency.
+- [x] Backend: Define `GenerationJob` model (`models.py`).
+- [x] Backend: Initialize DB on app startup.
+- [x] Backend: Modify `POST /api/generate` to use DB.
+- [x] Backend: Modify `tasks.run_generation` to use DB.
+- [x] Backend: Create `GET /api/jobs` endpoint.
+- [x] Frontend: Update `types.ts` (`GenerationJob`, `GenerationStartResponse`).
+- [x] Frontend: Update `api.ts` (`getJobs`, `startGeneration`).
+- [x] Frontend: Rename `BatchListPage` -> `JobsPage` & implement.
+- [x] Frontend: Modify `GenerationPage` (remove monitor, add navigation).
+- [x] Frontend: Update `App.tsx` router/links.
+- [ ] Perform comprehensive manual testing of generation and job history flows.
+- [ ] Review and enhance logging based on testing feedback.
+- [ ] Address any bugs found during testing.
+- [ ] Refine UI/UX based on testing feedback.
+- [ ] **Testing:** Revisit backend/frontend testing issues (Optional / Future).
+- [ ] **Documentation:** Update README.
+- [ ] **Documentation:** Ensure code comments and docstrings are adequate.
+
+## Phase 8: Build & Deployment Prep (Milestone: Ready for deployment)
+
+- [ ] Create production build of frontend (`docker-compose exec frontend npm run build`).
+- [ ] Adapt backend Dockerfile/entrypoint for production (use Gunicorn/Waitress instead of Flask dev server).
+- [ ] Adapt frontend service for production (use Nginx or similar to serve static files).
+- [ ] Finalize production logging configuration.
+- [ ] Document deployment steps using Docker Compose (or alternative orchestration).
+- [ ] **Checkpoint Test:** Test the production-like setup locally.
+- [ ] **Self-Review:** Review code against project standards. Document any necessary future refactoring.
+
+## Continuous Tasks
+
+- [x] Update `.cursor/notes/agentnotes.md` and `notebook.md`.
+- [x] Commit changes frequently using conventional commit messages.
+- [ ] Run tests frequently via `docker-compose exec` (when tests are working).

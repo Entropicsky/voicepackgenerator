@@ -1,15 +1,15 @@
 import React, { useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import VoiceSelector from '../components/generation/VoiceSelector';
 import GenerationForm from '../components/generation/GenerationForm';
-import TaskMonitor from '../components/generation/TaskMonitor';
 import { GenerationConfig } from '../types';
 import { api } from '../api';
 
 const GenerationPage: React.FC = () => {
   const [selectedVoiceIds, setSelectedVoiceIds] = useState<string[]>([]);
-  const [submittedTaskIds, setSubmittedTaskIds] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   const handleVoiceSelectionChange = (newSelectedIds: string[]) => {
     setSelectedVoiceIds(newSelectedIds);
@@ -21,14 +21,15 @@ const GenerationPage: React.FC = () => {
     console.log("Submitting generation config:", config);
     try {
       const response = await api.startGeneration(config);
-      setSubmittedTaskIds(prevIds => [...prevIds, response.task_id]); // Add new task ID
+      console.log(`Job ${response.job_id} (Task ${response.task_id}) submitted.`);
+      navigate('/jobs');
     } catch (error: any) {
       console.error("Failed to start generation job:", error);
       setSubmitError(`Failed to start job: ${error.message}`);
     } finally {
       setIsSubmitting(false);
     }
-  }, []); // No dependencies needed if api is stable
+  }, [navigate]);
 
   return (
     <div>
@@ -51,10 +52,6 @@ const GenerationPage: React.FC = () => {
            {submitError && <p style={{ color: 'red', marginTop: '10px' }}>{submitError}</p>}
         </div>
       </div>
-
-      <hr style={{margin: '20px 0'}} />
-
-      <TaskMonitor submittedTaskIds={submittedTaskIds} />
 
     </div>
   );

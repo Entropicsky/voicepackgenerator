@@ -4,7 +4,9 @@ import requests
 import time
 from typing import List, Dict, Any, Optional
 
-ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1"
+# Use V2 endpoint base FOR /voices, but keep V1 for TTS
+ELEVENLABS_API_V2_URL = "https://api.elevenlabs.io/v2"
+ELEVENLABS_API_V1_URL = "https://api.elevenlabs.io/v1" # Define V1 URL
 DEFAULT_MODEL = "eleven_multilingual_v2" # Or use a specific model if needed
 
 class ElevenLabsError(Exception):
@@ -23,18 +25,46 @@ def get_headers() -> Dict[str, str]:
         'Content-Type': 'application/json'
     }
 
-def get_available_voices() -> List[Dict[str, Any]]:
-    """Fetches the list of available voices from the ElevenLabs API."""
-    url = f"{ELEVENLABS_API_URL}/voices"
+def get_available_voices(
+    search: Optional[str] = None,
+    category: Optional[str] = None, # premade, cloned, generated, professional
+    voice_type: Optional[str] = None, # personal, community, default, workspace
+    sort: Optional[str] = None, # created_at_unix, name
+    sort_direction: Optional[str] = None, # asc, desc
+    page_size: int = 100, # Get more voices by default
+    next_page_token: Optional[str] = None
+) -> List[Dict[str, Any]]: # Might return more info with V2
+    """Fetches voices from the V2 API with filtering and sorting."""
+    url = f"{ELEVENLABS_API_V2_URL}/voices"
+    params: Dict[str, Any] = {
+        'page_size': page_size,
+        'include_total_count': False # Don't need total count for now
+    }
+    if search:
+        params['search'] = search
+    if category:
+        params['category'] = category
+    if voice_type:
+        params['voice_type'] = voice_type
+    if sort:
+        params['sort'] = sort
+    if sort_direction:
+        params['sort_direction'] = sort_direction
+    if next_page_token:
+        params['next_page_token'] = next_page_token
+
     try:
-        response = requests.get(url, headers=get_headers())
-        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+        print(f"Fetching voices with params: {params}") # Debugging
+        response = requests.get(url, headers=get_headers(), params=params)
+        response.raise_for_status()
         voices_data = response.json()
+        # V2 response structure might be different, check API docs if needed
+        # Assuming it still has a 'voices' key
         return voices_data.get('voices', [])
     except requests.exceptions.RequestException as e:
-        raise ElevenLabsError(f"Error fetching voices from ElevenLabs API: {e}") from e
+        raise ElevenLabsError(f"Error fetching V2 voices from ElevenLabs API: {e}") from e
     except Exception as e:
-        raise ElevenLabsError(f"An unexpected error occurred while fetching voices: {e}") from e
+        raise ElevenLabsError(f"An unexpected error occurred while fetching V2 voices: {e}") from e
 
 def generate_tts_audio(
     text: str,
@@ -45,17 +75,18 @@ def generate_tts_audio(
     style: Optional[float] = None,
     speed: Optional[float] = None,
     use_speaker_boost: Optional[bool] = None,
-    model_id: str = DEFAULT_MODEL,
+    model_id: str = "eleven_monolingual_v1", # Use V1 default model
     output_format: str = 'mp3_44100_128',
     retries: int = 3,
     delay: int = 5
 ) -> None:
-    """Generates TTS audio using ElevenLabs API and saves it to output_path."""
-    url = f"{ELEVENLABS_API_URL}/text-to-speech/{voice_id}"
+    """Generates TTS audio using V1 API and saves it to output_path."""
+    # Explicitly use V1 URL
+    url = f"{ELEVENLABS_API_V1_URL}/text-to-speech/{voice_id}" 
     params = {'output_format': output_format}
     payload = {
         'text': text,
-        'model_id': model_id,
+        'model_id': model_id, # Ensure compatible model for V1
         'voice_settings': {}
     }
 

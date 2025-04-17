@@ -1,7 +1,7 @@
 # backend/tasks.py
 from celery_app import celery_app
-from backend import utils_elevenlabs
-from backend import utils_fs
+from backend import utils_elevenlabs, utils_fs, models # Import models
+from sqlalchemy.orm import Session
 import time
 import json
 import os
@@ -13,232 +13,283 @@ from datetime import datetime, timezone
 print("Celery Worker: Loading tasks.py...")
 
 @celery_app.task(bind=True, name='tasks.run_generation')
-def run_generation(self, config_json: str):
-    """Celery task to generate a batch of voice takes."""
+def run_generation(self, generation_job_db_id: int, config_json: str):
+    """Celery task to generate a batch of voice takes, updating DB status."""
     task_id = self.request.id
-    print(f"[Task ID: {task_id}] Starting generation task...")
-    self.update_state(state='STARTED', meta={'status': 'Parsing configuration...'})
-
+    print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] Received generation task.")
+    
+    db: Session = next(models.get_db()) # Get DB session for this task execution
+    db_job = None
     try:
+        # Update DB status to STARTED
+        db_job = db.query(models.GenerationJob).filter(models.GenerationJob.id == generation_job_db_id).first()
+        if not db_job:
+            print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] ERROR: GenerationJob record not found.")
+            # Cannot update status, but maybe still proceed? Or raise Ignore?
+            from celery.exceptions import Ignore
+            raise Ignore() # Ignore if DB record is missing
+        
+        db_job.status = "STARTED"
+        db_job.started_at = datetime.utcnow()
+        db_job.celery_task_id = task_id # Ensure celery task ID is stored
+        db.commit()
+        print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] Updated job status to STARTED.")
+
+        # Update Celery state for intermediate progress (optional but good)
+        self.update_state(state='STARTED', meta={'status': 'Parsing configuration...', 'db_id': generation_job_db_id})
+
         config = json.loads(config_json)
-    except json.JSONDecodeError as e:
-        print(f"[Task ID: {task_id}] Error decoding config JSON: {e}")
-        self.update_state(state='FAILURE', meta={'status': f'Invalid configuration JSON: {e}'})
-        # Use Celery's Ignore to prevent retries for bad input
-        from celery.exceptions import Ignore
-        raise Ignore()
+        # --- Config Validation / Setup --- 
+        skin_name = config['skin_name']
+        voice_ids = config['voice_ids']
+        script_csv_content = config['script_csv_content']
+        variants_per_line = config['variants_per_line']
+        model_id = config.get('model_id', utils_elevenlabs.DEFAULT_MODEL)
+        output_format = config.get('output_format', 'mp3_44100_128')
+        
+        # --- Get Configurable RANGES (with defaults) --- 
+        stability_range = config.get('stability_range', [0.5, 0.75])
+        similarity_boost_range = config.get('similarity_boost_range', [0.75, 0.9])
+        style_range = config.get('style_range', [0.0, 0.45])
+        speed_range = config.get('speed_range', [0.95, 1.05])
+        # Speaker boost remains fixed for the job
+        use_speaker_boost = config.get('use_speaker_boost', True)
 
-    # --- Configuration Validation (Basic) ---
-    required_keys = ['skin_name', 'voice_ids', 'script_csv_content', 'variants_per_line']
-    if not all(key in config for key in required_keys):
-        missing = [key for key in required_keys if key not in config]
-        status_msg = f'Missing required configuration keys: {missing}'
-        print(f"[Task ID: {task_id}] {status_msg}")
-        self.update_state(state='FAILURE', meta={'status': status_msg})
-        from celery.exceptions import Ignore
-        raise Ignore()
+        # Ensure ranges are valid lists/tuples of length 2
+        # (Add more robust validation if needed)
+        if not isinstance(stability_range, (list, tuple)) or len(stability_range) != 2: stability_range = [0.5, 0.75]
+        if not isinstance(similarity_boost_range, (list, tuple)) or len(similarity_boost_range) != 2: similarity_boost_range = [0.75, 0.9]
+        if not isinstance(style_range, (list, tuple)) or len(style_range) != 2: style_range = [0.0, 0.45]
+        if not isinstance(speed_range, (list, tuple)) or len(speed_range) != 2: speed_range = [0.95, 1.05]
 
-    skin_name: str = config['skin_name']
-    voice_ids: list[str] = config['voice_ids']
-    script_csv_content: str = config['script_csv_content'] # Expect CSV as a string
-    variants_per_line: int = config['variants_per_line']
-    model_id: str = config.get('model_id', utils_elevenlabs.DEFAULT_MODEL)
-    output_format: str = config.get('output_format', 'mp3_44100_128')
+        # --- Get ROOT dir (from env var within container) ---
+        audio_root_str = os.getenv('AUDIO_ROOT')
+        if not audio_root_str:
+            status_msg = 'AUDIO_ROOT environment variable not set in worker.'
+            print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] {status_msg}")
+            # This is an environment setup error, might retry indefinitely without Ignore
+            self.update_state(state='FAILURE', meta={'status': status_msg, 'db_id': generation_job_db_id})
+            from celery.exceptions import Ignore
+            raise Ignore()
+        audio_root = Path(audio_root_str)
 
-    # TTS Parameter Ranges (provide defaults if not specified)
-    stability_range = config.get('stability_range', [0.5, 0.75])
-    similarity_boost_range = config.get('similarity_boost_range', [0.75, 0.9])
-    style_range = config.get('style_range', [0.0, 0.5]) # Adjust default if needed
-    speed_range = config.get('speed_range', [0.9, 1.1])
-    use_speaker_boost = config.get('use_speaker_boost', True)
-
-    # --- Get ROOT dir (from env var within container) ---
-    audio_root_str = os.getenv('AUDIO_ROOT')
-    if not audio_root_str:
-        status_msg = 'AUDIO_ROOT environment variable not set in worker.'
-        print(f"[Task ID: {task_id}] {status_msg}")
-        # This is an environment setup error, might retry indefinitely without Ignore
-        self.update_state(state='FAILURE', meta={'status': status_msg})
-        from celery.exceptions import Ignore
-        raise Ignore()
-    audio_root = Path(audio_root_str)
-
-    # --- Prepare Script Data ---
-    try:
-        # Use csv.reader on the string content
-        lines = list(csv.reader(script_csv_content.splitlines()))
-        if not lines or len(lines[0]) < 2:
-             raise ValueError("CSV content is empty or header missing/invalid")
-        header = [h.strip() for h in lines[0]]
-        # Assuming header columns are 'Function' and 'Line'
-        func_idx = header.index('Function')
-        line_idx = header.index('Line')
-        script_data = [
-            {'Function': row[func_idx].strip(), 'Line': row[line_idx].strip()}
-            for row in lines[1:] if len(row) > max(func_idx, line_idx)
-        ]
-        if not script_data:
-             raise ValueError("No valid data rows found in CSV content")
-    except (ValueError, IndexError, Exception) as e:
-        status_msg = f'Error parsing script CSV content: {e}'
-        print(f"[Task ID: {task_id}] {status_msg}")
-        self.update_state(state='FAILURE', meta={'status': status_msg})
-        from celery.exceptions import Ignore
-        raise Ignore()
-
-    total_takes_to_generate = len(voice_ids) * len(script_data) * variants_per_line
-    generated_takes_count = 0
-    print(f"[Task ID: {task_id}] Parsed config. Total takes to generate: {total_takes_to_generate}")
-
-    # --- Generation Loop ---
-    all_batches_metadata = [] # Store metadata for all generated batches
-
-    for voice_id in voice_ids:
-        self.update_state(state='PROGRESS', meta={
-            'status': f'Processing voice: {voice_id}...',
-            'current_voice': voice_id,
-            'progress': int(100 * generated_takes_count / total_takes_to_generate)
-        })
-
-        # --- Get Voice Name & Create Directories ---
+        # --- Prepare Script Data ---
         try:
-            # TODO: Consider caching voice details? API call per task might be slow.
-            voices = utils_elevenlabs.get_available_voices()
-            voice_info = next((v for v in voices if v.get('voice_id') == voice_id), None)
-            if not voice_info:
-                raise ValueError(f"Voice ID {voice_id} not found.")
-            voice_name_human = voice_info.get('name', voice_id)
-            voice_folder_name = f"{voice_name_human}-{voice_id}"
-        except Exception as e:
-            # Log warning but continue if possible, or fail task?
-            print(f"[Task ID: {task_id}] Warning: Could not get voice name for {voice_id}: {e}")
-            voice_folder_name = voice_id # Fallback to ID
+            # Use csv.reader on the string content
+            lines = list(csv.reader(script_csv_content.splitlines()))
+            if not lines or len(lines[0]) < 2:
+                 raise ValueError("CSV content is empty or header missing/invalid")
+            header = [h.strip() for h in lines[0]]
+            # Assuming header columns are 'Function' and 'Line'
+            func_idx = header.index('Function')
+            line_idx = header.index('Line')
+            script_data = [
+                {'Function': row[func_idx].strip(), 'Line': row[line_idx].strip()}
+                for row in lines[1:] if len(row) > max(func_idx, line_idx)
+            ]
+            if not script_data:
+                 raise ValueError("No valid data rows found in CSV content")
+        except (ValueError, IndexError, Exception) as e:
+            status_msg = f'Error parsing script CSV content: {e}'
+            print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] {status_msg}")
+            self.update_state(state='FAILURE', meta={'status': status_msg, 'db_id': generation_job_db_id})
+            from celery.exceptions import Ignore
+            raise Ignore()
 
-        batch_timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-        batch_id = f"{batch_timestamp}-{voice_id[:4]}"
-        batch_dir = audio_root / skin_name / voice_folder_name / batch_id
-        takes_dir = batch_dir / "takes"
+        total_takes_to_generate = len(voice_ids) * len(script_data) * variants_per_line
+        generated_takes_count = 0
+        print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] Parsed config. Total takes to generate: {total_takes_to_generate}")
 
-        try:
-            takes_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as e:
-            status_msg = f'Failed to create directory {takes_dir}: {e}'
-            print(f"[Task ID: {task_id}] {status_msg}")
-            self.update_state(state='FAILURE', meta={'status': status_msg})
-            from celery.exceptions import Retry
-            raise Retry(exc=e, countdown=30) # Retry on filesystem error
+        # --- Generation Loop ---
+        all_batches_metadata = []
+        elevenlabs_failures = 0
 
-        print(f"[Task ID: {task_id}] Created batch directory: {batch_dir}")
+        for voice_id in voice_ids:
+            self.update_state(state='PROGRESS', meta={
+                'status': f'Processing voice: {voice_id}...',
+                'current_voice': voice_id,
+                'progress': int(100 * generated_takes_count / total_takes_to_generate)
+            })
 
-        batch_metadata = {
-            "batch_id": batch_id,
-            "skin_name": skin_name,
-            "voice_name": voice_folder_name,
-            "generated_at_utc": None, # Will be set at the end
-            "generation_params": config, # Store original config
-            "ranked_at_utc": None,
-            "takes": []
-        }
+            # --- Get Voice Name & Create Directories ---
+            try:
+                # TODO: Consider caching voice details? API call per task might be slow.
+                voices = utils_elevenlabs.get_available_voices()
+                voice_info = next((v for v in voices if v.get('voice_id') == voice_id), None)
+                if not voice_info:
+                    raise ValueError(f"Voice ID {voice_id} not found.")
+                voice_name_human = voice_info.get('name', voice_id)
+                voice_folder_name = f"{voice_name_human}-{voice_id}"
+            except Exception as e:
+                # Log warning but continue if possible, or fail task?
+                print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] Warning: Could not get voice name for {voice_id}: {e}")
+                voice_folder_name = voice_id # Fallback to ID
 
-        # --- Line & Variant Loop ---
-        for line_info in script_data:
-            line_func = line_info['Function']
-            line_text = line_info['Line']
+            batch_timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+            batch_id = f"{batch_timestamp}-{voice_id[:4]}"
+            batch_dir = audio_root / skin_name / voice_folder_name / batch_id
+            takes_dir = batch_dir / "takes"
 
-            for take_num in range(1, variants_per_line + 1):
-                generated_takes_count += 1
-                progress_percent = int(100 * generated_takes_count / total_takes_to_generate)
-                self.update_state(state='PROGRESS', meta={
-                    'status': f'Generating: {line_func} Take {take_num}/{variants_per_line} (Voice {voice_id}) Progress: {progress_percent}%',
-                    'current_voice': voice_id,
-                    'current_line': line_func,
-                    'current_take': take_num,
-                    'progress': progress_percent
-                })
+            try:
+                takes_dir.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                status_msg = f'Failed to create directory {takes_dir}: {e}'
+                print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] {status_msg}")
+                self.update_state(state='FAILURE', meta={'status': status_msg, 'db_id': generation_job_db_id})
+                from celery.exceptions import Retry
+                raise Retry(exc=e, countdown=30) # Retry on filesystem error
 
-                # Randomize settings for this take
-                stability = random.uniform(*stability_range)
-                similarity_boost = random.uniform(*similarity_boost_range)
-                style = random.uniform(*style_range)
-                speed = random.uniform(*speed_range)
+            print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] Created batch directory: {batch_dir}")
 
-                take_settings = {
-                    'stability': stability,
-                    'similarity_boost': similarity_boost,
-                    'style': style,
-                    'use_speaker_boost': use_speaker_boost,
-                    'speed': speed
-                }
+            batch_metadata = {
+                "batch_id": batch_id,
+                "skin_name": skin_name,
+                "voice_name": voice_folder_name,
+                "generated_at_utc": None, # Will be set at the end
+                "generation_params": config, # Store original config
+                "ranked_at_utc": None,
+                "takes": []
+            }
 
-                output_filename = f"{line_func}_take_{take_num}.mp3"
-                output_path = takes_dir / output_filename
+            voice_has_success = False # Track if *any* take for this voice succeeded
+            for line_info in script_data:
+                line_func = line_info['Function']
+                line_text = line_info['Line']
 
-                try:
-                    utils_elevenlabs.generate_tts_audio(
-                        text=line_text,
-                        voice_id=voice_id,
-                        output_path=str(output_path),
-                        model_id=model_id,
-                        output_format=output_format,
-                        stability=stability,
-                        similarity_boost=similarity_boost,
-                        style=style,
-                        speed=speed,
-                        use_speaker_boost=use_speaker_boost
-                    )
-
-                    # Add take metadata
-                    batch_metadata["takes"].append({
-                        "file": output_filename,
-                        "line": line_func,
-                        "script_text": line_text,
-                        "take_number": take_num,
-                        "generation_settings": take_settings,
-                        "rank": None,
-                        "ranked_at": None
+                for take_num in range(1, variants_per_line + 1):
+                    generated_takes_count += 1
+                    progress_percent = int(100 * generated_takes_count / total_takes_to_generate)
+                    self.update_state(state='PROGRESS', meta={
+                        'status': f'Generating: {line_func} Take {take_num}/{variants_per_line} (Voice {voice_id}) Progress: {progress_percent}%',
+                        'current_voice': voice_id,
+                        'current_line': line_func,
+                        'current_take': take_num,
+                        'progress': progress_percent
                     })
 
-                except utils_elevenlabs.ElevenLabsError as e:
-                    # Log error for this take, but continue with others
-                    print(f"[Task ID: {task_id}] ERROR generating take {output_filename}: {e}")
-                    # TODO: Decide if one failed take should fail the whole batch/task?
-                    # For now, we continue.
-                except Exception as e:
-                    print(f"[Task ID: {task_id}] UNEXPECTED ERROR during take {output_filename} generation: {e}")
-                    # Optionally fail the task here if needed
+                    # --- Randomize settings WITHIN the provided ranges --- 
+                    stability_take = random.uniform(*stability_range)
+                    similarity_boost_take = random.uniform(*similarity_boost_range)
+                    style_take = random.uniform(*style_range)
+                    speed_take = random.uniform(*speed_range)
+                    
+                    take_settings = {
+                        'stability': stability_take,
+                        'similarity_boost': similarity_boost_take,
+                        'style': style_take,
+                        'use_speaker_boost': use_speaker_boost, # Fixed value
+                        'speed': speed_take
+                    }
 
-        # --- Post-Voice Processing ---
-        if batch_metadata['takes']: # Only save metadata if some takes were successful
-             batch_metadata["generated_at_utc"] = datetime.now(timezone.utc).isoformat()
-             try:
-                 utils_fs.save_metadata(batch_dir, batch_metadata)
-                 print(f"[Task ID: {task_id}] Saved metadata for batch: {batch_id}")
-                 all_batches_metadata.append(batch_metadata) # Add for final result
-             except utils_fs.FilesystemError as e:
-                 print(f"[Task ID: {task_id}] ERROR saving metadata for batch {batch_id}: {e}")
-                 # Fail the task if metadata saving fails?
-                 self.update_state(state='FAILURE', meta={'status': f'Failed to save metadata for {batch_id}: {e}'})
-                 from celery.exceptions import Retry
-                 raise Retry(exc=e, countdown=60)
-        else:
-            print(f"[Task ID: {task_id}] No successful takes generated for voice {voice_id}, skipping metadata saving for batch {batch_id}.")
+                    output_filename = f"{line_func}_take_{take_num}.mp3"
+                    output_path = takes_dir / output_filename
 
+                    try:
+                        utils_elevenlabs.generate_tts_audio(
+                            text=line_text,
+                            voice_id=voice_id,
+                            output_path=str(output_path),
+                            model_id=model_id,
+                            output_format=output_format,
+                            # Pass the RANDOMIZED settings for this take
+                            stability=stability_take,
+                            similarity_boost=similarity_boost_take,
+                            style=style_take,
+                            speed=speed_take,
+                            use_speaker_boost=use_speaker_boost # Pass fixed value
+                        )
 
-    # --- Task Completion ---
-    final_status_msg = f"Generation complete. Processed {len(voice_ids)} voices, generated {generated_takes_count}/{total_takes_to_generate} takes."
-    print(f"[Task ID: {task_id}] {final_status_msg}")
+                        # Add take metadata
+                        batch_metadata["takes"].append({
+                            "file": output_filename,
+                            "line": line_func,
+                            "script_text": line_text,
+                            "take_number": take_num,
+                            "generation_settings": take_settings,
+                            "rank": None,
+                            "ranked_at": None
+                        })
+                        voice_has_success = True # Mark success for this voice
 
-    # Return info about generated batches
-    result_payload = {
-        'status': 'SUCCESS',
-        'message': final_status_msg,
-        'generated_batches': [
-            {'batch_id': b['batch_id'], 'voice': b['voice_name'], 'skin': b['skin_name'], 'take_count': len(b['takes'])}
-            for b in all_batches_metadata
-        ]
-    }
-    self.update_state(state='SUCCESS', meta=result_payload)
-    return result_payload
+                    except utils_elevenlabs.ElevenLabsError as e:
+                        # Log error for this take, but continue with others
+                        print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] ERROR generating take {output_filename}: {e}")
+                        elevenlabs_failures += 1
+                    except Exception as e:
+                        print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] UNEXPECTED ERROR during take {output_filename} generation: {e}")
+                        # Decide if unexpected errors should count as failure?
+                        elevenlabs_failures += 1 # Count unexpected as failure too
+
+            # --- Post-Voice Processing ---
+            if voice_has_success:
+                batch_metadata["generated_at_utc"] = datetime.now(timezone.utc).isoformat()
+                try:
+                    utils_fs.save_metadata(batch_dir, batch_metadata)
+                    print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] Saved metadata for batch: {batch_id}")
+                    all_batches_metadata.append(batch_metadata) # Add for final result
+                except utils_fs.FilesystemError as e:
+                    print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] ERROR saving metadata for batch {batch_id}: {e}")
+                    # Fail the task if metadata saving fails?
+                    self.update_state(state='FAILURE', meta={'status': f'Failed to save metadata for {batch_id}: {e}', 'db_id': generation_job_db_id})
+                    from celery.exceptions import Retry
+                    raise Retry(exc=e, countdown=60)
+            else:
+                print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] No successful takes for voice {voice_id}, skipping metadata.")
+
+        # --- Task Completion ---
+        final_status_msg = f"Generation complete. Processed {len(voice_ids)} voices. Generated {generated_takes_count - elevenlabs_failures}/{total_takes_to_generate} takes ({elevenlabs_failures} failures)."
+        print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] {final_status_msg}")
+
+        # --- Update DB Job Record ---
+        # Determine final status based on failures
+        if elevenlabs_failures > 0 and elevenlabs_failures < total_takes_to_generate:
+             final_db_status = "COMPLETED_WITH_ERRORS"
+        elif elevenlabs_failures == total_takes_to_generate:
+             final_db_status = "FAILURE" # Treat total failure as job failure
+             # Optionally refine message if needed
+             final_status_msg = f"Generation failed. Processed {len(voice_ids)} voices, generated 0/{total_takes_to_generate} takes ({elevenlabs_failures} failures)."
+        else: # No failures
+             final_db_status = "SUCCESS"
+
+        db_job.status = final_db_status
+        db_job.completed_at = datetime.utcnow()
+        db_job.result_message = final_status_msg
+        generated_batch_ids = [b['batch_id'] for b in all_batches_metadata]
+        db_job.result_batch_ids_json = json.dumps(generated_batch_ids)
+        db.commit()
+        print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] Updated job status to {final_db_status}.")
+
+        # Celery result payload (can also reflect partial failure)
+        return {
+            'status': final_db_status, # Return the more granular status
+            'message': final_status_msg,
+            'generated_batches': [
+                {'batch_id': b['batch_id'], 'voice': b['voice_name'], 'skin': b['skin_name'], 'take_count': len(b['takes'])}
+                for b in all_batches_metadata
+            ]
+        }
+
+    except (ValueError, OSError, utils_fs.FilesystemError, Exception) as e:
+        # Catch expected config/file errors and unexpected errors
+        error_msg = f"Task failed: {type(e).__name__}: {e}"
+        print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] {error_msg}")
+        # --- Update DB Job Record on FAILURE ---
+        if db_job: # Ensure db_job was loaded
+            db_job.status = "FAILURE"
+            db_job.completed_at = datetime.utcnow()
+            db_job.result_message = error_msg
+            try:
+                db.commit()
+            except Exception as db_err:
+                print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] Failed to update job status to FAILURE: {db_err}")
+                db.rollback()
+        
+        # Update Celery state
+        self.update_state(state='FAILURE', meta={'status': error_msg, 'db_id': generation_job_db_id})
+        # Re-raise exception so Celery marks task as failed
+        raise e
+    finally:
+        db.close() # Ensure session is closed for this task execution
 
 # --- Placeholder Task (Keep or Remove) ---
 # @celery_app.task(bind=True)
