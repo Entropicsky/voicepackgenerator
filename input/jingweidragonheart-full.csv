@@ -1,0 +1,207 @@
+Function,Line
+Ability_1a,“Ride the wind!”
+Ability_1b,“Can’t hit what you can’t catch!”
+Ability_2a,“Say hi to my little firecrackers!”
+Ability_2b,“Boom boom bye!~”
+Ability_3a,“Whoosh!”
+Ability_3b,“Zoom!”
+Ability_4a,“Sky’s mine—get ready to burn!”
+Ability_4b,“From above… DRAGONSTRIKE!”
+Death_1,“Ughhh... I should’ve stayed grounded…”
+Death_2,“This is… so not cool…”
+Health_Low_1,“Oof… anybody got a spare scale?”
+Health_Low_2,“I’m still in the air… barely!”
+Intro_1,"Wings sharp, claws sharper. Let’s soar.”"
+Intro_2,"“Ooooh, look at all these enemies waiting to get singed!”"
+Joke_1,“How many elders does it take to screw in a light orb? None! They’d rather sit in the dark and lecture me.”
+Joke_2,“I asked the clan elders for advice—they gave me a scroll on ‘etiquette.’ So I used it to start my campfire.”
+Joke_3,“Why did the phoenix break up with the dragon? Couldn’t handle the heat!”
+Kill_JungleBoss_1,“Another beastie bites the clouds!”
+Kill_JungleBoss_2,"“Big, slow, and not-so-tough after all!”"
+Kill_Streak_1,“And that makes how many now?”
+Kill_Streak_2,"“Another one down—who’s next?! Seriously, I’m warmed up!”"
+Kill_Tower_1,“Down goes the big bad brick wall!”
+Kill_Tower_2,“One less glorified lawn ornament!”
+Laugh_1,Confident snort into mischievous giggle
+Laugh_2,Mocking laughter
+Laugh_3,"Fast, fiery giggle, like sparks flying"
+Purchase_Consumable_1,“Snack time! No judgment.”
+Purchase_Consumable_2,“Potion of awesome. Trademark pending.”
+Purchase_Defensive_1,"“I like staying alive, thanks.”"
+Purchase_Defensive_2,“This should bounce a few arrows.”
+Purchase_Offensive_1,“Firepower: check.”
+Purchase_Offensive_2,“Let’s turn the heat up!”
+Select,“Dragonheart locked and loaded!”
+Taunt_1,"“Try not to get too roasted, okay?”"
+Taunt_2,“What’s that smell? Oh right—burnt dignity.”
+Taunt_3,“Hey! You dropped your skill back there.”
+Taunt_4,“Don’t blame yourself. Most people can’t keep up with dragons.”
+Taunt_5,"“Claws out, baby. Let’s make this interesting.”"
+Taunt_Directed_Anhur,"“Anhur, huh? I’ve seen scarier hairballs.”"
+Taunt_Directed_Bacchus,“You’re not fighting—you’re just wobbling aggressively!”
+Taunt_Directed_Bellona,“All that armor just to lose this bad? Oof.”
+Taunt_Directed_Hun Batz,“Your chaos is cute. Now watch a pro.”
+Taunt_Directed_Ra,"“Light show’s over, old man. Time for the real heat.”"
+Taunt_Directed_Sobek,“Gator-boy! Nice teeth. Wanna see mine?”
+VOX_VGS_AFK,Stepping away for a moment.
+VOX_VGS_Arena_M,Attack the Minions!
+VOX_VGS_Arena_P,Defend the Portal!
+VOX_VGS_Attack_1,Attack left lane!
+VOX_VGS_Attack_2,Attack middle lane!
+VOX_VGS_Attack_3,Attack right lane!
+VOX_VGS_Attack_A,Attack!
+VOX_VGS_Attack_F,Attack the Fire Giant!
+VOX_VGS_Attack_G,Attack the Gold Fury!
+VOX_VGS_Attack_M,Attack the Titan!
+VOX_VGS_Attack_T,Attack the Titan!
+VOX_VGS_BRB,Be right back!
+VOX_VGS_Cancel,Cancel that!
+VOX_VGS_Careful_1,Be careful left!
+VOX_VGS_Careful_2,Be careful middle!
+VOX_VGS_Careful_3,Be careful right!
+VOX_VGS_Careful_B,Return to base!
+VOX_VGS_Careful_C,Be careful!
+VOX_VGS_Careful_J,Be careful in the jungle
+VOX_VGS_Completed,Completed!
+VOX_VGS_Defend_1,Defend left lane!
+VOX_VGS_Defend_2,Defend middle lane!
+VOX_VGS_Defend_3,Defend right lane!
+VOX_VGS_Defend_D,Defend!
+VOX_VGS_Defend_F,Defend the Fire Giant!
+VOX_VGS_Defend_G,Defend the Gold Fury!
+VOX_VGS_Defend_M,Defend the Titan!
+VOX_VGS_Defend_T,Defend the Titan!
+VOX_VGS_Emote_A,“Heck yes! That was flame-tastic!”
+VOX_VGS_Emote_F,“May your wings not cramp!”
+VOX_VGS_Emote_G,“Bow to your new aerial queen!”
+VOX_VGS_Emote_No,No
+VOX_VGS_Emote_Please,Please
+VOX_VGS_Emote_R,“That was straight fire—love it!”
+VOX_VGS_Emote_W,"“Woooo! Wings up, baby!”"
+VOX_VGS_Emote_Yes,Yes
+VOX_VGS_Enemy_1,Enemies in left lane!
+VOX_VGS_Enemy_2,Enemies in middle lane!
+VOX_VGS_Enemy_3,Enemies in right lane!
+VOX_VGS_Enemy_B,Enemies have returned to base.
+VOX_VGS_Enemy_E,Enemies behind us.
+VOX_VGS_Enemy_F,Enemies at the Fire Giant!
+VOX_VGS_Enemy_G,Enemies at the Gold Fury!
+VOX_VGS_Enemy_J,Enemies in the jungle!
+VOX_VGS_Enemy_Jungle_1,Enemies in the Left Jungle
+VOX_VGS_Enemy_Jungle_2,Enemies in the Right Jungle
+VOX_VGS_Enemy_M,Enemies at our Titan!
+VOX_VGS_Enemy_S,Enemy spotted!
+VOX_VGS_Enemy_T,Enemies at our Titan!
+VOX_VGS_Gank_1,Gank left lane!
+VOX_VGS_Gank_2,Gank middle lane!
+VOX_VGS_Gank_3,Gank right lane!
+VOX_VGS_Gank_G,Gank!
+VOX_VGS_Help,Help!
+VOX_VGS_Help_1,Help left lane!
+VOX_VGS_Help_2,Help middle lane!
+VOX_VGS_Help_3,Help right lane!
+VOX_VGS_Help_S,Need Healing!
+VOX_VGS_Incoming_1,Enemies incoming left!
+VOX_VGS_Incoming_2,Enemies incoming middle!
+VOX_VGS_Incoming_3,Enemies incoming right!
+VOX_VGS_Incoming_I,Enemies incoming!
+VOX_VGS_Jungle_Buff_C,Take this jungle buff.
+VOX_VGS_Jungle_Buff_N,I need the jungle buff.
+VOX_VGS_MIA_1,Enemy missing left!
+VOX_VGS_MIA_2,Enemy missing middle!
+VOX_VGS_MIA_3,Enemy missing right!
+VOX_VGS_MIA_M,Enemy missing!
+VOX_VGS_NiceJob,“Wicked nice! You’ve got talent.”
+VOX_VGS_OK,Ok!
+VOX_VGS_Other_G_B,“Catch ya on the wing!”
+VOX_VGS_Other_G_G,"“GG, you all brought the heat!”"
+VOX_VGS_Other_G_H,“Heya! Ready to wreck?”
+VOX_VGS_Other_G_L,“Good luck!”
+VOX_VGS_Other_G_M,Out of mana.   
+VOX_VGS_Other_G_O,“Wings slipped. Whoopsie~”
+VOX_VGS_Other_G_Q,“Shhh… let the dragon do the talkin’.”
+VOX_VGS_Other_G_R,“Don’t sweat it! I gotchu.”
+VOX_VGS_Other_G_S,“Ugh! That was not the plan!”
+VOX_VGS_Other_G_T,“Ahh man… we were so close!”
+VOX_VGS_Other_G_W,You're welcome.
+VOX_VGS_Other_S,“Oopsie! My bad… sorta.”
+VOX_VGS_Other_V_A,Set up an ambush here!
+VOX_VGS_Other_V_B,Behind us!
+VOX_VGS_Other_V_C,Chase the enemy!
+VOX_VGS_Other_V_D,Ultimate is down!
+VOX_VGS_Other_V_F,Follow me.
+VOX_VGS_Other_V_G,Group up.
+VOX_VGS_Other_V_J,Going into the jungle!
+VOX_VGS_Other_V_P,Split Push!
+VOX_VGS_Other_V_P_1,Split Push Left!
+VOX_VGS_Other_V_P_2,Split Push Right!
+VOX_VGS_Other_V_R,Ultimate is ready!
+VOX_VGS_Other_V_S,Stay here.
+VOX_VGS_Other_V_T,It's a trap!
+VOX_VGS_Other_V_W,On my way.
+VOX_VGS_Other_V_X,Spread Out!
+VOX_VGS_Other_W,Wait!
+VOX_VGS_Phoenix,Attack the Phoenix!
+VOX_VGS_Phoenix_1,Attack the Left Phoenix!
+VOX_VGS_Phoenix_2,Attack the Middle Phoenix!
+VOX_VGS_Phoenix_3,Attack the Right Phoenix!
+VOX_VGS_Retreat_1,Retreat left lane!
+VOX_VGS_Retreat_2,Retreat middle lane!
+VOX_VGS_Retreat_3,Retreat right lane!
+VOX_VGS_Retreat_J,Retreat from the jungle
+VOX_VGS_Retreat_R,Retreat!
+VOX_VGS_Retreat_S,Save yourself!
+VOX_VGS_Returned_1,Enemies have returned left!
+VOX_VGS_Returned_2,Enemies have returned middle!
+VOX_VGS_Returned_3,Enemies have returned right!
+VOX_VGS_Returned_E,Enemies have returned!
+VOX_VGS_Self_Attack,I'll attack!
+VOX_VGS_Self_Attack_1,I'll attack left lane!
+VOX_VGS_Self_Attack_2,I'll attack middle lane!
+VOX_VGS_Self_Attack_3,I'll attack right lane!
+VOX_VGS_Self_Attack_F,I'll attack the Fire Giant!
+VOX_VGS_Self_Attack_G,I'll attack the Gold Fury!
+VOX_VGS_Self_Attack_M,I'll attack the Titan!
+VOX_VGS_Self_Attack_T,I'll attack the Titan!
+VOX_VGS_Self_B,I'm going for jungle buff!
+VOX_VGS_Self_Defend,I'll defend!
+VOX_VGS_Self_Defend_1,I'll defend left lane!
+VOX_VGS_Self_Defend_2,I'll defend middle lane!
+VOX_VGS_Self_Defend_3,I'll defend right lane!
+VOX_VGS_Self_Defend_F,I'll defend the Fire Giant!
+VOX_VGS_Self_Defend_G,I'll defend the Gold Fury!
+VOX_VGS_Self_Defend_M,I'll defend the Titan!
+VOX_VGS_Self_Defend_T,I'll defend the Titan!
+VOX_VGS_Self_Gank,I'll gank!
+VOX_VGS_Self_Gank_1,I'll gank left lane!
+VOX_VGS_Self_Gank_2,I'll gank middle lane!
+VOX_VGS_Self_Gank_3,I'll gank right lane!
+VOX_VGS_Self_O,I'm on it!
+VOX_VGS_Self_R,Falling back!
+VOX_VGS_Self_Returned,I have returned!
+VOX_VGS_Self_Returned_1,I'm returning left lane!
+VOX_VGS_Self_Returned_2,I'm returning middle lane!
+VOX_VGS_Self_Returned_3,I'm returning right lane!
+VOX_VGS_Self_Returned_B,I'm returning to base!
+VOX_VGS_Self_Stacks,I'm building stacks!
+VOX_VGS_Self_Ward,I will Ward!
+VOX_VGS_Self_Ward_1,I will Ward Left!
+VOX_VGS_Self_Ward_2,I will Ward Middle.
+VOX_VGS_Self_Ward_3,I will Ward Right.
+VOX_VGS_Thanks,Thanks!
+VOX_VGS_Tower,Attack the Tower!
+VOX_VGS_Tower_1,Attack Left Tower!
+VOX_VGS_Tower_2,Attack Middle Tower!
+VOX_VGS_Tower_3,Attack Right Tower!
+VOX_VGS_Ultimate_Enemy_A,Enemy ultimate incoming!
+VOX_VGS_Ultimate_Enemy_D,Enemy ultimate down!
+VOX_VGS_Ward,Ward here!
+VOX_VGS_Ward_1,Ward Left.
+VOX_VGS_Ward_2,Ward Middle.
+VOX_VGS_Ward_3,Ward Right.
+VOX_VGS_Ward_F,Ward the Fire Giant.
+VOX_VGS_Ward_G,Ward the Gold Fury.
+VOX_VGS_Ward_N,We need wards!
+VOX_VGS_Ward_T,Place a ward for teleport.
+Ward_Placed_1,“Eyes in the sky… literally.”
+Ward_Placed_2,“Boom. Scouted.”

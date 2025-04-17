@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:alpine
+    ports:
+      # Expose Redis port to host for potential debugging/direct connection
+      - "6379:6379"
+    volumes:
+      # Persist Redis data
+      - redis_data:/data
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      # Map container port 5000 to HOST port 5001
+      - "5001:5000"
+    volumes:
+      # Mount entire project dir; Python path should find 'backend' package
+      - .:/app
+    working_dir: /app # Ensure commands run from the project root inside container
+    env_file:
+      - .env # Pass environment variables from .env file
+    environment:
+      # Set Flask environment for development
+      - FLASK_ENV=development
+      # Set the audio root relative to WORKDIR inside container
+      # Needs to match the volume mount target above
+      - AUDIO_ROOT=/app/output
+      - PYTHONPATH=/app # Explicitly add project root to path
+    # Command to run the Flask dev server (host 0.0.0.0 makes it accessible)
+    command: flask --app backend.app:app run --host=0.0.0.0 --port=5000
+    depends_on:
+      - redis # Ensure Redis is running before backend starts
+    restart: unless-stopped
+
+  worker:
+    build:
+      # Worker uses the same Dockerfile as backend
+      context: .
+      dockerfile: backend/Dockerfile
+    volumes:
+      # Mount entire project dir
+      - .:/app
+    working_dir: /app # Run from project root
+    env_file:
+      - .env
+    environment:
+      - AUDIO_ROOT=/app/output
+      - PYTHONPATH=/app # Explicitly add project root to path
+    # Command uses app defined in root celery_app.py
+    command: celery -A celery_app worker --loglevel=INFO
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      # Expose Vite dev server port
+      - "5173:5173"
+    volumes:
+      # Mount local code into container for development hot-reloading
+      - ./frontend:/app
+      # Important: Prevent host node_modules from overwriting container's node_modules
+      - /app/node_modules
+    # depends_on:
+      # - backend # Usually not needed for Vite dev server with proxy
+    restart: unless-stopped
+
+volumes:
+  # Define the named volume for Redis persistence
+  redis_data: 

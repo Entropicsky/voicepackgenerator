@@ -1,0 +1,12 @@
+{
+  "game": "SMITE2",
+  "voice_ids": ["hnrHj0hSslLeW9wNBMWs", "BxSuxLxBfhuyQ9Bm5HzI", "B0VziPcvYfsB33fA6REf"],
+  "output_format": "mp3_44100_128",
+  "stability_range": [0.5, 0.6],
+  "similarity_boost_range": [0.7, 0.8],
+  "style_range": [0.2, 0.4],
+  "use_speaker_boost": true,
+  "speed_range": [0.9, 1.0],
+  "skinname": "JingWeiDragonHeart",
+  "variants": 3
+}
