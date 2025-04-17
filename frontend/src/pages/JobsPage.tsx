@@ -160,11 +160,21 @@ const JobsPage: React.FC = () => {
   }
 
   const renderJobDetails = (job: GenerationJob) => {
-    const params: GenerationConfig | null = parseJsonSafe(job.parameters_json);
-    const batchIds: string[] | null = parseJsonSafe(job.result_batch_ids_json);
+    // Log the job object to inspect its properties
+    console.log("Rendering details for job:", job);
+
+    const params = parseJsonSafe(job.parameters_json);
+    const batchIds = parseJsonSafe(job.result_batch_ids_json);
+
+    const isLineRegen = job.job_type === 'line_regen';
+    const targetBatchId = job.target_batch_id;
+    const targetLineKey = job.target_line_key;
+
+    // Log the conditions
+    console.log(`Job ${job.id}: isLineRegen=${isLineRegen}, status=${job.status}, targetBatchId=${targetBatchId}`);
 
     return (
-      <> 
+      <>
         <td>
           <small>
             {params ? (
@@ -172,7 +182,17 @@ const JobsPage: React.FC = () => {
                 <div><strong>Skin:</strong> {params.skin_name}</div>
                 <div><strong>Voices:</strong> {params.voice_ids?.join(', ') || 'N/A'}</div>
                 <div><strong>Takes/Line:</strong> {params.variants_per_line}</div>
-                {/* Optionally display more params if needed */}
+                {isLineRegen && targetLineKey && <div><strong>Target Line:</strong> {targetLineKey}</div>} 
+                {/* Display regeneration specific params? */}
+                {isLineRegen && params?.settings && (
+                    <div><strong>Regen Params:</strong> 
+                        {/* Simple display, could format better */} 
+                        Stab:[{params.settings.stability_range?.join('-') || 'N/A'}], 
+                        Sim:[{params.settings.similarity_boost_range?.join('-') || 'N/A'}], 
+                        Style:[{params.settings.style_range?.join('-') || 'N/A'}], 
+                        Speed:[{params.settings.speed_range?.join('-') || 'N/A'}]
+                    </div>
+                )}
               </>
             ) : (
               <div>Params: N/A</div>
@@ -182,23 +202,35 @@ const JobsPage: React.FC = () => {
         <td>
           <small>
             <div><strong>Result:</strong> {job.result_message || 'N/A'}</div>
-            {(job.status === 'SUCCESS' || job.status === 'COMPLETED_WITH_ERRORS') && batchIds && batchIds.length > 0 && (
-              <div>
-                <strong>Batches Generated:</strong>
-                <ul style={{ margin: '2px 0 0 0', paddingLeft: '15px' }}>
-                  {batchIds.map((batchId: string) => (
-                    <li key={batchId}>
-                      {/* Attempt to show voice association based on batch ID suffix */} 
-                      {/* {params?.voice_ids?.find(vid => batchId.endsWith(vid.substring(0, 4))) ? 
-                         `(${params.voice_ids.find(vid => batchId.endsWith(vid.substring(0, 4)))}) ` : ''} */} 
-                      {batchId} 
-                      <Link key={batchId} to={`/batch/${batchId}`} style={{ marginLeft: '5px' }}>[Rank]</Link>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+            
+            {/* Link for Line Regen Jobs */}  
+            {isLineRegen && (job.status === 'SUCCESS' || job.status === 'COMPLETED_WITH_ERRORS') && targetBatchId && (
+                 <div>
+                     <Link 
+                        key={targetBatchId} 
+                        to={`/batch/${targetBatchId}`} 
+                        style={{marginRight: '5px', fontWeight: 'bold'}}
+                     >
+                         [View/Rank Batch]
+                     </Link>
+                     (Line: {targetLineKey || 'N/A'})
+                 </div>
+            )} 
+            
+            {/* Links for Full Batch Jobs */} 
+            {!isLineRegen && (job.status === 'SUCCESS' || job.status === 'COMPLETED_WITH_ERRORS') && batchIds && batchIds.length > 0 && (
+                <div>
+                    <strong>Batches Generated:</strong>
+                    <ul style={{ margin: '2px 0 0 0', paddingLeft: '15px' }}>
+                        {batchIds.map((batchId: string) => (
+                            <li key={batchId}>
+                                {batchId} 
+                                <Link key={batchId} to={`/batch/${batchId}`} style={{ marginLeft: '5px' }}>[Rank]</Link>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
             )}
-            {/* Show error details if job failed */}
             {job.status === 'FAILURE' && job.result_message && (
               <div style={{ color: 'red', marginTop: '5px' }}>
                 <strong>Error Details:</strong> {job.result_message}

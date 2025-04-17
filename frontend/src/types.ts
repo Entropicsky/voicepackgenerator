@@ -12,6 +12,12 @@ export interface VoiceOption {
   // created_at_unix?: number; // If API provides this
 }
 
+// Represents a TTS model option
+export interface ModelOption {
+  model_id: string;
+  name: string;
+}
+
 // ... other types (GenerationConfig, TaskStatus, etc.) ... 
 
 // UPDATED: Response from starting generation now includes DB job ID
@@ -33,6 +39,9 @@ export interface GenerationJob {
     parameters_json: string | null; // JSON string of GenerationConfig
     result_message: string | null;
     result_batch_ids_json: string | null; // JSON string array of batch IDs
+    job_type?: 'full_batch' | 'line_regen' | string; // Allow string for flexibility
+    target_batch_id?: string | null;
+    target_line_key?: string | null;
 }
 
 // ... BatchInfo, Take, BatchMetadata ...

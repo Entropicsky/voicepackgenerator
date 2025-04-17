@@ -7,7 +7,7 @@ import LineNavigation from '../components/ranking/LineNavigation';
 
 // Inner component to access context data
 const RankingUI: React.FC = () => {
-  const { batchMetadata, loading, error, isLocked, lockCurrentBatch } = useRanking();
+  const { batchMetadata, loading, error, isLocked, lockCurrentBatch, refetchMetadata } = useRanking();
 
   if (loading) {
     return <p>Loading batch data...</p>;
@@ -47,6 +47,8 @@ const RankingUI: React.FC = () => {
               <span style={detailStyle}><span style={labelStyle}>Status:</span> {isLocked ? `Locked (${new Date(batchMetadata.ranked_at_utc || Date.now()).toLocaleDateString()})` : 'Unlocked'}</span>
           </div>
           <div style={{display: 'flex', gap: '10px'}}> {/* Wrapper for buttons */} 
+              {/* Refresh Button */} 
+              <button onClick={refetchMetadata} disabled={loading} style={{ padding: '5px 10px' }} title="Reload batch data from server">🔄 Refresh Data</button>
               {/* Download Button */} 
                <a 
                   href={`/api/batch/${batchMetadata?.batch_id}/download`} 

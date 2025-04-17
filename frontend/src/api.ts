@@ -7,7 +7,8 @@ import {
   BatchInfo,
   BatchMetadata,
   GenerationJob,
-  BatchDetailInfo
+  BatchDetailInfo,
+  ModelOption
 } from './types';
 
 // Define options for filtering/sorting voices
@@ -19,6 +20,15 @@ interface GetVoicesOptions {
     sort_direction?: 'asc' | 'desc';
     page_size?: number;
     next_page_token?: string;
+}
+
+// Define payload for line regeneration
+interface RegenerateLinePayload {
+    line_key: string;
+    line_text: string;
+    num_new_takes: number;
+    settings: Partial<GenerationConfig>; // Only need TTS settings part
+    replace_existing: boolean;
 }
 
 // Helper to handle API responses and errors
@@ -68,6 +78,11 @@ export const api = {
     return handleApiResponse<VoiceOption[]>(response);
   },
 
+  getModels: async (): Promise<ModelOption[]> => {
+      const response = await fetch(`${API_BASE}/api/models`);
+      return handleApiResponse<ModelOption[]>(response);
+  },
+
   // Returns { task_id, job_id } now
   startGeneration: async (config: GenerationConfig): Promise<GenerationStartResponse> => {
     const response = await fetch(`${API_BASE}/api/generate`, {
@@ -91,6 +106,20 @@ export const api = {
   getJobs: async (): Promise<GenerationJob[]> => {
       const response = await fetch(`${API_BASE}/api/jobs`);
       return handleApiResponse<GenerationJob[]>(response);
+  },
+
+  // New endpoint for regenerating line takes
+  regenerateLineTakes: async (batchId: string, payload: RegenerateLinePayload): Promise<GenerationStartResponse> => {
+      const url = `${API_BASE}/api/batch/${batchId}/regenerate_line`;
+      const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+      });
+      // Returns { task_id, job_id }
+      return handleApiResponse<GenerationStartResponse>(response);
   },
 
   // --- Ranking --- //

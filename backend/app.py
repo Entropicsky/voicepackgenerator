@@ -189,6 +189,25 @@ def get_task_status(task_id):
         print(f"Error checking task status for {task_id}: {e}")
         return make_api_response(error="Failed to retrieve task status", status_code=500)
 
+@app.route('/api/models', methods=['GET'])
+def get_models():
+    """Endpoint to get available TTS models from ElevenLabs."""
+    try:
+        # TODO: Add caching for this endpoint
+        models_list = utils_elevenlabs.get_available_models()
+        # Return relevant fields for the frontend
+        model_options = [
+            {"model_id": m.get('model_id'), "name": m.get('name')}
+            for m in models_list if m.get('model_id') and m.get('name')
+        ]
+        return make_api_response(data=model_options)
+    except utils_elevenlabs.ElevenLabsError as e:
+        print(f"Error fetching models via API route: {e}")
+        return make_api_response(error=str(e), status_code=500)
+    except Exception as e:
+        print(f"Unexpected error in /api/models route: {e}")
+        return make_api_response(error="An unexpected error occurred", status_code=500)
+
 # --- Job History API Endpoint --- #
 
 @app.route('/api/jobs', methods=['GET'])
@@ -196,11 +215,7 @@ def list_generation_jobs():
     """Lists previously submitted generation jobs from the database."""
     db: Session = next(models.get_db())
     try:
-        # Query jobs, order by most recent submission
         jobs = db.query(models.GenerationJob).order_by(models.GenerationJob.submitted_at.desc()).all()
-        
-        # Convert SQLAlchemy objects to dictionaries for JSON response
-        # Handle potential JSON parsing for results/params if needed on frontend
         job_list = [
             {
                 "id": job.id,
@@ -209,9 +224,12 @@ def list_generation_jobs():
                 "submitted_at": job.submitted_at.isoformat() if job.submitted_at else None,
                 "started_at": job.started_at.isoformat() if job.started_at else None,
                 "completed_at": job.completed_at.isoformat() if job.completed_at else None,
-                "parameters_json": job.parameters_json, # Keep as string for now
+                "parameters_json": job.parameters_json, 
                 "result_message": job.result_message,
-                "result_batch_ids_json": job.result_batch_ids_json # Keep as string for now
+                "result_batch_ids_json": job.result_batch_ids_json, 
+                "job_type": job.job_type,
+                "target_batch_id": job.target_batch_id,
+                "target_line_key": job.target_line_key
             }
             for job in jobs
         ]
@@ -404,6 +422,74 @@ def download_batch_zip(batch_id):
     except Exception as e:
         print(f"Unexpected error creating zip for {batch_id}: {e}")
         return make_api_response(error="Failed to create batch zip file", status_code=500)
+
+@app.route('/api/batch/<batch_id>/regenerate_line', methods=['POST'])
+def regenerate_line(batch_id):
+    """Endpoint to start a line regeneration task."""
+    if not request.is_json:
+        return make_api_response(error="Request must be JSON", status_code=400)
+    
+    data = request.get_json()
+    required_keys = ['line_key', 'line_text', 'num_new_takes', 'settings', 'replace_existing']
+    if not all(key in data for key in required_keys):
+        missing = [key for key in required_keys if key not in data]
+        return make_api_response(error=f'Missing required keys for regeneration: {missing}', status_code=400)
+
+    line_key = data['line_key']
+    line_text = data['line_text']
+    num_new_takes = data['num_new_takes']
+    settings = data['settings'] # This should be the GenerationConfig subset
+    replace_existing = data['replace_existing']
+    settings_json = json.dumps(settings)
+
+    db: Session = next(models.get_db())
+    db_job = None
+    try:
+        # Check if target batch exists before creating job
+        target_batch_dir = utils_fs.get_batch_dir(AUDIO_ROOT, batch_id)
+        if not target_batch_dir or not target_batch_dir.is_dir():
+             return make_api_response(error=f"Target batch '{batch_id}' not found for regeneration", status_code=404)
+        
+        # Create Job DB record
+        db_job = models.GenerationJob(
+            status="PENDING",
+            job_type="line_regen", # Mark job type
+            target_batch_id=batch_id,
+            target_line_key=line_key,
+            parameters_json=json.dumps(data) # Store all input params
+        )
+        db.add(db_job)
+        db.commit()
+        db.refresh(db_job)
+        db_job_id = db_job.id
+        print(f"Created Line Regeneration Job record with DB ID: {db_job_id}")
+
+        # Enqueue Celery task
+        task = tasks.regenerate_line_takes.delay(
+            db_job_id, batch_id, line_key, line_text, 
+            num_new_takes, settings_json, replace_existing
+        )
+        print(f"Enqueued line regen task: Celery ID {task.id}, DB Job ID {db_job_id}")
+
+        # Update Job record with Celery task ID
+        db_job.celery_task_id = task.id
+        db.commit()
+
+        return make_api_response(data={'task_id': task.id, 'job_id': db_job_id}, status_code=202)
+
+    except Exception as e:
+        print(f"Error submitting line regeneration job: {e}")
+        if db_job and db_job.id:
+            try:
+                 db_job.status = "SUBMIT_FAILED"
+                 db_job.result_message = f"Failed to enqueue Celery task: {e}"
+                 db.commit()
+            except Exception as db_err:
+                 print(f"Failed to update job status after enqueue error: {db_err}")
+                 db.rollback()
+        return make_api_response(error="Failed to start line regeneration task", status_code=500)
+    finally:
+        db.close()
 
 # --- Audio Streaming Endpoint --- #
 

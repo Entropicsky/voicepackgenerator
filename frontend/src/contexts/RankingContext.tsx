@@ -15,6 +15,7 @@ interface RankingContextType {
   selectedLineKey: string | null;
   setSelectedLineKey: (lineKey: string | null) => void;
   currentLineRankedTakes: (Take | null)[]; // Index 0=Rank1, ..., 4=Rank5
+  refetchMetadata: () => void;
 }
 
 const RankingContext = createContext<RankingContextType | undefined>(undefined);
@@ -35,50 +36,51 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
   const [selectedLineKey, setSelectedLineKey] = useState<string | null>(null); // State for selected line
 
   // --- Fetch Metadata ---
-  useEffect(() => {
-    const fetchMetadata = async () => {
-      if (!batchId) return;
-      setLoading(true);
-      setError(null);
-      setBatchMetadata(null);
-      setTakesByLine({});
-      setIsLocked(false);
-      console.log(`Fetching metadata for batch: ${batchId}`);
-      try {
-        const metadata: BatchMetadata = await api.getBatchMetadata(batchId);
-        setBatchMetadata(metadata);
+  const fetchMetadata = useCallback(async () => {
+    if (!batchId) return;
+    setLoading(true);
+    setError(null);
+    setBatchMetadata(null);
+    setTakesByLine({});
+    setIsLocked(false);
+    console.log(`Fetching metadata for batch: ${batchId}`);
+    try {
+      const metadata: BatchMetadata = await api.getBatchMetadata(batchId);
+      setBatchMetadata(metadata);
 
-        // Check lock status (might be redundant if metadata includes it, but good practice)
-        // This requires an `is_locked` field in the metadata or a separate API call.
-        // For now, assume metadata contains ranked_at_utc which implies locked.
-        setIsLocked(metadata.ranked_at_utc !== null);
+      // Check lock status (might be redundant if metadata includes it, but good practice)
+      // This requires an `is_locked` field in the metadata or a separate API call.
+      // For now, assume metadata contains ranked_at_utc which implies locked.
+      setIsLocked(metadata.ranked_at_utc !== null);
 
-        // Group takes by line
-        const grouped: Record<string, Take[]> = {};
-        for (const take of metadata.takes) {
-          if (!grouped[take.line]) {
-            grouped[take.line] = [];
-          }
-          grouped[take.line].push(take);
+      // Group takes by line
+      const grouped: Record<string, Take[]> = {};
+      for (const take of metadata.takes) {
+        if (!grouped[take.line]) {
+          grouped[take.line] = [];
         }
-        // Ensure takes within each line are sorted initially (e.g., by take number)
-        for (const line in grouped) {
-          grouped[line].sort((a: Take, b: Take) => a.take_number - b.take_number);
-        }
-        setTakesByLine(grouped);
-        // Auto-select the first line if available
-        const firstLineKey = Object.keys(grouped).sort()[0];
-        setSelectedLineKey(firstLineKey || null);
-
-      } catch (err: any) {
-        setError(`Failed to load batch metadata: ${err.message}`);
-        console.error(err);
-      } finally {
-        setLoading(false);
+        grouped[take.line].push(take);
       }
-    };
+      // Ensure takes within each line are sorted initially (e.g., by take number)
+      for (const line in grouped) {
+        grouped[line].sort((a: Take, b: Take) => a.take_number - b.take_number);
+      }
+      setTakesByLine(grouped);
+      // DON'T auto-select line on refetch, keep current selection if possible
+      // setSelectedLineKey(Object.keys(grouped).sort()[0] || null);
+
+    } catch (err: any) {
+      setError(`Failed to load batch metadata: ${err.message}`);
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, [batchId]); // Dependency is just batchId
+
+  // Call fetchMetadata on initial mount and when batchId changes
+  useEffect(() => {
     fetchMetadata();
-  }, [batchId]); // Refetch if batchId changes
+  }, [fetchMetadata]); // Use the memoized fetchMetadata
 
   // --- Rank Update Logic ---
   const updateApiRank = useCallback(async (updates: { file: string, rank: number | null }[]) => {
@@ -234,7 +236,8 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
     isLocked,
     selectedLineKey,
     setSelectedLineKey,
-    currentLineRankedTakes
+    currentLineRankedTakes,
+    refetchMetadata: fetchMetadata
   };
 
   return <RankingContext.Provider value={value}>{children}</RankingContext.Provider>;

@@ -25,6 +25,11 @@ class GenerationJob(Base):
     parameters_json = Column(Text, nullable=True) # Store input config as JSON string
     result_message = Column(Text, nullable=True) # Store success message or error details
     result_batch_ids_json = Column(Text, nullable=True) # Store list of generated batch IDs as JSON string
+    
+    # New fields for tracking job type and target
+    job_type = Column(String, default="full_batch") # E.g., 'full_batch', 'line_regen'
+    target_batch_id = Column(String, nullable=True) # For line_regen jobs
+    target_line_key = Column(String, nullable=True) # For line_regen jobs
 
 def init_db():
     """Create database tables."""

@@ -66,6 +66,24 @@ def get_available_voices(
     except Exception as e:
         raise ElevenLabsError(f"An unexpected error occurred while fetching V2 voices: {e}") from e
 
+def get_available_models() -> List[Dict[str, Any]]:
+    """Fetches the list of available models from the V1 API."""
+    url = f"{ELEVENLABS_API_V1_URL}/models" # Use V1 models endpoint
+    try:
+        response = requests.get(url, headers=get_headers())
+        response.raise_for_status()
+        all_models = response.json()
+        # Filter for models that can do TTS
+        tts_models = [
+            model for model in all_models 
+            if model.get('can_do_text_to_speech') and not model.get('requires_alpha_access')
+        ]
+        return tts_models
+    except requests.exceptions.RequestException as e:
+        raise ElevenLabsError(f"Error fetching models from ElevenLabs API: {e}") from e
+    except Exception as e:
+        raise ElevenLabsError(f"An unexpected error occurred while fetching models: {e}") from e
+
 def generate_tts_audio(
     text: str,
     voice_id: str,
@@ -75,7 +93,7 @@ def generate_tts_audio(
     style: Optional[float] = None,
     speed: Optional[float] = None,
     use_speaker_boost: Optional[bool] = None,
-    model_id: str = "eleven_monolingual_v1", # Use V1 default model
+    model_id: str = "eleven_multilingual_v2",
     output_format: str = 'mp3_44100_128',
     retries: int = 3,
     delay: int = 5

@@ -9,6 +9,8 @@ import csv
 import random
 from pathlib import Path
 from datetime import datetime, timezone
+from celery.exceptions import Ignore, Retry
+import shutil
 
 print("Celery Worker: Loading tasks.py...")
 
@@ -290,6 +292,174 @@ def run_generation(self, generation_job_db_id: int, config_json: str):
         raise e
     finally:
         db.close() # Ensure session is closed for this task execution
+
+# --- New Task for Line Regeneration --- #
+
+@celery_app.task(bind=True, name='tasks.regenerate_line_takes')
+def regenerate_line_takes(self, 
+                          generation_job_db_id: int, 
+                          batch_id: str, 
+                          line_key: str, 
+                          line_text: str, 
+                          num_new_takes: int, 
+                          settings_json: str, 
+                          replace_existing: bool):
+    """Generates new takes for a specific line within an existing batch."""
+    task_id = self.request.id
+    print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] Received line regeneration task for Batch '{batch_id}', Line '{line_key}'")
+
+    db: Session = next(models.get_db())
+    db_job = None
+    try:
+        # Update DB job status to STARTED
+        db_job = db.query(models.GenerationJob).filter(models.GenerationJob.id == generation_job_db_id).first()
+        if not db_job:
+            print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] ERROR: GenerationJob record not found.")
+            raise Ignore()
+        
+        db_job.status = "STARTED"
+        db_job.started_at = datetime.utcnow()
+        db_job.celery_task_id = task_id
+        # Also store target info if not already set during job creation
+        db_job.target_batch_id = batch_id
+        db_job.target_line_key = line_key
+        db.commit()
+        print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] Updated job status to STARTED.")
+        self.update_state(state='STARTED', meta={'status': f'Preparing regeneration for line: {line_key}', 'db_id': generation_job_db_id})
+
+        # Get settings from JSON
+        settings = json.loads(settings_json)
+        stability_range = settings.get('stability_range', [0.5, 0.75])
+        similarity_boost_range = settings.get('similarity_boost_range', [0.75, 0.9])
+        style_range = settings.get('style_range', [0.0, 0.45])
+        speed_range = settings.get('speed_range', [0.95, 1.05])
+        use_speaker_boost = settings.get('use_speaker_boost', True)
+        model_id = settings.get('model_id', utils_elevenlabs.DEFAULT_MODEL)
+        output_format = settings.get('output_format', 'mp3_44100_128')
+
+        # Get batch directory and load metadata
+        audio_root = Path(os.getenv('AUDIO_ROOT', '/app/output'))
+        batch_dir = utils_fs.get_batch_dir(audio_root, batch_id)
+        if not batch_dir or not batch_dir.is_dir():
+            raise ValueError(f"Target batch directory not found for batch ID: {batch_id}")
+        
+        metadata = utils_fs.load_metadata(batch_dir)
+        takes_dir = batch_dir / "takes"
+        takes_dir.mkdir(exist_ok=True) # Ensure takes dir exists
+
+        original_takes = metadata.get('takes', [])
+        new_metadata_takes = []
+        archived_files = []
+        start_take_num = 1
+        current_line_takes = [t for t in original_takes if t.get('line') == line_key]
+
+        if replace_existing:
+            print(f"[Task ID: {task_id}] Replacing existing takes for line '{line_key}'")
+            self.update_state(state='PROGRESS', meta={'status': f'Archiving old takes for line: {line_key}', 'db_id': generation_job_db_id})
+            
+            archive_timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+            archive_dir = takes_dir / f"archived_{line_key.replace(' ', '_')}_{archive_timestamp}"
+            try:
+                archive_dir.mkdir(parents=True)
+                for take in current_line_takes:
+                    old_path = takes_dir / take['file']
+                    if old_path.is_file():
+                        new_path = archive_dir / take['file']
+                        shutil.move(str(old_path), str(new_path))
+                        archived_files.append(take['file'])
+                    elif old_path.is_symlink(): # Handle potential old symlinks in takes?
+                         os.unlink(old_path)
+            except OSError as e:
+                print(f"[Task ID: {task_id}] Warning: Failed to archive old takes: {e}")
+                # Decide whether to continue or fail
+            
+            # Filter out the old takes for this line
+            new_metadata_takes = [t for t in original_takes if t.get('line') != line_key]
+            # start_take_num remains 1
+        else:
+            print(f"[Task ID: {task_id}] Adding new takes for line '{line_key}'")
+            new_metadata_takes = original_takes # Start with all original takes
+            if current_line_takes:
+                start_take_num = max(t.get('take_number', 0) for t in current_line_takes) + 1
+
+        # Generate new takes
+        newly_generated_takes_meta = []
+        failures = 0
+        for i in range(num_new_takes):
+            take_num = start_take_num + i
+            self.update_state(state='PROGRESS', meta={
+                'status': f'Generating take {take_num}/{start_take_num + num_new_takes - 1} for line: {line_key}',
+                'db_id': generation_job_db_id,
+                'progress': int(100 * (i + 1) / num_new_takes) # Progress within this line regen
+            })
+
+            stability_take = random.uniform(*stability_range)
+            similarity_boost_take = random.uniform(*similarity_boost_range)
+            style_take = random.uniform(*style_range)
+            speed_take = random.uniform(*speed_range)
+            
+            take_settings = { 'stability': stability_take, 'similarity_boost': similarity_boost_take, 'style': style_take, 'use_speaker_boost': use_speaker_boost, 'speed': speed_take }
+            output_filename = f"{line_key}_take_{take_num}.mp3"
+            output_path = takes_dir / output_filename
+
+            try:
+                utils_elevenlabs.generate_tts_audio(
+                    text=line_text, voice_id=metadata['voice_name'].split('-')[-1], # Extract voice ID
+                    output_path=str(output_path), model_id=model_id,
+                    output_format=output_format, stability=stability_take,
+                    similarity_boost=similarity_boost_take, style=style_take,
+                    speed=speed_take, use_speaker_boost=use_speaker_boost
+                )
+                new_take_meta = {
+                    "file": output_filename, "line": line_key,
+                    "script_text": line_text, "take_number": take_num,
+                    "generation_settings": take_settings, "rank": None, "ranked_at": None
+                }
+                new_metadata_takes.append(new_take_meta)
+                newly_generated_takes_meta.append(new_take_meta)
+            except Exception as e:
+                print(f"[Task ID: {task_id}] ERROR generating take {output_filename} for line regen: {e}")
+                failures += 1
+        
+        # Update metadata file
+        metadata['takes'] = new_metadata_takes
+        # Add note about regeneration?
+        metadata['last_regenerated_line'] = {'line': line_key, 'at': datetime.now(timezone.utc).isoformat(), 'num_added': len(newly_generated_takes_meta), 'replaced': replace_existing}
+        utils_fs.save_metadata(batch_dir, metadata)
+        print(f"[Task ID: {task_id}] Updated metadata for batch {batch_id} after regenerating line {line_key}.")
+
+        # --- Update DB Job --- 
+        final_status = "SUCCESS" if failures == 0 else "COMPLETED_WITH_ERRORS" if failures < num_new_takes else "FAILURE"
+        result_msg = f"Regenerated line '{line_key}'. Added {len(newly_generated_takes_meta)} takes ({failures} failures). Replaced existing: {replace_existing}. Archived: {len(archived_files)} files."
+        if final_status == "FAILURE":
+             result_msg = f"Failed to regenerate any takes for line '{line_key}'. ({failures} failures). Replaced existing: {replace_existing}. Archived: {len(archived_files)} files."
+             
+        db_job.status = final_status
+        db_job.completed_at = datetime.utcnow()
+        db_job.result_message = result_msg
+        # Store generated filenames?
+        # db_job.result_batch_ids_json = json.dumps([t['file'] for t in newly_generated_takes_meta])
+        db.commit()
+        print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] Updated job status to {final_status}.")
+
+        return {'status': final_status, 'message': result_msg}
+
+    except Exception as e:
+        error_msg = f"Line regeneration task failed: {type(e).__name__}: {e}"
+        print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] {error_msg}")
+        if db_job:
+            db_job.status = "FAILURE"
+            db_job.completed_at = datetime.utcnow()
+            db_job.result_message = error_msg
+            try:
+                db.commit()
+            except Exception as db_err:
+                print(f"[...] Failed to update job status to FAILURE: {db_err}")
+                db.rollback()
+        self.update_state(state='FAILURE', meta={'status': error_msg, 'db_id': generation_job_db_id})
+        raise e
+    finally:
+        db.close()
 
 # --- Placeholder Task (Keep or Remove) ---
 # @celery_app.task(bind=True)

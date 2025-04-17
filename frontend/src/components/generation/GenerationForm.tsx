@@ -1,7 +1,8 @@
-import React, { useState, useCallback } from 'react';
-import { GenerationConfig } from '../../types';
+import React, { useState, useCallback, useEffect } from 'react';
+import { GenerationConfig, ModelOption } from '../../types';
 import Slider from 'rc-slider';
 import 'rc-slider/assets/index.css';
+import { api } from '../../api';
 
 interface GenerationFormProps {
   selectedVoiceIds: string[];
@@ -15,6 +16,7 @@ const DEFAULT_SIMILARITY_RANGE: [number, number] = [0.75, 0.9];
 const DEFAULT_STYLE_RANGE: [number, number] = [0.0, 0.45]; // Style Exaggeration
 const DEFAULT_SPEED_RANGE: [number, number] = [0.95, 1.05];
 const DEFAULT_SPEAKER_BOOST = true;
+const DEFAULT_MODEL_ID = "eleven_multilingual_v2";
 
 const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSubmit, isSubmitting }) => {
   // Basic Info
@@ -30,6 +32,34 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
   const [styleRange, setStyleRange] = useState<[number, number]>(DEFAULT_STYLE_RANGE);
   const [speedRange, setSpeedRange] = useState<[number, number]>(DEFAULT_SPEED_RANGE);
   const [speakerBoost, setSpeakerBoost] = useState<boolean>(DEFAULT_SPEAKER_BOOST);
+
+  // Model Selection State
+  const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState<string>(DEFAULT_MODEL_ID);
+  const [modelsLoading, setModelsLoading] = useState<boolean>(true);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+
+  // Fetch available models on mount
+  useEffect(() => {
+    const fetchModels = async () => {
+        setModelsLoading(true);
+        setModelsError(null);
+        try {
+            const models = await api.getModels();
+            setAvailableModels(models);
+            // Ensure default is valid, fallback if needed
+            if (!models.find(m => m.model_id === DEFAULT_MODEL_ID)) {
+                 setSelectedModelId(models[0]?.model_id || ''); // Select first available if default missing
+            }
+        } catch (err: any) {
+             setModelsError(`Failed to load models: ${err.message}`);
+             console.error(err);
+        } finally {
+             setModelsLoading(false);
+        }
+    };
+    fetchModels();
+  }, []);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -95,6 +125,7 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
       style_range: styleRange,
       speed_range: speedRange,
       use_speaker_boost: speakerBoost,
+      model_id: selectedModelId
     };
     onSubmit(config);
   };
@@ -137,6 +168,26 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
           required
         />
         {scriptFile && <span> ({scriptFile.name})</span>}
+      </div>
+
+      {/* Model Selection */}
+      <div style={{ marginTop: '10px' }}>
+        <label htmlFor="modelSelect">Model: </label>
+        <select 
+            id="modelSelect" 
+            value={selectedModelId} 
+            onChange={e => setSelectedModelId(e.target.value)} 
+            disabled={modelsLoading || !!modelsError}
+        >
+            {modelsLoading && <option>Loading models...</option>}
+            {modelsError && <option>Error loading models</option>}
+            {!modelsLoading && !modelsError && availableModels.map(model => (
+                <option key={model.model_id} value={model.model_id}>
+                    {model.name} ({model.model_id})
+                </option>
+            ))}
+        </select>
+        {modelsError && <span style={{ color: 'red', marginLeft: '10px' }}>{modelsError}</span>}
       </div>
 
       {/* TTS Settings Section with Range Sliders */} 
