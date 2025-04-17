@@ -1,5 +1,5 @@
 # backend/app.py
-from flask import Flask, jsonify, request, current_app, Response, send_from_directory
+from flask import Flask, jsonify, request, current_app, Response, send_from_directory, send_file
 from dotenv import load_dotenv
 import os
 from celery.result import AsyncResult
@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
+import zipfile
+import io
 
 # Import celery app instance from root
 from celery_app import celery_app
@@ -336,6 +338,72 @@ def lock_batch_endpoint(batch_id):
     except Exception as e:
         print(f"Unexpected error locking batch {batch_id}: {e}")
         return make_api_response(error="Failed to lock batch", status_code=500)
+
+@app.route('/api/batch/<batch_id>/download', methods=['GET'])
+def download_batch_zip(batch_id):
+    """Creates and returns a ZIP archive of the batch directory contents."""
+    try:
+        batch_dir = utils_fs.get_batch_dir(AUDIO_ROOT, batch_id)
+        if not batch_dir or not batch_dir.is_dir():
+            return make_api_response(error=f"Batch '{batch_id}' not found", status_code=404)
+
+        # Get the parent directory name (VoiceName-VoiceID) for the zip filename
+        zip_filename_base = batch_dir.parent.name
+        zip_download_name = f"{zip_filename_base}.zip"
+
+        memory_file = io.BytesIO()
+        with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+            # Add metadata.json and LOCKED if they exist
+            meta_file = batch_dir / 'metadata.json'
+            lock_file = batch_dir / 'LOCKED'
+            if meta_file.is_file():
+                 zf.write(meta_file, arcname=meta_file.name)
+            if lock_file.is_file():
+                 zf.write(lock_file, arcname=lock_file.name)
+
+            # Add contents of takes/
+            takes_dir = batch_dir / 'takes'
+            if takes_dir.is_dir():
+                for root, _, files in os.walk(takes_dir):
+                    for file in files:
+                        file_path = Path(root) / file
+                        # Archive name relative to batch_dir (e.g., takes/file.mp3)
+                        arcname = file_path.relative_to(batch_dir).as_posix()
+                        zf.write(file_path, arcname=arcname)
+            
+            # Add contents of ranked/
+            ranked_dir = batch_dir / 'ranked'
+            if ranked_dir.is_dir():
+                 for root, _, files in os.walk(ranked_dir):
+                    for file in files:
+                        file_path = Path(root) / file
+                        # Archive name relative to batch_dir (e.g., ranked/01/file.mp3)
+                        arcname = file_path.relative_to(batch_dir).as_posix()
+                        # Check if it's a symlink and add the *target* file content if possible,
+                        # or just add the link itself if adding target fails?
+                        # For simplicity and to avoid issues with broken links, let's just add the link itself.
+                        # If the target file needs to be included regardless of link, 
+                        # we'd need to resolve it and add with its content, being careful about duplicates.
+                        # Add the file/link with its relative path
+                        zf.write(file_path, arcname=arcname)
+                        
+        memory_file.seek(0)
+
+        # Consider checking if *anything* was added beyond metadata/lock?
+
+        return send_file(
+            memory_file,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=zip_download_name # Use the voice folder name
+        )
+
+    except utils_fs.FilesystemError as e:
+        print(f"Filesystem error creating zip for {batch_id}: {e}")
+        return make_api_response(error=str(e), status_code=500)
+    except Exception as e:
+        print(f"Unexpected error creating zip for {batch_id}: {e}")
+        return make_api_response(error="Failed to create batch zip file", status_code=500)
 
 # --- Audio Streaming Endpoint --- #
 

@@ -46,9 +46,27 @@ const RankingUI: React.FC = () => {
               <span style={detailStyle}><span style={labelStyle}>Generated:</span> {new Date(batchMetadata.generated_at_utc).toLocaleString()}</span>
               <span style={detailStyle}><span style={labelStyle}>Status:</span> {isLocked ? `Locked (${new Date(batchMetadata.ranked_at_utc || Date.now()).toLocaleDateString()})` : 'Unlocked'}</span>
           </div>
-          {!isLocked && (
-              <button onClick={handleLock} style={{ padding: '5px 10px' }}>Lock Batch</button>
-          )}
+          <div style={{display: 'flex', gap: '10px'}}> {/* Wrapper for buttons */} 
+              {/* Download Button */} 
+               <a 
+                  href={`/api/batch/${batchMetadata?.batch_id}/download`} 
+                  download={`${batchMetadata?.voice_name}.zip`} 
+                  style={{ 
+                      padding: '5px 10px', 
+                      border: '1px solid green', 
+                      color: 'green', 
+                      borderRadius: '4px',
+                      textDecoration: 'none'
+                  }}
+                  title={`Download ZIP for ${batchMetadata?.batch_id}`}
+              >
+                  Download ZIP
+              </a>
+              {/* Lock Button */} 
+              {!isLocked && (
+                  <button onClick={handleLock} style={{ padding: '5px 10px' }}>Lock Batch</button>
+              )}
+          </div>
       </div>
       
       {/* Main Content Panels */}

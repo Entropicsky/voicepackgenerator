@@ -75,6 +75,19 @@ const BatchesPage: React.FC = () => {
       padding: '8px', 
       verticalAlign: 'top'
   };
+  const actionCellStyle: React.CSSProperties = {
+      ...tdStyle, // Inherit base style
+      textAlign: 'center'
+  };
+  const downloadLinkStyle: React.CSSProperties = {
+      display: 'inline-block',
+      padding: '4px 8px',
+      border: '1px solid #0d6efd',
+      borderRadius: '4px',
+      textDecoration: 'none',
+      color: '#0d6efd',
+      fontSize: '0.9em'
+  }
 
   if (loading) {
     return <p>Loading batches...</p>;
@@ -100,6 +113,7 @@ const BatchesPage: React.FC = () => {
                     <th style={thStyle} onClick={() => handleSort('takes_per_line')}>Takes/Line{renderSortArrow('takes_per_line')}</th>
                     <th style={thStyle} onClick={() => handleSort('created_at_sortkey')}>Created{renderSortArrow('created_at_sortkey')}</th>
                     <th style={thStyle} onClick={() => handleSort('status')}>Status{renderSortArrow('status')}</th>
+                    <th style={{...thStyle, cursor: 'default'}}>Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -112,6 +126,16 @@ const BatchesPage: React.FC = () => {
                          <td style={tdStyle}>{batch.takes_per_line}</td>
                          <td style={tdStyle}>{batch.created_at ? new Date(batch.created_at).toLocaleString() : 'N/A'}</td>
                          <td style={tdStyle}>{batch.status}</td>
+                         <td style={actionCellStyle}>
+                            <a 
+                                href={`/api/batch/${batch.batch_id}/download`} 
+                                download={`${batch.voice}.zip`}
+                                style={downloadLinkStyle}
+                                title={`Download ZIP for ${batch.batch_id} (${batch.voice})`}
+                            >
+                                Download ZIP
+                            </a>
+                         </td>
                     </tr>
                 ))}
             </tbody>
