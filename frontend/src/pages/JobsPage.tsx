@@ -203,11 +203,13 @@ const JobsPage: React.FC = () => {
           <small>
             <div><strong>Result:</strong> {job.result_message || 'N/A'}</div>
             
-            {/* Link for Line Regen Jobs */}  
+            {/* Separate Links based on Job Type */} 
+            
+            {/* Link for Successful/Partial Line Regen Jobs */}  
             {isLineRegen && (job.status === 'SUCCESS' || job.status === 'COMPLETED_WITH_ERRORS') && targetBatchId && (
                  <div>
                      <Link 
-                        key={targetBatchId} 
+                        key={`${targetBatchId}-link`}
                         to={`/batch/${targetBatchId}`} 
                         style={{marginRight: '5px', fontWeight: 'bold'}}
                      >
@@ -217,7 +219,7 @@ const JobsPage: React.FC = () => {
                  </div>
             )} 
             
-            {/* Links for Full Batch Jobs */} 
+            {/* Links for Successful/Partial Full Batch Jobs */} 
             {!isLineRegen && (job.status === 'SUCCESS' || job.status === 'COMPLETED_WITH_ERRORS') && batchIds && batchIds.length > 0 && (
                 <div>
                     <strong>Batches Generated:</strong>
@@ -225,16 +227,18 @@ const JobsPage: React.FC = () => {
                         {batchIds.map((batchId: string) => (
                             <li key={batchId}>
                                 {batchId} 
-                                <Link key={batchId} to={`/batch/${batchId}`} style={{ marginLeft: '5px' }}>[Rank]</Link>
+                                <Link key={`${batchId}-rank`} to={`/batch/${batchId}`} style={{ marginLeft: '5px' }}>[Rank]</Link>
                             </li>
                         ))}
                     </ul>
                 </div>
             )}
-            {job.status === 'FAILURE' && job.result_message && (
-              <div style={{ color: 'red', marginTop: '5px' }}>
-                <strong>Error Details:</strong> {job.result_message}
-              </div>
+            
+            {/* Error Display (applies to both job types) */} 
+            {(job.status === 'FAILURE' || job.status === 'SUBMIT_FAILED') && job.result_message && (
+                <div style={{ color: 'red', marginTop: '5px' }}>
+                    <strong>Error Details:</strong> {job.result_message}
+                </div>
             )}
           </small>
         </td>

@@ -85,3 +85,17 @@ export interface BatchDetailInfo {
 // export interface BatchInfo { ... }
 
 // ... Take, BatchMetadata ...
+
+// Payload for STS request
+export interface SpeechToSpeechPayload {
+    line_key: string;
+    source_audio_b64: string; // data:audio/...;base64,... string
+    num_new_takes: number;
+    target_voice_id: string;
+    model_id: string;
+    settings: { // Specific STS settings
+        stability?: number;
+        similarity_boost?: number;
+    };
+    replace_existing: boolean;
+}

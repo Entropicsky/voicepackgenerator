@@ -8,7 +8,8 @@ import {
   BatchMetadata,
   GenerationJob,
   BatchDetailInfo,
-  ModelOption
+  ModelOption,
+  SpeechToSpeechPayload
 } from './types';
 
 // Define options for filtering/sorting voices
@@ -20,6 +21,11 @@ interface GetVoicesOptions {
     sort_direction?: 'asc' | 'desc';
     page_size?: number;
     next_page_token?: string;
+}
+
+// NEW: Options for getModels
+interface GetModelsOptions {
+    capability?: 'tts' | 'sts';
 }
 
 // Define payload for line regeneration
@@ -78,8 +84,16 @@ export const api = {
     return handleApiResponse<VoiceOption[]>(response);
   },
 
-  getModels: async (): Promise<ModelOption[]> => {
-      const response = await fetch(`${API_BASE}/api/models`);
+  // Updated getModels to accept options
+  getModels: async (options?: GetModelsOptions): Promise<ModelOption[]> => {
+      const queryParams = new URLSearchParams();
+      if (options?.capability) {
+          queryParams.append('capability', options.capability);
+      }
+      const queryString = queryParams.toString();
+      const url = `${API_BASE}/api/models${queryString ? '?' + queryString : ''}`; 
+      console.log("Fetching models from URL:", url); // Debugging
+      const response = await fetch(url);
       return handleApiResponse<ModelOption[]>(response);
   },
 
@@ -111,6 +125,20 @@ export const api = {
   // New endpoint for regenerating line takes
   regenerateLineTakes: async (batchId: string, payload: RegenerateLinePayload): Promise<GenerationStartResponse> => {
       const url = `${API_BASE}/api/batch/${batchId}/regenerate_line`;
+      const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+      });
+      // Returns { task_id, job_id }
+      return handleApiResponse<GenerationStartResponse>(response);
+  },
+
+  // New function for starting STS job
+  startSpeechToSpeech: async (batchId: string, payload: SpeechToSpeechPayload): Promise<GenerationStartResponse> => {
+      const url = `${API_BASE}/api/batch/${batchId}/speech_to_speech`;
       const response = await fetch(url, {
           method: 'POST',
           headers: {

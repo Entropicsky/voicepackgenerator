@@ -100,26 +100,44 @@
 - [ ] **Testing:** Run frontend tests (Deferred)
 - [x] **Checkpoint Test:** Manually tested line-scoped ranking, side panel.
 
-## Phase 7: Job Tracking & Refinement (Milestone: Job history persists & basic flows stable)
+## Phase 7: Job Tracking, STS & Refinement (Milestone: Core flows stable)
 
+### Phase 7a: Job Tracking Implementation (Complete)
 - [x] Backend: Add SQLAlchemy dependency.
 - [x] Backend: Define `GenerationJob` model (`models.py`).
 - [x] Backend: Initialize DB on app startup.
 - [x] Backend: Modify `POST /api/generate` to use DB.
 - [x] Backend: Modify `tasks.run_generation` to use DB.
 - [x] Backend: Create `GET /api/jobs` endpoint.
-- [x] Frontend: Update `types.ts` (`GenerationJob`, `GenerationStartResponse`).
-- [x] Frontend: Update `api.ts` (`getJobs`, `startGeneration`).
-- [x] Frontend: Rename `BatchListPage` -> `JobsPage` & implement.
-- [x] Frontend: Modify `GenerationPage` (remove monitor, add navigation).
+- [x] Frontend: Update `types.ts`.
+- [x] Frontend: Update `api.ts`.
+- [x] Frontend: Implement `JobsPage.tsx`.
+- [x] Frontend: Modify `GenerationPage.tsx`.
 - [x] Frontend: Update `App.tsx` router/links.
-- [ ] Perform comprehensive manual testing of generation and job history flows.
-- [ ] Review and enhance logging based on testing feedback.
-- [ ] Address any bugs found during testing.
-- [ ] Refine UI/UX based on testing feedback.
+- [x] Checkpoint Test: Verified job submission, DB persistence, status updates, UI display.
+
+### Phase 7b: Speech-to-Speech (Line Level)
+- [ ] Backend: Update `GenerationJob` model (Confirm fields sufficient - Done in 7a).
+- [ ] Backend: Enhance `utils_elevenlabs.get_available_models` (add STS filter).
+- [ ] Backend: Implement `utils_elevenlabs.run_speech_to_speech_conversion`.
+- [ ] Backend: Add `GET /api/models` capability filter.
+- [ ] Backend: Implement `POST /api/batch/<batch_id>/speech_to_speech` endpoint.
+- [ ] Backend: Implement `tasks.run_speech_to_speech_line` Celery task.
+- [ ] Frontend: Update `types.ts` (Add `SpeechToSpeechPayload`, update `ModelOption`?).
+- [ ] Frontend: Update `api.ts` (Add `getModels` capability param, add `startSpeechToSpeech`).
+- [ ] Frontend: Create `SpeechToSpeechModal.tsx` component (with file input).
+- [ ] Frontend: Add "Speech-to-Speech..." button to `CurrentLineTakes.tsx`.
+- [ ] Frontend: Integrate `SpeechToSpeechModal` into `RankingPage.tsx`.
+- [ ] Checkpoint Test: Manually test STS flow (upload audio file, check job status, verify output & metadata update).
+
+### Phase 7c: Final Testing & Refinement
+- [ ] Perform comprehensive manual testing of all flows (Generation, Ranking, Line Regen, STS).
+- [ ] Review and enhance logging.
+- [ ] Address any bugs found.
+- [ ] Refine UI/UX.
 - [ ] **Testing:** Revisit backend/frontend testing issues (Optional / Future).
 - [ ] **Documentation:** Update README.
-- [ ] **Documentation:** Ensure code comments and docstrings are adequate.
+- [ ] **Documentation:** Ensure code comments/docstrings are adequate.
 
 ## Phase 8: Build & Deployment Prep (Milestone: Ready for deployment)
 

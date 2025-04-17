@@ -11,6 +11,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from celery.exceptions import Ignore, Retry
 import shutil
+import base64
 
 print("Celery Worker: Loading tasks.py...")
 
@@ -458,6 +459,148 @@ def regenerate_line_takes(self,
                 db.rollback()
         self.update_state(state='FAILURE', meta={'status': error_msg, 'db_id': generation_job_db_id})
         raise e
+    finally:
+        db.close()
+
+# --- New Task for Speech-to-Speech Line Regeneration --- #
+
+@celery_app.task(bind=True, name='tasks.run_speech_to_speech_line')
+def run_speech_to_speech_line(self,
+                              generation_job_db_id: int,
+                              batch_id: str,
+                              line_key: str,
+                              source_audio_b64: str, # Expecting full data URI e.g., data:audio/wav;base64,...
+                              num_new_takes: int,
+                              target_voice_id: str,
+                              model_id: str,
+                              settings_json: str,
+                              replace_existing: bool):
+    """Generates new takes for a line using Speech-to-Speech."""
+    task_id = self.request.id
+    print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] Received STS task for Batch '{batch_id}', Line '{line_key}'")
+
+    db: Session = next(models.get_db())
+    db_job = None
+    try:
+        # --- Update Job Status --- 
+        db_job = db.query(models.GenerationJob).filter(models.GenerationJob.id == generation_job_db_id).first()
+        if not db_job: raise Ignore() # Ignore if DB record missing
+        db_job.status = "STARTED"; db_job.started_at = datetime.utcnow(); db_job.celery_task_id = task_id
+        db.commit()
+        self.update_state(state='STARTED', meta={'status': f'Preparing STS for line: {line_key}', 'db_id': generation_job_db_id})
+        print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] Updated job status to STARTED.")
+
+        # --- Decode Audio & Settings --- 
+        try:
+            header, encoded = source_audio_b64.split(';base64,', 1)
+            audio_data_bytes = base64.b64decode(encoded)
+            # Can get mime type from header if needed: header.split(':')[1]
+        except Exception as e:
+            raise ValueError(f"Failed to decode source audio base64 data: {e}") from e
+        
+        settings = json.loads(settings_json) # Stability, Similarity
+        # Extract specific settings for ElevenLabs STS API
+        sts_voice_settings = {
+            key: settings.get(key) for key in ['stability', 'similarity_boost'] if settings.get(key) is not None
+        }
+
+        # --- Prepare Filesystem & Metadata --- 
+        audio_root = Path(os.getenv('AUDIO_ROOT', '/app/output'))
+        batch_dir = utils_fs.get_batch_dir(audio_root, batch_id)
+        if not batch_dir or not batch_dir.is_dir(): raise ValueError(f"Target batch dir not found: {batch_id}")
+        metadata = utils_fs.load_metadata(batch_dir)
+        takes_dir = batch_dir / "takes"
+        takes_dir.mkdir(exist_ok=True)
+
+        original_takes = metadata.get('takes', [])
+        new_metadata_takes = []
+        archived_files = []
+        start_take_num = 1
+        current_line_takes = [t for t in original_takes if t.get('line') == line_key]
+        
+        if replace_existing:
+            print(f"[...] Replacing existing takes for line '{line_key}' before STS.")
+            self.update_state(state='PROGRESS', meta={'status': f'Archiving old takes...', 'db_id': generation_job_db_id})
+            archive_timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+            archive_dir = takes_dir / f"archived_{line_key.replace(' ', '_')}_{archive_timestamp}"
+            try:
+                archive_dir.mkdir(parents=True)
+                for take in current_line_takes:
+                    old_path = takes_dir / take['file']
+                    if old_path.is_file(): shutil.move(str(old_path), str(archive_dir / take['file'])); archived_files.append(take['file'])
+                    elif old_path.is_symlink(): os.unlink(old_path)
+            except OSError as e: print(f"[...] Warning: Failed to archive old takes: {e}")
+            new_metadata_takes = [t for t in original_takes if t.get('line') != line_key]
+        else:
+            new_metadata_takes = original_takes
+            if current_line_takes: start_take_num = max(t.get('take_number', 0) for t in current_line_takes) + 1
+
+        # --- Generate New Takes via STS --- 
+        newly_generated_takes_meta = []
+        failures = 0
+        for i in range(num_new_takes):
+            take_num = start_take_num + i
+            self.update_state(state='PROGRESS', meta={
+                'status': f'Running STS take {take_num} for line: {line_key}',
+                'db_id': generation_job_db_id,
+                'progress': int(100 * (i + 1) / num_new_takes)
+            })
+            
+            output_filename = f"{line_key}_take_{take_num}.mp3" # Assuming mp3 output from STS
+            output_path = takes_dir / output_filename
+
+            try:
+                result_audio_bytes = utils_elevenlabs.run_speech_to_speech_conversion(
+                    audio_data=audio_data_bytes,
+                    target_voice_id=target_voice_id,
+                    model_id=model_id,
+                    voice_settings=sts_voice_settings
+                )
+                # Save the resulting audio
+                with open(output_path, 'wb') as f:
+                    f.write(result_audio_bytes)
+                print(f"[...] Successfully saved STS audio to {output_path}")
+
+                new_take_meta = {
+                    "file": output_filename, "line": line_key,
+                    "script_text": "[STS]", # Indicate it was generated via STS
+                    "take_number": take_num,
+                    "generation_settings": {**settings, 'source_audio_info': header}, # Store STS settings used
+                    "rank": None, "ranked_at": None
+                }
+                new_metadata_takes.append(new_take_meta)
+                newly_generated_takes_meta.append(new_take_meta)
+            except Exception as e:
+                print(f"[...] ERROR generating STS take {output_filename}: {e}")
+                failures += 1
+
+        # --- Update Metadata & DB Job --- 
+        metadata['takes'] = new_metadata_takes
+        metadata['last_regenerated_line'] = { 'line': line_key, 'at': datetime.now(timezone.utc).isoformat(), 'num_added': len(newly_generated_takes_meta), 'replaced': replace_existing, 'type': 'sts' }
+        utils_fs.save_metadata(batch_dir, metadata)
+        print(f"[...] Updated metadata for batch {batch_id} after STS for line {line_key}.")
+
+        final_status = "SUCCESS" if failures == 0 else "COMPLETED_WITH_ERRORS" if failures < num_new_takes else "FAILURE"
+        result_msg = f"STS for line '{line_key}' complete. Added {len(newly_generated_takes_meta)} takes ({failures} failures). Replaced: {replace_existing}. Archived: {len(archived_files)}."
+        if final_status == "FAILURE": result_msg = f"STS failed for line '{line_key}'. ({failures} failures)."
+        
+        db_job.status = final_status
+        db_job.completed_at = datetime.utcnow()
+        db_job.result_message = result_msg
+        db.commit()
+        print(f"[...] Updated job status to {final_status}.")
+
+        return {'status': final_status, 'message': result_msg}
+
+    except Exception as e:
+        error_msg = f"STS line task failed: {type(e).__name__}: {e}"
+        print(f"[...] {error_msg}")
+        if db_job: # Update DB if possible
+            db_job.status = "FAILURE"; db_job.completed_at = datetime.utcnow(); db_job.result_message = error_msg
+            try: db.commit()
+            except: db.rollback()
+        self.update_state(state='FAILURE', meta={'status': error_msg, 'db_id': generation_job_db_id})
+        raise e # Re-raise
     finally:
         db.close()
 

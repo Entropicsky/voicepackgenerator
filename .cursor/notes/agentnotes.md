@@ -52,6 +52,7 @@ Ranking relies primarily on filesystem interactions (`metadata.json`, symlinks) 
 - Refactored to use Docker Compose for simpler setup/deployment.
 - Implement frontend ranking UI with 3-panel layout.
 - Implement line-scoped ranking logic in `RankingContext`.
+- **New Feature:** Implement line-level Speech-to-Speech (STS) generation using file upload.
 - Defer fixing Pytest environment issues (e.g., `mocker` fixture) until core functionality is complete.
 
 ## Current State / Next Steps
@@ -60,7 +61,8 @@ Ranking relies primarily on filesystem interactions (`metadata.json`, symlinks) 
 - Basic frontend structure with routing and API wrappers implemented.
 - Generation UI implemented and tested.
 - Ranking UI structure implemented (3 panels), line-scoped ranking logic added.
-- Next: Finish Ranking UI details, then address testing issues.
+- **Current:** Implementing line-level Speech-to-Speech feature (Phase 7b).
+- Next: Final testing & refinement, address deferred testing issues.
 
 ## GitHub Repo
 

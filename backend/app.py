@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 import zipfile
 import io
+import base64
 
 # Import celery app instance from root
 from celery_app import celery_app
@@ -191,11 +192,14 @@ def get_task_status(task_id):
 
 @app.route('/api/models', methods=['GET'])
 def get_models():
-    """Endpoint to get available TTS models from ElevenLabs."""
+    """Endpoint to get available models, supports capability filtering."""
+    capability = request.args.get('capability', None)
+    require_sts = capability == 'sts'
+    print(f"API Route /api/models received capability='{capability}', require_sts={require_sts}")
+    
     try:
-        # TODO: Add caching for this endpoint
-        models_list = utils_elevenlabs.get_available_models()
-        # Return relevant fields for the frontend
+        models_list = utils_elevenlabs.get_available_models(require_sts=require_sts)
+        
         model_options = [
             {"model_id": m.get('model_id'), "name": m.get('name')}
             for m in models_list if m.get('model_id') and m.get('name')
@@ -488,6 +492,101 @@ def regenerate_line(batch_id):
                  print(f"Failed to update job status after enqueue error: {db_err}")
                  db.rollback()
         return make_api_response(error="Failed to start line regeneration task", status_code=500)
+    finally:
+        db.close()
+
+@app.route('/api/batch/<batch_id>/speech_to_speech', methods=['POST'])
+def start_speech_to_speech_line(batch_id):
+    """Endpoint to start a line speech-to-speech task."""
+    if not request.is_json:
+        return make_api_response(error="Request must be JSON", status_code=400)
+
+    data = request.get_json()
+    required_keys = [
+        'line_key', 'source_audio_b64', 'num_new_takes', 
+        'target_voice_id', 'model_id', 'settings', 'replace_existing'
+    ]
+    if not all(key in data for key in required_keys):
+        missing = [key for key in required_keys if key not in data]
+        return make_api_response(error=f'Missing required keys for STS: {missing}', status_code=400)
+
+    line_key = data['line_key']
+    source_audio_b64 = data['source_audio_b64']
+    num_new_takes = data['num_new_takes']
+    target_voice_id = data['target_voice_id']
+    model_id = data['model_id']
+    settings = data['settings'] # Should contain stability, similarity_boost
+    replace_existing = data['replace_existing']
+    settings_json = json.dumps(settings)
+
+    # Basic validation
+    if not source_audio_b64 or not source_audio_b64.startswith('data:audio'):
+        return make_api_response(error='Invalid or missing source audio data (expecting base64 data URI)', status_code=400)
+    if not isinstance(num_new_takes, int) or num_new_takes <= 0:
+        return make_api_response(error='Invalid number of new takes', status_code=400)
+
+    # Extract raw base64 data
+    try:
+        header, encoded = source_audio_b64.split(';base64,', 1)
+        # audio_data_bytes = base64.b64decode(encoded)
+        # PASS base64 string directly to Celery task to avoid large memory usage here?
+        # Task can decode it.
+    except Exception as e:
+        print(f"Error decoding base64 audio: {e}")
+        return make_api_response(error='Failed to decode source audio data', status_code=400)
+
+    db: Session = next(models.get_db())
+    db_job = None
+    try:
+        # Check target batch exists
+        target_batch_dir = utils_fs.get_batch_dir(AUDIO_ROOT, batch_id)
+        if not target_batch_dir or not target_batch_dir.is_dir():
+             return make_api_response(error=f"Target batch '{batch_id}' not found for STS", status_code=404)
+        
+        # Create Job DB record
+        db_job = models.GenerationJob(
+            status="PENDING",
+            job_type="sts_line_regen", # Mark job type
+            target_batch_id=batch_id,
+            target_line_key=line_key,
+            parameters_json=json.dumps({ # Store specific STS params
+                 'target_voice_id': target_voice_id,
+                 'model_id': model_id,
+                 'num_new_takes': num_new_takes,
+                 'settings': settings,
+                 'replace_existing': replace_existing,
+                 'source_audio_info': header # Store mime type etc.
+            })
+        )
+        db.add(db_job)
+        db.commit()
+        db.refresh(db_job)
+        db_job_id = db_job.id
+        print(f"Created STS Line Job record with DB ID: {db_job_id}")
+
+        # Enqueue Celery task, pass base64 string
+        task = tasks.run_speech_to_speech_line.delay(
+            db_job_id, batch_id, line_key, source_audio_b64, 
+            num_new_takes, target_voice_id, model_id, settings_json, replace_existing
+        )
+        print(f"Enqueued STS line task: Celery ID {task.id}, DB Job ID {db_job_id}")
+
+        db_job.celery_task_id = task.id
+        db.commit()
+
+        return make_api_response(data={'task_id': task.id, 'job_id': db_job_id}, status_code=202)
+
+    except Exception as e:
+        print(f"Error submitting STS line job: {e}")
+        if db_job and db_job.id: # Attempt to mark DB job as failed
+            try:
+                 db_job.status = "SUBMIT_FAILED"
+                 db_job.result_message = f"Failed to enqueue Celery task: {e}"
+                 db.commit()
+            except Exception as db_err:
+                 print(f"Failed to update job status after enqueue error: {db_err}")
+                 db.rollback()
+        return make_api_response(error="Failed to start speech-to-speech task", status_code=500)
     finally:
         db.close()
 

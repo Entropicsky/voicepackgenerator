@@ -2,6 +2,7 @@
 import os
 import requests
 import time
+import json
 from typing import List, Dict, Any, Optional
 
 # Use V2 endpoint base FOR /voices, but keep V1 for TTS
@@ -66,23 +67,96 @@ def get_available_voices(
     except Exception as e:
         raise ElevenLabsError(f"An unexpected error occurred while fetching V2 voices: {e}") from e
 
-def get_available_models() -> List[Dict[str, Any]]:
-    """Fetches the list of available models from the V1 API."""
-    url = f"{ELEVENLABS_API_V1_URL}/models" # Use V1 models endpoint
+def get_available_models(require_sts: bool = False) -> List[Dict[str, Any]]:
+    """Fetches available models, optionally filtering for STS capability."""
+    url = f"{ELEVENLABS_API_V1_URL}/models"
+    print(f"Fetching models from {url}. Require STS: {require_sts}")
     try:
         response = requests.get(url, headers=get_headers())
         response.raise_for_status()
         all_models = response.json()
-        # Filter for models that can do TTS
-        tts_models = [
-            model for model in all_models 
-            if model.get('can_do_text_to_speech') and not model.get('requires_alpha_access')
-        ]
-        return tts_models
+        print(f"Received {len(all_models)} models from API.")
+        
+        filtered_models = []
+        for model in all_models:
+            model_id = model.get('model_id')
+            model_name = model.get('name')
+            can_tts = model.get('can_do_text_to_speech', False)
+            can_sts = model.get('can_do_voice_conversion', False) 
+            requires_alpha = model.get('requires_alpha_access', False)
+            
+            # Log details for each model
+            print(f"  - Model: {model_name} ({model_id}) | TTS: {can_tts} | STS: {can_sts} | Alpha: {requires_alpha}")
+            
+            if not model_id or not model_name or requires_alpha:
+                continue
+            
+            if require_sts:
+                if can_sts:
+                    print(f"    -> Including STS model: {model_name}")
+                    filtered_models.append(model)
+                # else: 
+                #     print(f"    -> Excluding non-STS model: {model_name}")
+            else: # require TTS
+                if can_tts:
+                    print(f"    -> Including TTS model: {model_name}")
+                    filtered_models.append(model)
+                # else:
+                #     print(f"    -> Excluding non-TTS model: {model_name}")
+                    
+        print(f"Returning {len(filtered_models)} filtered models.")
+        return filtered_models
     except requests.exceptions.RequestException as e:
         raise ElevenLabsError(f"Error fetching models from ElevenLabs API: {e}") from e
     except Exception as e:
         raise ElevenLabsError(f"An unexpected error occurred while fetching models: {e}") from e
+
+def run_speech_to_speech_conversion(
+    audio_data: bytes, 
+    target_voice_id: str, 
+    model_id: Optional[str], 
+    voice_settings: Optional[dict],
+    retries: int = 2, # Fewer retries for STS?
+    delay: int = 5
+) -> bytes:
+    """Performs Speech-to-Speech using the V1 API."""
+    # Default STS model if not provided
+    sts_model_id = model_id or "eleven_multilingual_sts_v2" 
+    
+    url = f"{ELEVENLABS_API_V1_URL}/speech-to-speech/{target_voice_id}"
+    headers = {'xi-api-key': get_api_key()} # No Content-Type needed for multipart
+    
+    files = {'audio': ('source_audio.wav', audio_data, 'audio/wav')} # Assuming WAV, adjust if needed
+    data: Dict[str, Any] = {'model_id': sts_model_id}
+    if voice_settings:
+        # STS settings need to be JSON string according to docs
+        data['voice_settings'] = json.dumps(voice_settings)
+
+    attempt = 0
+    while attempt < retries:
+        try:
+            print(f"Attempt {attempt + 1}/{retries}: Running STS for target voice {target_voice_id}...")
+            response = requests.post(url, headers=headers, data=data, files=files)
+
+            if response.status_code == 200:
+                print(f"Successfully ran STS for target voice {target_voice_id}")
+                return response.content # Return audio bytes
+            elif response.status_code == 429:
+                print(f"Rate limit hit during STS. Retrying in {delay} seconds...")
+                time.sleep(delay)
+            else:
+                response.raise_for_status() # Raise for other errors
+
+        except requests.exceptions.RequestException as e:
+            print(f"Error during STS (attempt {attempt + 1}): {e}")
+            if attempt == retries - 1:
+                 raise ElevenLabsError(f"Failed STS after {retries} attempts: {e}") from e
+        except Exception as e:
+             raise ElevenLabsError(f"An unexpected error occurred during STS: {e}") from e
+
+        attempt += 1
+
+    raise ElevenLabsError(f"Failed STS for target voice {target_voice_id} after {retries} attempts.")
 
 def generate_tts_audio(
     text: str,
