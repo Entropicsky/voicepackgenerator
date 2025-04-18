@@ -3,9 +3,11 @@ import {
   BrowserRouter as Router,
   Routes,
   Route,
-  Link,
+  NavLink,
   Navigate
 } from 'react-router-dom';
+import { AppShell, Burger, Group, Title } from '@mantine/core';
+import { useDisclosure } from '@mantine/hooks';
 import './App.css'
 
 // Assuming placeholder pages exist
@@ -15,36 +17,49 @@ import BatchesPage from './pages/BatchesPage';
 import RankingPage from './pages/RankingPage';
 
 function App() {
-  // Basic layout with navigation
+  const [opened, { toggle }] = useDisclosure();
+
+  // Define link style for NavLink
+  const linkStyle = ({ isActive }: { isActive: boolean }): React.CSSProperties => ({
+      display: 'block',
+      padding: '8px 12px',
+      borderRadius: '4px',
+      textDecoration: 'none',
+      color: isActive ? 'var(--mantine-color-blue-filled)' : 'var(--mantine-color-text)',
+      backgroundColor: isActive ? 'var(--mantine-color-blue-light)' : 'transparent',
+      fontWeight: isActive ? 500 : 400,
+  });
+
   return (
     <Router>
-      <div style={{ padding: '10px 20px' }}>
-        <h1>Voice Generation & Ranking Tool</h1>
-        <nav>
-          <ul style={{ listStyle: 'none', padding: 0, display: 'flex', gap: '15px' }}>
-            <li>
-              <Link to="/generate">Generate</Link>
-            </li>
-            <li>
-              <Link to="/jobs">Jobs</Link>
-            </li>
-            <li>
-              <Link to="/batches">Batches</Link>
-            </li>
-          </ul>
-        </nav>
+      <AppShell
+        header={{ height: 60 }}
+        navbar={{ width: 200, breakpoint: 'sm', collapsed: { mobile: !opened } }}
+        padding="md"
+      >
+        <AppShell.Header>
+          <Group h="100%" px="md">
+            <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
+            <Title order={3}>Voice Generation & Ranking</Title>
+          </Group>
+        </AppShell.Header>
 
-        <hr style={{ margin: '15px 0' }} />
+        <AppShell.Navbar p="md">
+          <NavLink to="/generate" style={linkStyle} onClick={toggle}>Generate</NavLink>
+          <NavLink to="/jobs" style={linkStyle} onClick={toggle}>Jobs</NavLink>
+          <NavLink to="/batches" style={linkStyle} onClick={toggle}>Batches</NavLink>
+        </AppShell.Navbar>
 
-        <Routes>
-          <Route path="/generate" element={<GenerationPage />} />
-          <Route path="/jobs" element={<JobsPage />} />
-          <Route path="/batches" element={<BatchesPage />} />
-          <Route path="/batch/:batchId" element={<RankingPage />} />
-          {/* Default route redirects to generate page */}
-          <Route path="*" element={<Navigate to="/generate" replace />} />
-        </Routes>
-      </div>
+        <AppShell.Main>
+          <Routes>
+            <Route path="/generate" element={<GenerationPage />} />
+            <Route path="/jobs" element={<JobsPage />} />
+            <Route path="/batches" element={<BatchesPage />} />
+            <Route path="/batch/:batchId" element={<RankingPage />} />
+            <Route path="*" element={<Navigate to="/generate" replace />} />
+          </Routes>
+        </AppShell.Main>
+      </AppShell>
     </Router>
   );
 }

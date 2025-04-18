@@ -33,7 +33,7 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
   const [error, setError] = useState<string | null>(null);
   const [takesByLine, setTakesByLine] = useState<Record<string, Take[]>>({});
   const [isLocked, setIsLocked] = useState<boolean>(false); // Track lock status
-  const [selectedLineKey, setSelectedLineKey] = useState<string | null>(null); // State for selected line
+  const [selectedLineKey, setSelectedLineKey] = useState<string | null>(null);
 
   // --- Fetch Metadata ---
   const fetchMetadata = useCallback(async () => {
@@ -47,13 +47,7 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
     try {
       const metadata: BatchMetadata = await api.getBatchMetadata(batchId);
       setBatchMetadata(metadata);
-
-      // Check lock status (might be redundant if metadata includes it, but good practice)
-      // This requires an `is_locked` field in the metadata or a separate API call.
-      // For now, assume metadata contains ranked_at_utc which implies locked.
       setIsLocked(metadata.ranked_at_utc !== null);
-
-      // Group takes by line
       const grouped: Record<string, Take[]> = {};
       for (const take of metadata.takes) {
         if (!grouped[take.line]) {
@@ -61,26 +55,34 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
         }
         grouped[take.line].push(take);
       }
-      // Ensure takes within each line are sorted initially (e.g., by take number)
       for (const line in grouped) {
         grouped[line].sort((a: Take, b: Take) => a.take_number - b.take_number);
       }
       setTakesByLine(grouped);
-      // DON'T auto-select line on refetch, keep current selection if possible
-      // setSelectedLineKey(Object.keys(grouped).sort()[0] || null);
-
     } catch (err: any) {
       setError(`Failed to load batch metadata: ${err.message}`);
       console.error(err);
     } finally {
       setLoading(false);
     }
-  }, [batchId]); // Dependency is just batchId
+  }, [batchId]);
 
-  // Call fetchMetadata on initial mount and when batchId changes
+  // Effect to fetch data on mount/batchId change
   useEffect(() => {
+    setSelectedLineKey(null); // Reset selected line when batch ID changes
     fetchMetadata();
-  }, [fetchMetadata]); // Use the memoized fetchMetadata
+  }, [fetchMetadata]);
+
+  // NEW Effect to auto-select the first line *after* data is loaded
+  useEffect(() => {
+    // Only run if not loading, no error, some lines exist, and no line is currently selected
+    if (!loading && !error && Object.keys(takesByLine).length > 0 && selectedLineKey === null) {
+      const firstLineKey = Object.keys(takesByLine).sort()[0];
+      console.log(`[RankingContext] Auto-selecting first line: ${firstLineKey}`);
+      setSelectedLineKey(firstLineKey);
+    }
+    // Dependencies: trigger when loading finishes or takesByLine data arrives
+  }, [loading, error, takesByLine, selectedLineKey, setSelectedLineKey]);
 
   // --- Rank Update Logic ---
   const updateApiRank = useCallback(async (updates: { file: string, rank: number | null }[]) => {
