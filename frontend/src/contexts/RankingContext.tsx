@@ -301,7 +301,6 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
     } else {
         // Handle ranking (1-5) within the line
         let rankToShift = newRank;
-        let currentTakeInLineIndex = lineTakesIndices.findIndex(({ take }) => take.file === file); // Index within lineTakes
 
         // Find if another take *within the same line* already has the target rank
         let takeToShiftLineIndex = lineTakesIndices.findIndex(({ take }) => take.rank === rankToShift && take.file !== file);

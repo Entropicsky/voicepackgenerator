@@ -1,8 +1,8 @@
 import React, { useState, useCallback } from 'react';
 import { api } from '../api';
 import { 
-    VoicePreview, CreateVoicePreviewPayload, SaveVoicePayload, 
-    VoiceOption, RichVoicePreview 
+    CreateVoicePreviewPayload, SaveVoicePayload, 
+    RichVoicePreview 
 } from '../types'; 
 import Slider from 'rc-slider'; 
 import 'rc-slider/assets/index.css';
@@ -43,7 +43,7 @@ const VoiceDesignPage: React.FC = () => {
 
   // --- Handlers ---
 
-  const handleGeneratePreviews = useCallback(async () => {
+  const handleGeneratePreviews = async () => {
     setError(null);
     setCurrentPreviews([]); 
     setGeneratedText('');
@@ -95,10 +95,7 @@ const VoiceDesignPage: React.FC = () => {
     } finally {
       setIsGenerating(false);
     }
-  }, [
-    voiceDescription, textToPreview, autoGenerateText, 
-    loudness, quality, guidanceScale, seed
-  ]);
+  };
 
   // NEW: Handler to move a preview from current to held
   const handleHoldPreview = (previewToHold: RichVoicePreview) => {

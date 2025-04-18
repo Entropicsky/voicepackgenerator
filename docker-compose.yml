@@ -62,15 +62,15 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      # Expose Vite dev server port
-      - "5173:5173"
+      # Map host 5173 to Nginx container port 80
+      - "5173:80"
     volumes:
-      # Mount local code into container for development hot-reloading
-      - ./frontend:/app
-      # Important: Prevent host node_modules from overwriting container's node_modules
-      - /app/node_modules
-    # depends_on:
-      # - backend # Usually not needed for Vite dev server with proxy
+      # **** VOLUME MUST BE COMMENTED OUT FOR STATIC BUILD ****
+      # - ./frontend:/app 
+      - /app/node_modules # Keep this isolated
+    # No command override needed, CMD in Dockerfile is used
+    depends_on: 
+      - backend
     restart: unless-stopped
 
 volumes:

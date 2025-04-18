@@ -172,3 +172,67 @@
 - [x] Update `.cursor/notes/agentnotes.md` and `notebook.md`.
 - [x] Commit changes frequently using conventional commit messages.
 - [ ] Run tests frequently via `docker-compose exec` (when tests are working).
+
+## Feature: Script Management
+
+*   [ ] **Phase 1: Project Setup & Foundation (Backend)**
+    *   [x] Initialize/Update `.cursor` Workspace (Checked structure, created spec)
+    *   [x] Define DB Models (`Script`, `ScriptLine`) in `backend/models.py`
+    *   [x] Implement DB initialization/migration for new models
+    *   [x] Implement `GET /api/scripts` endpoint
+    *   [x] Implement `GET /api/scripts/<script_id>` endpoint
+    *   [x] Implement `POST /api/scripts` endpoint (Create New & Import CSV)
+    *   [x] Implement `PUT /api/scripts/<script_id>` endpoint (Update metadata & lines)
+    *   [x] Implement `DELETE /api/scripts/<script_id>` endpoint
+    *   [x] Modify `POST /api/generate` to accept `script_id`
+    *   [x] Modify `tasks.run_generation` Celery task to handle `script_id`
+*   [ ] **Phase 2: Frontend Implementation**
+    *   [ ] Add script API functions to `frontend/src/api.ts`
+    *   [ ] Create `ScriptsPage.tsx` (`/scripts` route)
+    *   [ ] Create `ScriptEditor.tsx` component
+    *   [ ] Create script editor page/route (`/scripts/:scriptId`)
+    *   [ ] Update `GenerationPage.tsx`/`GenerationForm.tsx` with script selection UI
+    *   [ ] Add "Scripts" link to main navigation
+*   [ ] **Phase 3: Testing & Refinement**
+    *   [ ] Write backend unit & integration tests
+    *   [ ] Write frontend component & interaction tests
+    *   [ ] Perform E2E testing (including backward compatibility)
+    *   [ ] Update documentation (`agentnotes.md`, `notebook.md`, etc.)
+    *   [ ] Code review and cleanup
+
+## Phase 1: Script Management Backend & Basic UI
+
+- [x] Define DB Models (`Script`, `ScriptLine`)
+- [x] Implement Alembic Migrations
+- [x] Create CRUD API Endpoints (`/api/scripts`)
+    - [x] `POST /api/scripts` (Create empty script)
+    - [x] `GET /api/scripts` (List scripts - including archive filter)
+    - [x] `GET /api/scripts/{id}` (Get script details + lines)
+    - [x] `PUT /api/scripts/{id}` (Update name, description, replace lines)
+    - [x] `DELETE /api/scripts/{id}`
+    - [x] `PATCH /api/scripts/{id}/archive` (Toggle archive status)
+- [ ] Add API Endpoint for CSV Import (`POST /api/scripts/{id}/import`? or enhance `POST/PUT`? - TBD)
+- [x] Implement Basic Frontend Pages (`ManageScriptsPage`, `ScriptEditorPage`)
+    - [x] List scripts
+    - [x] Link to editor
+    - [x] Basic script editor (name, description, lines - manual add/delete/edit)
+    - [x] Implement Archive/Unarchive functionality (UI toggle, buttons, API calls)
+- [ ] Implement CSV Import/Export on Frontend
+- [ ] Testing (Backend API tests, basic UI interaction tests)
+
+## Phase 2: Integration with Generation
+
+- [ ] Modify GenerationConfig / API to accept `script_id`
+- [ ] Update Generation UI (`GenerationForm.tsx`) to allow selecting script from DB
+- [ ] Ensure backend `generate` endpoint uses lines from specified script ID
+- [ ] Testing (Generation job submission with script ID)
+
+## Known Issues / Future Work
+
+- [ ] Resolve Vite dev server instability on macOS Docker environment.
+    - *Current Workaround:* Using static build + Nginx proxy. Requires manual frontend build/restart (`docker compose build frontend && docker compose up -d --force-recreate frontend`) to see changes.
+- [ ] Implement drag-and-drop reordering for script lines.
+- [ ] Improve CSV import validation and error handling.
+- [ ] Add more comprehensive testing (unit, integration, e2e).
+- [ ] Refactor large components (e.g., `ScriptEditor`) if they become unwieldy.
+- [ ] Address remaining linter errors.

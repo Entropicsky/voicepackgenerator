@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
 
 // Simple polling hook
 // callback: function to call on each interval
 // interval: time in ms between calls (null to disable)
 function usePolling(callback: () => Promise<void>, interval: number | null) {
-  const savedCallback = useRef<() => Promise<void>>();
+  const savedCallback = useRef<(() => Promise<void>) | null>(null);
 
   // Remember the latest callback.
   useEffect(() => {

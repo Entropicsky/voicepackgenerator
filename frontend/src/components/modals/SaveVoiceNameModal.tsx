@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RichVoicePreview } from '../types'; // Assuming types are in ../types
+import { RichVoicePreview } from '../../types'; // Assuming types are in ../types
 
 interface SaveVoiceNameModalProps {
   isOpen: boolean;

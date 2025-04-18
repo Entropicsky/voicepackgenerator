@@ -56,7 +56,8 @@ export interface TaskStatus {
 export interface GenerationConfig {
   skin_name: string;
   voice_ids: string[];
-  script_csv_content: string;
+  script_csv_content?: string; // Make CSV optional
+  script_id?: number; // Add optional script ID
   variants_per_line: number;
   model_id?: string;
   // Use RANGES for randomization settings
@@ -170,3 +171,44 @@ export interface SaveVoicePayload {
 // or potentially map the necessary fields (like `voice_id`, `name`) 
 // to our existing `VoiceOption` type if sufficient.
 // For now, the `api.saveVoiceFromPreview` function can return `VoiceOption` or `any`.
+
+// --- Script Management Types ---
+
+export interface ScriptLine {
+  id: number;
+  script_id: number;
+  line_key: string;
+  text: string;
+  order_index: number;
+}
+
+// Represents a Script with its lines included
+export interface Script {
+  id: number;
+  name: string;
+  description: string | null;
+  created_at: string; // ISO 8601 format
+  updated_at: string; // ISO 8601 format
+  lines: ScriptLine[];
+}
+
+// Represents the metadata returned by listScripts or after create/update
+export interface ScriptMetadata {
+  id: number;
+  name: string;
+  description: string | null;
+  line_count: number;
+  is_archived: boolean;
+  created_at: string; // ISO 8601 format
+  updated_at: string; // ISO 8601 format
+}
+
+// Type for creating/updating lines via PUT /api/scripts/:id
+// Note: Does not include `id` or `script_id` as these are implicit or handled by backend
+export interface ScriptLineCreateOrUpdate {
+    line_key: string;
+    text: string;
+    order_index: number;
+}
+
+// --- END Script Management Types ---

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
-import { GenerationJob, TaskStatus, GenerationConfig } from '../types';
+import { GenerationJob, TaskStatus } from '../types';
 import { Button } from '@mantine/core';
 
 const JOB_LIST_REFRESH_INTERVAL = 15000; // Refresh full list every 15s

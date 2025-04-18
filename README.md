@@ -53,7 +53,7 @@ Built with Flask (backend API), Celery (background tasks), Redis (task queue), R
 └── README.md           # This file
 ```
 
-## Setup & Running (Docker Compose - Recommended)
+## Setup & Running (Docker Compose - Static Build)
 
 1.  **Prerequisites:**
     *   Docker Desktop installed and running.
@@ -79,46 +79,56 @@ Built with Flask (backend API), Celery (background tasks), Redis (task queue), R
 4.  **Build and Start Services:**
     *   From the project root directory, run:
         ```bash
-        docker-compose up --build -d
+        docker compose up --build -d
         ```
-    *   `--build` ensures images are built if they don't exist or if Dockerfiles have changed.
+    *   `--build` ensures images are built (including the frontend static build) if they don't exist or if Dockerfiles have changed.
     *   `-d` runs the containers in detached mode (in the background).
-    *   The first build might take a few minutes to download base images and install dependencies.
+    *   The first build might take a few minutes.
 
 5.  **Access the Application:**
     *   Open your web browser and navigate to `http://localhost:5173`.
-    *   The Flask API is accessible directly at `http://localhost:5001` (due to current port mapping).
+    *   The Flask API is accessible directly at `http://localhost:5001`.
 
 6.  **View Logs:**
     ```bash
-    docker-compose logs -f           # View logs for all services (follow)
-    docker-compose logs backend      # View logs for just the backend
-    docker-compose logs worker       # View logs for just the worker
+    docker compose logs -f           # View logs for all services (follow)
+    docker compose logs backend      # View logs for just the backend
+    docker compose logs worker       # View logs for just the worker
+    docker compose logs frontend     # View logs for the Nginx frontend proxy
     ```
 
 7.  **Stop Services:**
     ```bash
-    docker-compose down
+    docker compose down
     ```
-    *   To also remove the Redis data volume: `docker-compose down -v`
+    *   To also remove the Redis data volume: `docker compose down -v`
 
 ## Development
 
-*   **Code Changes:** Since the `backend` and `frontend` directories are mounted as volumes, code changes should be reflected automatically.
-    *   The Flask development server (`backend` service) should auto-reload on Python file changes.
-    *   The Vite development server (`frontend` service) supports Hot Module Replacement (HMR).
-    *   Changes to `celery_app.py` or `tasks.py` might require restarting the `worker` service: `docker-compose restart worker`.
-*   **Running Tests:** Execute tests inside the containers for consistency:
+*   **Backend Changes:** Since the project root (`.`) is mounted into the `backend` and `worker` containers, changes to Python files in the `backend` directory, `celery_app.py`, or `tasks.py` should trigger auto-reloading (Flask dev server) or be picked up on the next task (Celery worker - restart worker `docker compose restart worker` for immediate effect).
+*   **Frontend Changes (Static Build Workflow):**
+    *   The local `./frontend` directory is **NOT** mounted into the running `frontend` container in this configuration.
+    *   To see changes made to frontend code (React components, CSS, etc.):
+        1.  Make your code edits locally in the `./frontend` directory.
+        2.  Run `docker compose build frontend` in your terminal to rebuild the frontend image.
+        3.  Run `docker compose up -d --force-recreate frontend` to restart the frontend container with the new image.
+        4.  Hard refresh your browser (Cmd+Shift+R / Ctrl+Shift+R).
+*   **Running Tests:** Execute tests inside the containers:
     ```bash
     # Run backend tests
-    docker-compose exec backend pytest
+    docker compose exec backend pytest
 
-    # Run frontend tests
-    docker-compose exec frontend npm run test
+    # Run frontend tests (Requires dev dependencies - build image with dev stage if needed)
+    # docker compose exec frontend npm run test # This might not work easily with static build
+    # Consider running frontend tests locally: cd frontend && npm install && npm test
     ```
 *   **Adding Dependencies:**
-    *   Backend (Python): Add to `backend/requirements.txt`, then rebuild the image: `docker-compose build backend`.
-    *   Frontend (Node): Run `docker-compose exec frontend npm install <package-name>`.
+    *   Backend (Python): Add to `backend/requirements.txt`, then rebuild: `docker compose build backend`.
+    *   Frontend (Node): Add to `frontend/package.json`, then rebuild: `docker compose build frontend`.
+
+## Known Issues
+
+*   The Vite development server (`npm run dev`) has shown instability and file-watching issues when run within Docker on macOS. The current static build configuration is a stable workaround.
 
 ## Key Technologies
 

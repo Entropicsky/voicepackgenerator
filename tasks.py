@@ -16,10 +16,14 @@ import base64
 print("Celery Worker: Loading tasks.py...")
 
 @celery_app.task(bind=True, name='tasks.run_generation')
-def run_generation(self, generation_job_db_id: int, config_json: str):
+def run_generation(self, 
+                   generation_job_db_id: int, 
+                   config_json: str, 
+                   script_id: int | None = None, 
+                   script_csv_content: str | None = None):
     """Celery task to generate a batch of voice takes, updating DB status."""
     task_id = self.request.id
-    print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] Received generation task.")
+    print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] Received generation task. Script ID: {script_id}, CSV Provided: {script_csv_content is not None}")
     
     db: Session = next(models.get_db()) # Get DB session for this task execution
     db_job = None
@@ -45,7 +49,6 @@ def run_generation(self, generation_job_db_id: int, config_json: str):
         # --- Config Validation / Setup --- 
         skin_name = config['skin_name']
         voice_ids = config['voice_ids']
-        script_csv_content = config['script_csv_content']
         variants_per_line = config['variants_per_line']
         model_id = config.get('model_id', utils_elevenlabs.DEFAULT_MODEL)
         output_format = config.get('output_format', 'mp3_44100_128')
@@ -76,28 +79,62 @@ def run_generation(self, generation_job_db_id: int, config_json: str):
             raise Ignore()
         audio_root = Path(audio_root_str)
 
-        # --- Prepare Script Data ---
+        # --- Prepare Script Data --- MODIFIED ---
+        script_data = []
         try:
-            # Use csv.reader on the string content
-            lines = list(csv.reader(script_csv_content.splitlines()))
-            if not lines or len(lines[0]) < 2:
-                 raise ValueError("CSV content is empty or header missing/invalid")
-            header = [h.strip() for h in lines[0]]
-            # Assuming header columns are 'Function' and 'Line'
-            func_idx = header.index('Function')
-            line_idx = header.index('Line')
-            script_data = [
-                {'Function': row[func_idx].strip(), 'Line': row[line_idx].strip()}
-                for row in lines[1:] if len(row) > max(func_idx, line_idx)
-            ]
-            if not script_data:
-                 raise ValueError("No valid data rows found in CSV content")
+            if script_id is not None:
+                print(f"[Task ID: {task_id}] Fetching script lines from DB for script_id {script_id}")
+                # Need a *new* DB session within the task for this query? Or reuse the existing one?
+                # Let's reuse the existing one for now, ensure it's closed in finally.
+                lines_from_db = db.query(models.ScriptLine).filter(models.ScriptLine.script_id == script_id).order_by(models.ScriptLine.order_index).all()
+                if not lines_from_db:
+                    raise ValueError(f"No lines found in database for script_id {script_id}")
+                # Format into the expected list of dicts (assuming target format is {'Function': key, 'Line': text})
+                script_data = [
+                    {'Function': line.line_key, 'Line': line.text}
+                    for line in lines_from_db
+                ]
+                print(f"[Task ID: {task_id}] Loaded {len(script_data)} lines from DB script {script_id}")
+            
+            elif script_csv_content is not None:
+                print(f"[Task ID: {task_id}] Parsing script lines from provided CSV content")
+                # Use csv.reader on the string content
+                lines = list(csv.reader(script_csv_content.splitlines()))
+                if not lines or len(lines[0]) < 2:
+                     raise ValueError("CSV content is empty or header missing/invalid")
+                header = [h.strip() for h in lines[0]]
+                # Assuming header columns are 'Function' and 'Line' (Case-insensitive check?)
+                try:
+                    # Attempt to find columns, handle potential case issues
+                    header_lower = [h.lower() for h in header]
+                    func_idx = header_lower.index('function')
+                    line_idx = header_lower.index('line')
+                except ValueError:
+                     raise ValueError("CSV header must contain 'Function' and 'Line' columns")
+                
+                script_data = [
+                    {'Function': row[func_idx].strip(), 'Line': row[line_idx].strip()}
+                    for row in lines[1:] if len(row) > max(func_idx, line_idx) and row[func_idx].strip() # Ensure key isn't empty
+                ]
+                if not script_data:
+                     raise ValueError("No valid data rows found in CSV content")
+                print(f"[Task ID: {task_id}] Parsed {len(script_data)} lines from CSV.")
+            
+            else:
+                 # This case should have been prevented by the API endpoint validation
+                 raise ValueError("Task started without script_id or script_csv_content. This should not happen.")
+                 
         except (ValueError, IndexError, Exception) as e:
-            status_msg = f'Error parsing script CSV content: {e}'
+            status_msg = f'Error preparing script data: {e}'
             print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] {status_msg}")
             self.update_state(state='FAILURE', meta={'status': status_msg, 'db_id': generation_job_db_id})
-            from celery.exceptions import Ignore
-            raise Ignore()
+            # Mark DB job as failed here too?
+            db_job.status = "FAILURE"
+            db_job.completed_at = datetime.utcnow()
+            db_job.result_message = status_msg
+            db.commit()
+            raise Ignore() # Use Ignore to stop processing without retrying
+        # --- END SCRIPT DATA PREPARATION ---
 
         total_takes_to_generate = len(voice_ids) * len(script_data) * variants_per_line
         generated_takes_count = 0

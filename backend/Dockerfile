@@ -1,38 +1,45 @@
 # Use an official Python runtime as a parent image
-FROM python:3.11-slim
+FROM python:3.11-alpine
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 
-# Set work directory
+# Set the working directory in the container
 WORKDIR /app
 
-# Copy only necessary files for dependency installation first
+# Install system dependencies
+# Add git for potential VCS requirements in pip packages
+# Add sqlite for Flask-Migrate/Alembic support with SQLite
+RUN apk update && apk add --no-cache git sqlite
+
+# Install pip dependencies
+# Copy only requirements to leverage Docker cache
 COPY backend/requirements.txt .
-# If celery_app or tasks were needed at install time, copy them too
-# COPY celery_app.py .
-# COPY tasks.py .
+RUN pip install --no-cache-dir -r requirements.txt
 
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
-# No need for explicit pytest-mock install here if it's in requirements.txt
+# Copy the rest of the application code into the container
+# Copy the backend directory content into the WORKDIR (/app)
+COPY ./backend /app
 
-# Copy the rest of the application code
-# Copy backend specific code
-COPY ./backend /app/backend
-# Copy root files needed by worker/app
-COPY celery_app.py .
-COPY tasks.py .
-
-# Install the backend package itself in editable mode (still useful for discovery)
-# Needs setup.py at the context root (which is now project root)
-# Let's try WITHOUT installing for now, rely on PYTHONPATH
-# RUN pip install -e .
-
-# Expose port (for Flask)
+# Make port 5000 available to the world outside this container
+# Note: For production, consider using a different port or reverse proxy
 EXPOSE 5000
 
-# The default command will be specified in docker-compose.yml
-# For running Flask: flask --app app:app run --host=0.0.0.0 --port=5000
-# For running Celery: celery -A celery_app:celery_app worker --loglevel=INFO 
+# Define environment variable for Flask app entry point
+ENV FLASK_APP=app.py
+# Set FLASK_ENV to development for debugging, change to production later
+ENV FLASK_ENV=development 
+
+# Ensure the output directory exists
+RUN mkdir -p /app/output/audio
+
+# Create the database file if it doesn't exist and initialize schema
+# This RUN step ensures the DB exists before the CMD tries to access it
+# We touch the file first, then initialize.
+RUN touch /app/jobs.db && python -c 'from models import init_db; init_db()'
+
+# Run app.py when the container launches
+# Use gunicorn for potentially better performance/handling multiple workers
+# CMD ["python", "app.py"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app"] # Assuming 'app' is the Flask app instance in app.py 

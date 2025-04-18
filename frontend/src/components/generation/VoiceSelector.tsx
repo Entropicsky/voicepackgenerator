@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Checkbox, Table, Input, Select } from '@mantine/core';
-import { VoiceOption } from '../../types';
 import { useVoiceContext } from '../../contexts/VoiceContext';
 
 interface VoiceSelectorProps {
@@ -31,6 +30,10 @@ const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoices, onChange 
     }
   };
 
+  const handleFilterChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchTerm(event.target.value);
+  };
+
   const filteredAndSortedVoices = useMemo(() => {
     let filtered = voices;
 
@@ -44,13 +47,15 @@ const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoices, onChange 
       );
     }
 
-    const [sortKey, sortDir] = sortOrder.split('_');
+    const [_, sortDir] = sortOrder.split('_');
+    const direction = sortDir === 'asc' ? 1 : -1;
+
     filtered.sort((a, b) => {
         let valA = a.name.toLowerCase();
         let valB = b.name.toLowerCase();
         
-        if (valA < valB) return sortDir === 'asc' ? -1 : 1;
-        if (valA > valB) return sortDir === 'asc' ? 1 : -1;
+        if (valA < valB) return direction;
+        if (valA > valB) return -direction;
         return 0;
     });
 
@@ -78,7 +83,7 @@ const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoices, onChange 
         <Input 
           placeholder="Search voices..." 
           value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+          onChange={handleFilterChange}
           style={{ flexGrow: 1, minWidth: '150px' }}
         />
         <Select
@@ -93,6 +98,7 @@ const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoices, onChange 
           style={{ minWidth: '150px' }}
         />
          <Select
+          id="voice-sort-order"
           placeholder="Sort by"
           value={sortOrder}
           onChange={(value) => setSortOrder(value || 'name_asc')}

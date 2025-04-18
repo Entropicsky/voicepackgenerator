@@ -86,4 +86,38 @@ Ranking relies primarily on filesystem interactions (`metadata.json`, symlinks) 
 **TODO/Notes:**
 - Backend testing setup still needs resolution.
 - Placeholder `api.getLineTakes` function in `frontend/src/api.ts` needs to be replaced with a dedicated backend endpoint for efficiency when that's implemented.
-- Consider replacing `alert()` with Mantine notifications for better UX feedback. 
+- Consider replacing `alert()` with Mantine notifications for better UX feedback.
+
+## Script Management Feature (Ongoing)
+
+*   Started implementation of the Script Management feature as outlined in `.cursor/docs/script_management_spec.md`.
+*   Focus is on backend DB models and API endpoints first (Phase 1).
+*   Maintain backward compatibility with CSV generation path.
+
+## Frontend Setup Resolution (April 18, 2025 Session)
+
+**Problem:** UI changes (specifically Script Archive feature) were not reflecting in the browser, despite code changes.
+
+**Troubleshooting:**
+*   Initially suspected Docker volume mounts, build cache, dev server instability (SIGTERM errors). These were red herrings for the core UI update issue.
+*   Found and fixed a parameter type bug where `GenerationForm.tsx` incorrectly called `api.listScripts` with an object instead of a boolean.
+*   Isolated the frontend by running `npm run dev` locally, which *still* failed to show UI updates initially.
+*   Discovered a zombie Vite process blocking port 5173, causing the new server to use 5174.
+*   Even after fixing the port and clearing local Vite caches (`node_modules`, `.vite`), the local dev server remained unreliable in reflecting changes to `ManageScriptsPage.tsx` specifically.
+
+**Resolution:**
+*   Confirmed the parameter bug was fixed.
+*   Confirmed the code for the archive feature exists and is correct.
+*   Reverted to a **Static Build + Nginx Proxy** configuration within Docker as the stable solution.
+    *   `frontend/Dockerfile` uses a multi-stage build (`npm run build` then serves `/dist` with Nginx).
+    *   `frontend/nginx.conf` handles serving static files and proxying `/api` and `/audio` to the `backend` service (using runtime DNS resolution).
+    *   `docker-compose.yml` maps host port 5173 to Nginx container port 80 and **does not** mount the local `./frontend` directory.
+
+**Current Frontend Development Workflow:**
+*   Make code changes locally in `./frontend`.
+*   Run `docker compose build frontend` to rebuild the image with changes.
+*   Run `docker compose up -d --force-recreate frontend` to restart the container.
+*   Hard refresh the browser.
+
+**Known Issues:**
+*   The Vite development server (`npm run dev`) is unstable/unreliable within Docker on the development macOS machine, and also exhibited caching/file watching issues when run locally. Avoid using it for now. 

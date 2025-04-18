@@ -1,6 +1,6 @@
 # backend/models.py
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, JSON
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, JSON, ForeignKey, func, Boolean
+from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 from datetime import datetime
 import os
 
@@ -30,6 +30,38 @@ class GenerationJob(Base):
     job_type = Column(String, default="full_batch") # E.g., 'full_batch', 'line_regen'
     target_batch_id = Column(String, nullable=True) # For line_regen jobs
     target_line_key = Column(String, nullable=True) # For line_regen jobs
+
+# --- NEW: Script Management Models --- #
+
+class Script(Base):
+    __tablename__ = "scripts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False, unique=True, index=True)
+    description = Column(Text, nullable=True)
+    is_archived = Column(Boolean, nullable=False, default=False, server_default='false', index=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+
+    lines = relationship(
+        "ScriptLine", 
+        back_populates="script", 
+        cascade="all, delete-orphan", # Delete lines when script is deleted
+        order_by="ScriptLine.order_index" # Default ordering when accessing script.lines
+    )
+
+class ScriptLine(Base):
+    __tablename__ = "script_lines"
+
+    id = Column(Integer, primary_key=True)
+    script_id = Column(Integer, ForeignKey("scripts.id"), nullable=False, index=True)
+    line_key = Column(String(255), nullable=False)
+    text = Column(Text, nullable=False)
+    order_index = Column(Integer, nullable=False)
+
+    script = relationship("Script", back_populates="lines")
+
+# --- End Script Management Models --- #
 
 def init_db():
     """Create database tables."""

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { VoiceOption, ModelOption, SpeechToSpeechPayload, Take } from '../../types';
+import React, { useState, useEffect, useRef } from 'react';
+import { VoiceOption, ModelOption, SpeechToSpeechPayload } from '../../types';
 import { api } from '../../api';
 import Slider from 'rc-slider';
 import 'rc-slider/assets/index.css';

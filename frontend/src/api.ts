@@ -13,7 +13,11 @@ import {
   // NEW: Import Voice Design types
   CreateVoicePreviewPayload,
   CreateVoicePreviewResponse,
-  SaveVoicePayload
+  SaveVoicePayload,
+  // NEW: Import Script types (define these in types.ts next)
+  ScriptMetadata, 
+  Script, 
+  ScriptLineCreateOrUpdate
 } from './types';
 
 // Define options for filtering/sorting voices
@@ -39,6 +43,20 @@ interface RegenerateLinePayload {
     num_new_takes: number;
     settings: Partial<GenerationConfig>; // Only need TTS settings part
     replace_existing: boolean;
+}
+
+// NEW: Payload for creating a script
+interface CreateScriptPayload {
+    name: string;
+    description?: string | null;
+    csv_content?: string | null; // For importing
+}
+
+// NEW: Payload for updating a script
+interface UpdateScriptPayload {
+    name?: string;
+    description?: string | null;
+    lines?: ScriptLineCreateOrUpdate[]; // Array of lines to replace existing
 }
 
 // Helper to handle API responses and errors
@@ -197,6 +215,71 @@ export const api = {
     // return handleApiResponse<Take[]>(response);
   },
 
+  // --- NEW: Script Management --- //
+  listScripts: async (includeArchived: boolean = false): Promise<ScriptMetadata[]> => {
+    // **** ADDING DETAILED LOG HERE ****
+    console.log(`[API listScripts ENTRY] Received includeArchived =`, includeArchived, `(Type: ${typeof includeArchived})`);
+    // --- REVERT DEBUGGING --- 
+    // console.log(`[API listScripts] Type of includeArchived param: ${typeof includeArchived}`, includeArchived);
+    
+    // --- Restore Original URLSearchParams logic --- 
+    const queryParams = new URLSearchParams();
+    queryParams.append('include_archived', String(includeArchived));
+    const queryString = queryParams.toString();
+    const url = `${API_BASE}/api/scripts${queryString ? '?' + queryString : ''}`;
+    console.log("[API] Listing scripts from URL:", url); // Restore original log
+    // --- End Restore --- 
+
+    const response = await fetch(url); 
+    return handleApiResponse<ScriptMetadata[]>(response);
+  },
+
+  getScriptDetails: async (scriptId: number): Promise<Script> => {
+      const url = `${API_BASE}/api/scripts/${scriptId}`;
+      console.log(`[API] Getting script details for ID: ${scriptId}`);
+      const response = await fetch(url);
+      return handleApiResponse<Script>(response);
+  },
+
+  createScript: async (payload: CreateScriptPayload): Promise<ScriptMetadata> => {
+      const url = `${API_BASE}/api/scripts`;
+      console.log("[API] Creating script with payload:", payload);
+      const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+      });
+      // Backend returns { id, name, description, created_at, updated_at, line_count }
+      return handleApiResponse<ScriptMetadata>(response);
+  },
+
+  updateScript: async (scriptId: number, payload: UpdateScriptPayload): Promise<ScriptMetadata> => {
+      const url = `${API_BASE}/api/scripts/${scriptId}`;
+      console.log(`[API] Updating script ID ${scriptId} with payload:`, payload);
+      const response = await fetch(url, {
+          method: 'PUT',
+          headers: {
+              'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+      });
+       // Backend returns { id, name, description, created_at, updated_at }
+      return handleApiResponse<ScriptMetadata>(response);
+  },
+
+  deleteScript: async (scriptId: number): Promise<{ message: string }> => {
+      const url = `${API_BASE}/api/scripts/${scriptId}`;
+      console.log(`[API] Deleting script ID: ${scriptId}`);
+      const response = await fetch(url, {
+          method: 'DELETE',
+      });
+      // Backend returns { message: "..." }
+      return handleApiResponse<{ message: string }>(response);
+  },
+  // --- End Script Management --- //
+
   // --- NEW: Voice Design --- //
   createVoicePreviews: async (payload: CreateVoicePreviewPayload): Promise<CreateVoicePreviewResponse> => {
     const url = `${API_BASE}/api/voice-design/previews`;
@@ -242,5 +325,18 @@ export const api = {
     // Ensure relpath doesn't start with / if API_BASE is involved
     const cleanRelPath = relpath.startsWith('/') ? relpath.substring(1) : relpath;
     return `${API_BASE}/audio/${cleanRelPath}`;
-  }
+  },
+
+  // NEW: Toggle Archive Status
+  toggleScriptArchive: async (scriptId: number, archive: boolean): Promise<ScriptMetadata> => {
+    const url = `${API_BASE}/api/scripts/${scriptId}/archive`;
+    const response = await fetch(url, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ archive }),
+    });
+    return handleApiResponse<ScriptMetadata>(response);
+  },
 }; 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { GenerationConfig, Take, ModelOption } from '../../types';
 import { api } from '../../api';
 import Slider from 'rc-slider'; // Assuming rc-slider is installed
