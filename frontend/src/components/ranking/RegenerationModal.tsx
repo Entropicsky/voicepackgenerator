@@ -9,7 +9,7 @@ interface RegenerationModalProps {
   lineKey: string;
   currentTakes: Take[]; // Pass current takes to get initial text
   onClose: () => void;
-  onJobSubmitted: (jobId: number, taskId: string) => void; // Notify parent about new job
+  onRegenJobStarted: (lineKey: string, taskId: string) => void; 
 }
 
 // Defaults for the modal form
@@ -22,7 +22,7 @@ const DEFAULT_SPEAKER_BOOST = true;
 const DEFAULT_MODEL_ID = "eleven_multilingual_v2";
 
 const RegenerationModal: React.FC<RegenerationModalProps> = ({ 
-    batchId, lineKey, currentTakes, onClose, onJobSubmitted 
+    batchId, lineKey, currentTakes, onClose, onRegenJobStarted 
 }) => {
   const [lineText, setLineText] = useState<string>('');
   const [numTakes, setNumTakes] = useState<number>(DEFAULT_NUM_TAKES);
@@ -43,6 +43,22 @@ const RegenerationModal: React.FC<RegenerationModalProps> = ({
 
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Effect to handle Escape key press for closing the modal
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    // Cleanup function to remove the event listener
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose]); // Dependency array ensures the latest onClose is used
 
   // Pre-fill text area with the script text from the first take of the current line
   useEffect(() => {
@@ -113,7 +129,7 @@ const RegenerationModal: React.FC<RegenerationModalProps> = ({
             replace_existing: replaceExisting
         });
         console.log(`Line regeneration job submitted: DB ID ${response.job_id}, Task ID ${response.task_id}`);
-        onJobSubmitted(response.job_id, response.task_id);
+        onRegenJobStarted(lineKey, response.task_id);
         onClose(); // Close modal on success
     } catch (err: any) {
         console.error("Failed to submit regeneration job:", err);

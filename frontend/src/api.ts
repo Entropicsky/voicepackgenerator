@@ -4,12 +4,16 @@ import {
   GenerationConfig,
   GenerationStartResponse,
   TaskStatus,
-  BatchInfo,
   BatchMetadata,
   GenerationJob,
   BatchDetailInfo,
   ModelOption,
-  SpeechToSpeechPayload
+  SpeechToSpeechPayload,
+  Take,
+  // NEW: Import Voice Design types
+  CreateVoicePreviewPayload,
+  CreateVoicePreviewResponse,
+  SaveVoicePayload
 } from './types';
 
 // Define options for filtering/sorting voices
@@ -179,6 +183,57 @@ export const api = {
     });
     // Expects { data: { locked: true, message?: "..." } }
     return handleApiResponse<{ locked: boolean }>(response);
+  },
+
+  // NEW: Endpoint to get takes for a specific line
+  getLineTakes: async (batchId: string, lineKey: string): Promise<Take[]> => {
+    // TODO: Implement backend endpoint GET /api/batch/{batch_id}/line/{line_key}/takes
+    console.log(`[API Placeholder] Fetching takes for batch ${batchId}, line ${lineKey}`);
+    // Temporarily refetch all metadata and filter - replace with dedicated API call
+    const metadata = await api.getBatchMetadata(batchId); 
+    return metadata.takes.filter(take => take.line === lineKey);
+    // --- Replace above with dedicated API call when backend is ready ---
+    // const response = await fetch(`${API_BASE}/api/batch/${batchId}/line/${encodeURIComponent(lineKey)}/takes`);
+    // return handleApiResponse<Take[]>(response);
+  },
+
+  // --- NEW: Voice Design --- //
+  createVoicePreviews: async (payload: CreateVoicePreviewPayload): Promise<CreateVoicePreviewResponse> => {
+    const url = `${API_BASE}/api/voice-design/previews`;
+    console.log("[API] Creating voice previews with payload:", payload);
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+    });
+    // Expects { data: { previews: [...], text: "..." } }
+    return handleApiResponse<CreateVoicePreviewResponse>(response); 
+  },
+  
+  saveVoiceFromPreview: async (payload: SaveVoicePayload): Promise<VoiceOption> => {
+      const url = `${API_BASE}/api/voice-design/save`;
+      console.log("[API] Saving voice from preview with payload:", payload);
+      const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+      });
+      // Backend returns the full saved voice details. 
+      // We'll map it to VoiceOption for consistency with the rest of the UI for now.
+      // Might need a more detailed type later if more fields are needed.
+      const fullVoiceDetails = await handleApiResponse<any>(response);
+      console.log("[API] Received saved voice details:", fullVoiceDetails);
+      // Map the relevant fields to VoiceOption
+      return {
+          voice_id: fullVoiceDetails.voice_id,
+          name: fullVoiceDetails.name,
+          category: fullVoiceDetails.category, // Add other fields if needed/available
+          labels: fullVoiceDetails.labels 
+      };
   },
 
   // --- Audio --- //

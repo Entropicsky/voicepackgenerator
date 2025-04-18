@@ -15,6 +15,7 @@ import GenerationPage from './pages/GenerationPage';
 import JobsPage from './pages/JobsPage';
 import BatchesPage from './pages/BatchesPage';
 import RankingPage from './pages/RankingPage';
+import VoiceDesignPage from './pages/VoiceDesignPage';
 
 function App() {
   const [opened, { toggle }] = useDisclosure();
@@ -45,14 +46,16 @@ function App() {
         </AppShell.Header>
 
         <AppShell.Navbar p="md">
+          <NavLink to="/voice-design" style={linkStyle} onClick={toggle}>Voice Design</NavLink>
           <NavLink to="/generate" style={linkStyle} onClick={toggle}>Generate</NavLink>
           <NavLink to="/jobs" style={linkStyle} onClick={toggle}>Jobs</NavLink>
           <NavLink to="/batches" style={linkStyle} onClick={toggle}>Batches</NavLink>
         </AppShell.Navbar>
 
-        <AppShell.Main>
+        <AppShell.Main style={{ width: '100%', maxWidth: 'none' }}>
           <Routes>
             <Route path="/generate" element={<GenerationPage />} />
+            <Route path="/voice-design" element={<VoiceDesignPage />} />
             <Route path="/jobs" element={<JobsPage />} />
             <Route path="/batches" element={<BatchesPage />} />
             <Route path="/batch/:batchId" element={<RankingPage />} />

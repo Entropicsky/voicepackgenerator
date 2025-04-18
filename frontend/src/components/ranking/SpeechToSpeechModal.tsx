@@ -8,7 +8,7 @@ interface SpeechToSpeechModalProps {
   batchId: string;
   lineKey: string;
   onClose: () => void;
-  onJobSubmitted: (jobId: number, taskId: string) => void;
+  onRegenJobStarted: (lineKey: string, taskId: string) => void;
 }
 
 // Defaults
@@ -18,7 +18,7 @@ const DEFAULT_STABILITY = 0.5;
 const DEFAULT_SIMILARITY = 0.9;
 
 const SpeechToSpeechModal: React.FC<SpeechToSpeechModalProps> = ({ 
-    batchId, lineKey, onClose, onJobSubmitted 
+    batchId, lineKey, onClose, onRegenJobStarted 
 }) => {
   const [sourceAudioFile, setSourceAudioFile] = useState<File | null>(null);
   const [fileAudioB64, setFileAudioB64] = useState<string | null>(null);
@@ -51,6 +51,22 @@ const SpeechToSpeechModal: React.FC<SpeechToSpeechModalProps> = ({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const audioStreamRef = useRef<MediaStream | null>(null);
+
+  // Effect to handle Escape key press for closing the modal
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    // Cleanup function to remove the event listener
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose]); // Dependency array ensures the latest onClose is used
 
   // Fetch Voices
   useEffect(() => {
@@ -207,7 +223,7 @@ const SpeechToSpeechModal: React.FC<SpeechToSpeechModalProps> = ({
 
     try {
         const response = await api.startSpeechToSpeech(batchId, payload);
-        onJobSubmitted(response.job_id, response.task_id);
+        onRegenJobStarted(lineKey, response.task_id);
         onClose();
     } catch (err: any) {
         setSubmitError(`Submission failed: ${err.message}`);

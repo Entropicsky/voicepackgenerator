@@ -67,3 +67,23 @@ Ranking relies primarily on filesystem interactions (`metadata.json`, symlinks) 
 ## GitHub Repo
 
 - https://github.com/Entropicsky/voicepackgenerator 
+
+## Voice Design Feature (Implemented 2024-07-29)
+
+- Added a new page `/voice-design` for creating voices using ElevenLabs Voice Design API.
+- Implemented backend endpoints (`/api/voice-design/previews`, `/api/voice-design/save`) and corresponding utility functions (`utils_elevenlabs.py`).
+- Frontend UI allows users to:
+    - Enter voice description and preview text/settings.
+    - Generate multiple batches of previews.
+    - "Hold" promising previews across batches.
+    - Save specific "Held" previews with a custom name via a modal.
+- Integrated a `VoiceContext` to manage the global list of voices (`api.getVoices`).
+- Refactored `VoiceSelector` component to use `VoiceContext`.
+- Saving a new voice from the Voice Design page now triggers `refetchVoices` via the context, updating the `VoiceSelector` dynamically.
+- Addressed initial layout issues with `AppShell.Main` and flexbox columns.
+- Updated sidebar navigation order.
+
+**TODO/Notes:**
+- Backend testing setup still needs resolution.
+- Placeholder `api.getLineTakes` function in `frontend/src/api.ts` needs to be replaced with a dedicated backend endpoint for efficiency when that's implemented.
+- Consider replacing `alert()` with Mantine notifications for better UX feedback. 

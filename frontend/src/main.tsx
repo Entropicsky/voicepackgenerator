@@ -1,14 +1,17 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
+import React from 'react'
+import ReactDOM from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import { MantineProvider } from '@mantine/core'
 import '@mantine/core/styles.css'
+import { VoiceProvider } from './contexts/VoiceContext'
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
     <MantineProvider defaultColorScheme="auto">
-      <App />
+      <VoiceProvider>
+        <App />
+      </VoiceProvider>
     </MantineProvider>
-  </StrictMode>,
+  </React.StrictMode>,
 )

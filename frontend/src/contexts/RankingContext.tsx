@@ -1,8 +1,16 @@
 // frontend/src/contexts/RankingContext.tsx
-import React, { createContext, useState, useContext, useCallback, ReactNode, useEffect, useMemo } from 'react';
-import { BatchMetadata, Take } from '../types';
+import React, { createContext, useState, useContext, useCallback, ReactNode, useEffect, useMemo, useRef } from 'react';
+import { BatchMetadata, Take, TaskStatus } from '../types';
 import { api } from '../api';
 import useDebouncedCallback from '../hooks/useDebouncedCallback'; // Assuming a debounce hook
+
+// Define the structure for tracking line regeneration status
+interface LineRegenerationJobStatus {
+    taskId: string;
+    status: TaskStatus['status'] | 'SUBMITTED'; // Add SUBMITTED as initial client-side status
+    info?: any;
+    error?: string | null;
+}
 
 interface RankingContextType {
   batchMetadata: BatchMetadata | null;
@@ -16,6 +24,9 @@ interface RankingContextType {
   setSelectedLineKey: (lineKey: string | null) => void;
   currentLineRankedTakes: (Take | null)[]; // Index 0=Rank1, ..., 4=Rank5
   refetchMetadata: () => void;
+  // NEW: State and function for tracking line regenerations
+  lineRegenerationStatus: Record<string, LineRegenerationJobStatus>; 
+  startLineRegeneration: (lineKey: string, taskId: string) => void;
 }
 
 const RankingContext = createContext<RankingContextType | undefined>(undefined);
@@ -26,6 +37,7 @@ interface RankingProviderProps {
 }
 
 const DEBOUNCE_DELAY = 500; // ms to wait before sending PATCH request
+const LINE_REGEN_POLL_INTERVAL = 4000; // ms to poll for line regen status
 
 export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, children }) => {
   const [batchMetadata, setBatchMetadata] = useState<BatchMetadata | null>(null);
@@ -34,6 +46,9 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
   const [takesByLine, setTakesByLine] = useState<Record<string, Take[]>>({});
   const [isLocked, setIsLocked] = useState<boolean>(false); // Track lock status
   const [selectedLineKey, setSelectedLineKey] = useState<string | null>(null);
+  // NEW: State for line regeneration tracking
+  const [lineRegenerationStatus, setLineRegenerationStatus] = useState<Record<string, LineRegenerationJobStatus>>({}); 
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null); // Ref for interval ID
 
   // --- Fetch Metadata ---
   const fetchMetadata = useCallback(async () => {
@@ -70,6 +85,7 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
   // Effect to fetch data on mount/batchId change
   useEffect(() => {
     setSelectedLineKey(null); // Reset selected line when batch ID changes
+    setLineRegenerationStatus({}); // Clear regen status on batch change
     fetchMetadata();
   }, [fetchMetadata]);
 
@@ -83,6 +99,148 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
     }
     // Dependencies: trigger when loading finishes or takesByLine data arrives
   }, [loading, error, takesByLine, selectedLineKey, setSelectedLineKey]);
+
+  // --- NEW: Logic for handling line regeneration --- 
+
+  // Function to fetch takes for a specific line and update state
+  const fetchTakesForLine = useCallback(async (lineKey: string) => {
+      if (!batchId) return;
+      console.log(`[RankingContext] Fetching updated takes for line: ${lineKey}`);
+      try {
+          const updatedTakes = await api.getLineTakes(batchId, lineKey);
+          // Update the takesByLine state
+          setTakesByLine(prevTakes => ({
+              ...prevTakes,
+              [lineKey]: updatedTakes.sort((a, b) => a.take_number - b.take_number)
+          }));
+          // Update the batchMetadata state
+          setBatchMetadata((prevMeta: BatchMetadata | null) => {
+              if (!prevMeta) return null;
+              // Filter out old takes for this line, then add new ones
+              const otherTakes = prevMeta.takes.filter((t: Take) => t.line !== lineKey);
+              return {
+                  ...prevMeta,
+                  takes: [...otherTakes, ...updatedTakes]
+              };
+          });
+          console.log(`[RankingContext] Successfully updated takes for line: ${lineKey}`);
+      } catch (err: any) {
+          console.error(`[RankingContext] Failed to fetch takes for line ${lineKey}:`, err);
+          // Optionally surface this error to the user?
+          setError(`Failed to refresh takes for line ${lineKey}: ${err.message}`); 
+      }
+  }, [batchId]);
+
+  // Function called by modals to start tracking a new regen job
+  const startLineRegeneration = useCallback((lineKey: string, taskId: string) => {
+      console.log(`[RankingContext] Starting to track regeneration for line ${lineKey}, task ${taskId}`);
+      setLineRegenerationStatus(prev => ({
+          ...prev,
+          [lineKey]: { taskId, status: 'SUBMITTED', info: 'Job submitted', error: null }
+      }));
+      // Trigger polling immediately if not already running (or rely on useEffect dependency)
+  }, []);
+
+  // Polling effect for active line regenerations
+  useEffect(() => {
+    const activeRegens = Object.entries(lineRegenerationStatus)
+        .filter(([_, job]) => job.status !== 'SUCCESS' && job.status !== 'FAILURE');
+
+    const pollStatuses = async () => {
+        if (activeRegens.length === 0) {
+             if (pollingIntervalRef.current) {
+                 console.log("[RankingContext Polling] No active regenerations, clearing interval.");
+                 clearInterval(pollingIntervalRef.current);
+                 pollingIntervalRef.current = null;
+             }
+            return;
+        }
+        
+        console.log(`[RankingContext Polling] Checking status for ${activeRegens.length} active line regenerations...`);
+
+        const statusPromises = activeRegens.map(async ([lineKey, job]) => {
+            try {
+                const taskStatus = await api.getTaskStatus(job.taskId);
+                return { lineKey, taskStatus };
+            } catch (err: any) {
+                console.error(`[RankingContext Polling] Error fetching status for task ${job.taskId} (line ${lineKey}):`, err);
+                // Create a synthetic FAILURE status on fetch error
+                return { lineKey, taskStatus: { task_id: job.taskId, status: 'FAILURE', info: { error: `Failed to fetch status: ${err.message}` } } as TaskStatus };
+            }
+        });
+
+        const results = await Promise.all(statusPromises);
+
+        let needsTakeRefresh: string[] = [];
+        let stateUpdates: Record<string, LineRegenerationJobStatus> = {};
+        let stillActive = false;
+
+        results.forEach(({ lineKey, taskStatus }) => {
+            const currentStatus = lineRegenerationStatus[lineKey];
+            // Only update if status actually changed
+            if (currentStatus && currentStatus.status !== taskStatus.status) {
+                console.log(`[RankingContext Polling] Status update for line ${lineKey} (Task ${taskStatus.task_id}): ${currentStatus.status} -> ${taskStatus.status}`);
+                stateUpdates[lineKey] = {
+                    taskId: taskStatus.task_id,
+                    status: taskStatus.status,
+                    info: taskStatus.info,
+                    error: taskStatus.status === 'FAILURE' ? (taskStatus.info?.error || 'Unknown error') : null
+                };
+
+                if (taskStatus.status === 'SUCCESS') {
+                    needsTakeRefresh.push(lineKey);
+                } else if (taskStatus.status !== 'FAILURE') {
+                    stillActive = true; // Mark that polling should continue
+                }
+            } else if (currentStatus && currentStatus.status !== 'SUCCESS' && currentStatus.status !== 'FAILURE'){
+                 stillActive = true; // Mark that polling should continue if unchanged and not terminal
+            }
+        });
+
+        if (Object.keys(stateUpdates).length > 0) {
+            setLineRegenerationStatus(prev => ({
+                ...prev,
+                ...stateUpdates
+            }));
+        }
+
+        if (needsTakeRefresh.length > 0) {
+            console.log(`[RankingContext Polling] Triggering take refresh for lines: ${needsTakeRefresh.join(', ')}`);
+            // Trigger fetches sequentially for now
+            for (const lineKey of needsTakeRefresh) {
+                await fetchTakesForLine(lineKey);
+                // Optionally clear the status after successful refresh
+                // setLineRegenerationStatus(prev => {
+                //     const newState = { ...prev };
+                //     delete newState[lineKey];
+                //     return newState;
+                // });
+            }
+        }
+         
+        // If no tasks are active anymore after the updates, clear interval
+        if (!stillActive && pollingIntervalRef.current) {
+            console.log("[RankingContext Polling] All regenerations terminal, clearing interval.");
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+        }
+    };
+
+    // Setup interval if there are active regenerations and no interval is running
+    if (activeRegens.length > 0 && !pollingIntervalRef.current) {
+        console.log("[RankingContext Polling] Active regenerations detected, setting up interval.");
+        pollingIntervalRef.current = setInterval(pollStatuses, LINE_REGEN_POLL_INTERVAL);
+    }
+
+    // Cleanup function
+    return () => {
+        if (pollingIntervalRef.current) {
+            console.log("[RankingContext Polling] Cleanup: Clearing interval.");
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+        }
+    };
+  }, [lineRegenerationStatus, fetchTakesForLine, batchId]); // Dependencies: re-run when status changes or batchId changes
 
   // --- Rank Update Logic ---
   const updateApiRank = useCallback(async (updates: { file: string, rank: number | null }[]) => {
@@ -239,7 +397,10 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
     selectedLineKey,
     setSelectedLineKey,
     currentLineRankedTakes,
-    refetchMetadata: fetchMetadata
+    refetchMetadata: fetchMetadata,
+    // NEW: Expose regeneration state and trigger function
+    lineRegenerationStatus,
+    startLineRegeneration 
   };
 
   return <RankingContext.Provider value={value}>{children}</RankingContext.Provider>;

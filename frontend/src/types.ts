@@ -86,6 +86,28 @@ export interface BatchDetailInfo {
 
 // ... Take, BatchMetadata ...
 
+// Add back missing definitions
+export interface Take {
+  file: string;
+  line: string;
+  take_number: number;
+  script_text: string | null;
+  rank: number | null;
+  ranked_at: string | null; // ISO string timestamp
+  // Add other fields if needed based on metadata.json structure
+}
+
+export interface BatchMetadata {
+  batch_id: string;
+  skin_name: string;
+  voice_name: string;
+  generated_at_utc: string; // ISO string timestamp
+  ranked_at_utc: string | null; // ISO string timestamp or null
+  takes: Take[];
+  // Include generation_params if needed
+  generation_params?: any; // Use a more specific type if available
+}
+
 // Payload for STS request
 export interface SpeechToSpeechPayload {
     line_key: string;
@@ -99,3 +121,52 @@ export interface SpeechToSpeechPayload {
     };
     replace_existing: boolean;
 }
+
+// --- NEW: Voice Design Types --- //
+
+// Payload for creating voice previews
+export interface CreateVoicePreviewPayload {
+  voice_description: string; // Required (20-1000 chars)
+  text?: string; // Optional (100-1000 chars) - required if auto_generate_text is false
+  auto_generate_text?: boolean; // Optional (defaults to false)
+  loudness?: number; // Optional (-1 to 1)
+  quality?: number; // Optional (-1 to 1)
+  seed?: number; // Optional (integer >= 0)
+  guidance_scale?: number; // Optional (0-100)
+  output_format?: string; // Optional (defaults mp3_44100_128)
+}
+
+// Structure of a single preview returned by the API
+export interface VoicePreview {
+  audio_base_64: string;
+  generated_voice_id: string;
+  media_type?: string; // e.g., "audio/mpeg"
+  duration_secs?: number;
+  // Add other fields if the API returns more useful info
+}
+
+// NEW: Extended preview type to include the description that generated it
+export interface RichVoicePreview extends VoicePreview {
+  originalDescription: string;
+}
+
+// Response structure from the create previews endpoint
+export interface CreateVoicePreviewResponse {
+  previews: VoicePreview[];
+  text: string; // The text used for generation (either provided or auto-generated)
+}
+
+// Payload for saving a selected voice preview
+export interface SaveVoicePayload {
+  generated_voice_id: string; // Required
+  voice_name: string; // Required
+  voice_description: string; // Required (20-1000 chars)
+  labels?: Record<string, string>; // Optional
+}
+
+// NOTE: The response from saving a voice (`/api/voice-design/save`)
+// returns the full ElevenLabs voice object structure.
+// We can either create a detailed interface for this (`DesignedVoiceDetail`?)
+// or potentially map the necessary fields (like `voice_id`, `name`) 
+// to our existing `VoiceOption` type if sufficient.
+// For now, the `api.saveVoiceFromPreview` function can return `VoiceOption` or `any`.

@@ -4,16 +4,24 @@ import TakeRow from './TakeRow';
 import { Take } from '../../types';
 import RegenerationModal from './RegenerationModal';
 import SpeechToSpeechModal from './SpeechToSpeechModal';
-import { useNavigate } from 'react-router-dom';
 
 // This component is no longer responsible for rendering takes,
 // as RankSlots handles grouping and rendering by rank.
 // It might be used later for other line-based info or filtering.
 const CurrentLineTakes: React.FC = () => {
-  const { takesByLine, selectedLineKey, batchMetadata } = useRanking();
+  const { 
+      takesByLine, 
+      selectedLineKey, 
+      batchMetadata, 
+      lineRegenerationStatus,
+      startLineRegeneration
+  } = useRanking();
   const [showRegenModal, setShowRegenModal] = useState<boolean>(false);
   const [showStsModal, setShowStsModal] = useState<boolean>(false);
-  const navigate = useNavigate();
+
+  // Get the current regeneration status for the selected line
+  const currentRegenJob = selectedLineKey ? lineRegenerationStatus[selectedLineKey] : null;
+  const isRegenerating = !!currentRegenJob && currentRegenJob.status !== 'SUCCESS' && currentRegenJob.status !== 'FAILURE';
 
   // Handle opening the modal
   const handleOpenRegenModal = () => {
@@ -37,10 +45,12 @@ const CurrentLineTakes: React.FC = () => {
     setShowStsModal(false);
   };
 
-  // Handle job submission notification from modal
-  const handleJobSubmitted = (jobId: number, taskId: string) => {
-    console.log(`New job ${jobId} submitted (task ${taskId}). Navigating to jobs page.`);
-    navigate('/jobs');
+  // NEW handler passed to modals
+  const handleRegenJobStarted = (lineKey: string, taskId: string) => {
+    startLineRegeneration(lineKey, taskId);
+    // Close the modal after submission is initiated
+    setShowRegenModal(false);
+    setShowStsModal(false);
   };
 
   // Handle no line selected state
@@ -60,12 +70,26 @@ const CurrentLineTakes: React.FC = () => {
       <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap'}}>
           <h3>Takes for Line: {selectedLineKey}</h3>
           <div>
-              <button onClick={handleOpenRegenModal} title={`Regenerate takes for line ${selectedLineKey}`} style={{marginRight: '10px'}}>
-                  🔄 Regenerate (TTS)...
-              </button>
-               <button onClick={handleOpenStsModal} title={`Generate takes using Speech-to-Speech for line ${selectedLineKey}"}`}>
-                  🎤 Speech-to-Speech...
-              </button>
+              {/* Conditionally render status or buttons */} 
+              {isRegenerating ? (
+                  <div style={{ fontStyle: 'italic', color: 'blue', padding: '5px 10px', border: '1px solid blue', borderRadius: '4px' }}>
+                      🔄 Regenerating... ({currentRegenJob?.status})
+                      {currentRegenJob?.info?.status && <small> ({currentRegenJob.info.status})</small>}
+                  </div>
+              ) : currentRegenJob?.status === 'FAILURE' ? (
+                   <div style={{ fontStyle: 'italic', color: 'red', padding: '5px 10px', border: '1px solid red', borderRadius: '4px' }}>
+                      ❌ Regeneration Failed: {currentRegenJob?.error || 'Unknown error'}
+                   </div>
+              ) : (
+                 <>
+                      <button onClick={handleOpenRegenModal} title={`Regenerate takes for line ${selectedLineKey}`} style={{marginRight: '10px'}} disabled={isRegenerating}>
+                          🔄 Regenerate (TTS)...
+                      </button>
+                      <button onClick={handleOpenStsModal} title={`Generate takes using Speech-to-Speech for line ${selectedLineKey}"}`} disabled={isRegenerating}>
+                          🎤 Speech-to-Speech...
+                      </button>
+                  </>
+              )}
           </div>
       </div>
       {currentLineTakes.length === 0 ? (
@@ -86,7 +110,7 @@ const CurrentLineTakes: React.FC = () => {
               lineKey={selectedLineKey}
               currentTakes={currentLineTakes}
               onClose={handleCloseRegenModal}
-              onJobSubmitted={handleJobSubmitted}
+              onRegenJobStarted={handleRegenJobStarted}
           />
       )}
       {showStsModal && selectedLineKey && batchMetadata && (
@@ -94,7 +118,7 @@ const CurrentLineTakes: React.FC = () => {
               batchId={batchMetadata.batch_id}
               lineKey={selectedLineKey}
               onClose={handleCloseStsModal}
-              onJobSubmitted={handleJobSubmitted}
+              onRegenJobStarted={handleRegenJobStarted}
           />
       )}
     </div>

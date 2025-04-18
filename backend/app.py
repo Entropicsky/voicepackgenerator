@@ -72,7 +72,6 @@ def get_voices():
     voice_type = request.args.get('voice_type', None)
     sort = request.args.get('sort', None)
     sort_direction = request.args.get('sort_direction', None)
-    page_size = request.args.get('page_size', 100, type=int)
     next_page_token = request.args.get('next_page_token', None)
     print(f"API Route /api/voices received search='{search}'")
 
@@ -83,7 +82,6 @@ def get_voices():
             voice_type=voice_type,
             sort=sort,
             sort_direction=sort_direction,
-            page_size=page_size,
             next_page_token=next_page_token
         )
         # V2 response includes more details, potentially filter/map here if needed
@@ -589,6 +587,91 @@ def start_speech_to_speech_line(batch_id):
         return make_api_response(error="Failed to start speech-to-speech task", status_code=500)
     finally:
         db.close()
+
+# --- NEW: Voice Design API Endpoints --- #
+
+@app.route('/api/voice-design/previews', methods=['POST'])
+def create_voice_design_previews():
+    """Endpoint to generate voice previews based on description and settings."""
+    if not request.is_json:
+        return make_api_response(error="Request must be JSON", status_code=400)
+
+    data = request.get_json()
+    
+    # Extract parameters from request data
+    voice_description = data.get('voice_description')
+    text = data.get('text')
+    auto_generate_text = data.get('auto_generate_text', False)
+    loudness = data.get('loudness')
+    quality = data.get('quality')
+    seed = data.get('seed')
+    guidance_scale = data.get('guidance_scale')
+    output_format = data.get('output_format', 'mp3_44100_128')
+
+    if not voice_description:
+         return make_api_response(error="Missing required field: voice_description", status_code=400)
+
+    try:
+        previews, generated_text = utils_elevenlabs.create_voice_previews(
+            voice_description=voice_description,
+            text=text,
+            auto_generate_text=auto_generate_text,
+            loudness=loudness,
+            quality=quality,
+            seed=seed,
+            guidance_scale=guidance_scale,
+            output_format=output_format
+        )
+        return make_api_response(data={"previews": previews, "text": generated_text})
+    except ValueError as ve:
+        # Catch validation errors from the utility function
+        print(f"Validation error creating voice previews: {ve}")
+        return make_api_response(error=str(ve), status_code=400)
+    except utils_elevenlabs.ElevenLabsError as e:
+        print(f"ElevenLabs API error creating voice previews: {e}")
+        # Determine appropriate status code based on error? (e.g., 422 for validation)
+        status_code = 422 if "validation failed" in str(e).lower() else 500
+        return make_api_response(error=str(e), status_code=status_code)
+    except Exception as e:
+        print(f"Unexpected error creating voice previews: {e}")
+        return make_api_response(error="Failed to create voice previews", status_code=500)
+
+@app.route('/api/voice-design/save', methods=['POST'])
+def save_voice_design_preview():
+    """Endpoint to save a selected voice preview to the library."""
+    if not request.is_json:
+        return make_api_response(error="Request must be JSON", status_code=400)
+
+    data = request.get_json()
+    generated_voice_id = data.get('generated_voice_id')
+    voice_name = data.get('voice_name')
+    voice_description = data.get('voice_description')
+    labels = data.get('labels') # Optional
+
+    if not all([generated_voice_id, voice_name, voice_description]):
+        missing = [k for k, v in {'generated_voice_id': generated_voice_id, 'voice_name': voice_name, 'voice_description': voice_description}.items() if not v]
+        return make_api_response(error=f"Missing required fields: {missing}", status_code=400)
+        
+    try:
+        saved_voice_details = utils_elevenlabs.save_generated_voice(
+            generated_voice_id=generated_voice_id,
+            voice_name=voice_name,
+            voice_description=voice_description,
+            labels=labels
+        )
+        # Maybe map this response to our VoiceOption type before sending?
+        # For now, just return the full details.
+        return make_api_response(data=saved_voice_details)
+    except ValueError as ve:
+        print(f"Validation error saving voice: {ve}")
+        return make_api_response(error=str(ve), status_code=400)
+    except utils_elevenlabs.ElevenLabsError as e:
+        print(f"ElevenLabs API error saving voice: {e}")
+        status_code = 422 if "validation failed" in str(e).lower() else 500
+        return make_api_response(error=str(e), status_code=status_code)
+    except Exception as e:
+        print(f"Unexpected error saving voice: {e}")
+        return make_api_response(error="Failed to save voice", status_code=500)
 
 # --- Audio Streaming Endpoint --- #
 

@@ -4,174 +4,6 @@
 
 _**User**_
 
-is this right? 
-
----
-
-_**Assistant**_
-
-
-
----
-
-Yes, that image from Docker Desktop showing the `voicepackgenerator-backend`, `voicepackgenerator-frontend`, and `voicepackgenerator-worker` images built and "In use" is exactly what we expect to see!
-
-It confirms that:
-
-1.  The `docker-compose up --build` command successfully built the images defined in our `Dockerfile`s.
-2.  Docker Compose started containers based on these images, which is why they are marked as "In use".
-
-**This is a great sign!** It means the setup phase seems to have completed correctly this time.
-
-**Next Step: Verification**
-
-Now, please try accessing the frontend application in your web browser at:
-
-`http://localhost:5173`
-
-You should see the default Vite + React starter page, and importantly, look for the "Backend Status:" message. It should hopefully update from "Pinging backend..." to "pong from Flask!", indicating the frontend can successfully communicate with the backend service via the proxy.
-
-Let me know if it works! If it does, we can mark Phase 0 as complete and move on to Phase 1.
-
----
-
-_**User**_
-
-this does not work http://localhost:5173
-
----
-
-_**Assistant**_
-
-
-
----
-
-Okay, if `http://localhost:5173` isn't loading, let's check the status of the containers.
-
-First, I'll run `docker-compose ps` to see if the `frontend` service (and others) are listed as "Up" or if they exited.
-
----
-
-```bash
-docker-compose ps
-```
-
-```
-stewchisam@Stews-MacBook-Pro voicepackgenerator % docker-compose ps
-NAME                            IMAGE                         COMMAND                  SERVICE             C
-REATED             STATUS              PORTS
-voicepackgenerator-frontend-1   voicepackgenerator-frontend   "docker-entrypoint.s…"   frontend            3
- minutes ago       Up About a minute   0.0.0.0:5173->5173/tcp
-stewchisam@Stews-MacBook-Pro voicepackgenerator %
-```
-
----
-
-That's interesting. It seems only the `frontend-1` container is currently running. The `backend`, `worker`, and `redis` containers are missing from the `docker-compose ps` output. This suggests they likely exited due to an error shortly after starting, even though the `docker-compose up` command might have continued running in the background initially.
-
-The most common reason for the backend/worker to fail silently after startup is often related to connecting to Redis, environment variable issues, or Python import errors.
-
-Let's look at the logs specifically for the services that aren't running. I'll start with the `backend` service logs.
-
----
-
-```bash
-docker-compose logs backend
-```
-
-```
-stewchisam@Stews-MacBook-Pro voicepackgenerator % 
-
-```
-
----
-
-No logs for the `backend` service. This usually means it either never started correctly or exited very early without logging much. Let's check the `worker` logs.
-
----
-
-```bash
-docker-compose logs worker
-```
-
-```
-stewchisam@Stews-MacBook-Pro voicepackgenerator % 
-
-```
-
----
-
-No logs for the `worker` either. How about `redis`?
-
----
-
-```bash
-docker-compose logs redis
-```
-
-```
-stewchisam@Stews-MacBook-Pro voicepackgenerator % 
-
-```
-
----
-
-Okay, this is strange. Only the `frontend` container seems to be running according to `docker-compose ps`, and `docker-compose logs` isn't showing anything for the others.
-
-This suggests the `backend`, `worker`, and `redis` containers might have failed during the *initial* `docker-compose up` that had the port conflict error for Redis. When Docker Compose encounters an error starting one service (like Redis due to the port conflict), it might prevent dependent services (backend, worker) from starting properly, or it might start them and then stop everything when the initial command exits.
-
-**Let's try a clean start:**
-
-1.  **Bring Everything Down:** Use `docker-compose down` to ensure all containers defined in the file are stopped and removed.
-2.  **Start Fresh:** Use `docker-compose up` (we can omit `--build` this time as the images exist) to start the services again, now that the port 6379 conflict is resolved.
-
-I'll run `docker-compose down` first.
-
----
-
-```bash
-docker-compose down
-```
-
-```
-stewchisam@Stews-MacBook-Pro voicepackgenerator % docker-compose down
-[+] Running 5/5
- ✔ Container voicepackgenerator-frontend-1  Removed                                                    0.1s 
- ✔ Container voicepackgenerator-backend-1   Removed                                                    0.0s 
- ✔ Container voicepackgenerator-worker-1    Removed                                                    0.0s 
- ✔ Container voicepackgenerator-redis-1     Removed                                                    0.0s 
- ✔ Network voicepackgenerator_default       Removed                                                    0.1s 
-stewchisam@Stews-MacBook-Pro voicepackgenerator %
-```
-
----
-
-Okay, all containers are stopped and removed.
-
-Now, let's try starting them again cleanly.
-
----
-
-```bash
-docker-compose up
-```
-
----
-
-The services should be starting now.
-
-Please give it ~15-30 seconds to initialize everything, and then:
-
-1.  Check the terminal output where `docker-compose up` is running. Look for startup logs from `redis`, `backend`, `worker`, and `frontend`. Ensure there are no obvious errors.
-2.  Try accessing `http://localhost:5173` in your browser.
-
-Let me know if the frontend loads and if the backend status updates to "pong from Flask!".
-
----
-
-_**User**_
-
 errro 
 
 ---
@@ -27397,6 +27229,160 @@ WHen I first go into the page for a batch, no line is selected. We should defaul
 _**Assistant**_
 
 
+
+---
+
+You're absolutely right. It's inconvenient to have to click the first line manually every time you load a batch. The application should default to selecting the first available line.
+
+Looking at the `RankingContext.tsx` code, I actually put the logic in place to do this already within the `useEffect` that fetches the metadata:
+
+```javascript
+// Inside useEffect -> fetchMetadata -> try block:
+          // ... (grouping logic) ...
+          setTakesByLine(grouped);
+          // Auto-select the first line if available
+          const firstLineKey = Object.keys(grouped).sort()[0]; // Gets the first key after sorting
+          setSelectedLineKey(firstLineKey || null); // Sets the state
+// ...
+```
+
+This code *should* find the first alphabetical line key after the data is fetched and grouped, and then update the `selectedLineKey` state. The fact that you're still seeing the "Select a Line" message indicates this state update isn't happening correctly or isn't causing the components to re-render with the selected line immediately.
+
+It might be a timing issue where the component renders before the state update fully propagates, or perhaps the initial `null` state isn't being properly overwritten.
+
+Let's try making this more robust by moving the initial line selection into its own `useEffect` hook that *depends* on `takesByLine` being populated. This ensures the data is definitely available before we try to select the first line.
+
+**Modify `RankingContext.tsx`:**
+
+---
+
+```diff
+    const [takesByLine, setTakesByLine] = useState<Record<string, Take[]>>({});
+    const [isLocked, setIsLocked] = useState<boolean>(false); // Track lock status
+-   const [selectedLineKey, setSelectedLineKey] = useState<string | null>(null); // State for selected line
++   const [selectedLineKey, setSelectedLineKey] = useState<string | null>(null);
+  
+    // --- Fetch Metadata ---
+        const metadata: BatchMetadata = await api.getBatchMetadata(batchId);
+        setBatchMetadata(metadata);
+- 
+-       // Check lock status (might be redundant if metadata includes it, but good practice)
+-       // This requires an `is_locked` field in the metadata or a separate API call.
+-       // For now, assume metadata contains ranked_at_utc which implies locked.
+        setIsLocked(metadata.ranked_at_utc !== null);
+- 
+-       // Group takes by line
+        const grouped: Record<string, Take[]> = {};
+        for (const take of metadata.takes) {
+          grouped[take.line].push(take);
+        }
+-       // Ensure takes within each line are sorted initially (e.g., by take number)
+        for (const line in grouped) {
+          grouped[line].sort((a: Take, b: Take) => a.take_number - b.take_number);
+        }
+        setTakesByLine(grouped);
+-       // DON'T auto-select line on refetch, keep current selection if possible
+-       // setSelectedLineKey(Object.keys(grouped).sort()[0] || null);
+- 
+      } catch (err: any) {
+        setError(`Failed to load batch metadata: ${err.message}`);
+        setLoading(false);
+      }
+-   }, [batchId]); // Dependency is just batchId
++   }, [batchId]);
+  
+-   // Call fetchMetadata on initial mount and when batchId changes
++   // Effect to fetch data on mount/batchId change
+    useEffect(() => {
++     setSelectedLineKey(null); // Reset selected line when batch ID changes
+      fetchMetadata();
+-   }, [fetchMetadata]); // Use the memoized fetchMetadata
++   }, [fetchMetadata]);
++ 
++   // NEW Effect to auto-select the first line *after* data is loaded
++   useEffect(() => {
++     // Only run if not loading, no error, some lines exist, and no line is currently selected
++     if (!loading && !error && Object.keys(takesByLine).length > 0 && selectedLineKey === null) {
++       const firstLineKey = Object.keys(takesByLine).sort()[0];
++       console.log(`[RankingContext] Auto-selecting first line: ${firstLineKey}`);
++       setSelectedLineKey(firstLineKey);
++     }
++     // Dependencies: trigger when loading finishes or takesByLine data arrives
++   }, [loading, error, takesByLine, selectedLineKey, setSelectedLineKey]);
+  
+    // --- Rank Update Logic ---
+```
+
+---
+
+Ignoring linter errors.
+
+**Checkpoint:**
+
+Refresh the Ranking page (`http://localhost:5173/batch/...`). It should now automatically select and display the takes for the first line (alphabetically) in the batch, rather than showing the "Select a Line" prompt initially.
+
+---
+
+_**User**_
+
+yeah. that's better. thanks. 
+
+Let's push our latest changes to github before i start on another bigger feature
+
+---
+
+_**Assistant**_
+
+
+
+---
+
+Okay, sounds good. Let's commit these UI refinements and the STS model filtering fix.
+
+---
+
+```bash
+git add . && git commit -m "refactor: Improve UI/UX, fix STS model filtering, default line selection"
+```
+
+```
+[master 301d432] refactor: Improve UI/UX, fix STS model filtering, default line selection
+ 7 files changed, 844 insertions(+), 194 deletions(-)
+
+```
+
+---
+
+Pushing to GitHub.
+
+---
+
+```bash
+git push origin master
+```
+
+```
+Enumerating objects: 29, done.
+Counting objects: 100% (29/29), done.
+Delta compression using up to 12 threads
+Compressing objects: 100% (14/14), done.
+Writing objects: 100% (15/15), 10.83 KiB | 1.35 MiB/s, done.
+Total 15 (delta 9), reused 0 (delta 0), pack-reused 0 (from 0)
+remote: Resolving deltas: 100% (9/9), completed with 9 local objects.
+To https://github.com/Entropicsky/voicepackgenerator.git
+   2d83905..301d432  master -> master
+
+```
+
+---
+
+All pushed. The repository is updated. Ready for the next feature.
+
+---
+
+_**User**_
+
+as a note, we should be excluding the .specstory directory from github (really all directories that start with .
 
 ---
 

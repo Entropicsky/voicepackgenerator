@@ -81,7 +81,7 @@
 
 ## Phase 6: Frontend - Ranking UI (Milestone: User can rank takes via UI)
 
-- [ ] Implement `JobsPage` (replaces BatchListPage, fetches /api/jobs). (Done in Phase 7)
+- [x] Implement `JobsPage` (replaces BatchListPage, fetches /api/jobs).
 - [x] Implement `RankingContext` (line-scoped state, fetch, update, cascade).
 - [x] Implement `RankingPage` (uses context, 3-panel layout).
 - [x] Implement `LineNavigation` component.
@@ -91,6 +91,7 @@
 - [x] Implement debounced PATCH call in `RankingContext`.
 - [x] Implement "Lock Batch" button and logic.
 - [x] Implement read-only state for locked batches.
+- [x] Implement inline regeneration status polling & UI.
 - [ ] Implement `AudioPlayer` component (Deferred)
 - [ ] Implement List Virtualization (Deferred)
 - [ ] Implement Waveform display (Deferred)
@@ -98,9 +99,9 @@
 - [ ] **Testing:** Component tests for Ranking UI (Deferred).
 - [ ] **Testing:** Integration tests for ranking flow (Deferred).
 - [ ] **Testing:** Run frontend tests (Deferred)
-- [x] **Checkpoint Test:** Manually tested line-scoped ranking, side panel.
+- [x] **Checkpoint Test:** Manually tested line-scoped ranking, side panel, inline regen status.
 
-## Phase 7: Job Tracking, STS & Refinement (Milestone: Core flows stable)
+## Phase 7: Job Tracking, STS, Voice Design (Milestone: Core flows stable)
 
 ### Phase 7a: Job Tracking Implementation (Complete)
 - [x] Backend: Add SQLAlchemy dependency.
@@ -116,22 +117,39 @@
 - [x] Frontend: Update `App.tsx` router/links.
 - [x] Checkpoint Test: Verified job submission, DB persistence, status updates, UI display.
 
-### Phase 7b: Speech-to-Speech (Line Level)
-- [ ] Backend: Update `GenerationJob` model (Confirm fields sufficient - Done in 7a).
-- [ ] Backend: Enhance `utils_elevenlabs.get_available_models` (add STS filter).
-- [ ] Backend: Implement `utils_elevenlabs.run_speech_to_speech_conversion`.
-- [ ] Backend: Add `GET /api/models` capability filter.
-- [ ] Backend: Implement `POST /api/batch/<batch_id>/speech_to_speech` endpoint.
-- [ ] Backend: Implement `tasks.run_speech_to_speech_line` Celery task.
-- [ ] Frontend: Update `types.ts` (Add `SpeechToSpeechPayload`, update `ModelOption`?).
-- [ ] Frontend: Update `api.ts` (Add `getModels` capability param, add `startSpeechToSpeech`).
-- [ ] Frontend: Create `SpeechToSpeechModal.tsx` component (with file input).
-- [ ] Frontend: Add "Speech-to-Speech..." button to `CurrentLineTakes.tsx`.
-- [ ] Frontend: Integrate `SpeechToSpeechModal` into `RankingPage.tsx`.
-- [ ] Checkpoint Test: Manually test STS flow (upload audio file, check job status, verify output & metadata update).
+### Phase 7b: Speech-to-Speech (Line Level) (Complete)
+- [x] Backend: Update `GenerationJob` model (Confirm fields sufficient).
+- [x] Backend: Enhance `utils_elevenlabs.get_available_models` (add STS filter).
+- [x] Backend: Implement `utils_elevenlabs.run_speech_to_speech_conversion`.
+- [x] Backend: Add `GET /api/models` capability filter.
+- [x] Backend: Implement `POST /api/batch/<batch_id>/speech_to_speech` endpoint.
+- [x] Backend: Implement `tasks.run_speech_to_speech_line` Celery task.
+- [x] Frontend: Update `types.ts` (Add `SpeechToSpeechPayload`).
+- [x] Frontend: Update `api.ts` (Add `getModels` capability param, add `startSpeechToSpeech`).
+- [x] Frontend: Create `SpeechToSpeechModal.tsx` component (with file/mic input).
+- [x] Frontend: Add "Speech-to-Speech..." button to `CurrentLineTakes.tsx`.
+- [x] Frontend: Integrate `SpeechToSpeechModal` into `RankingPage.tsx`.
+- [x] Frontend: Add ESC key close handler to `SpeechToSpeechModal.tsx`.
+- [x] Checkpoint Test: Manually tested STS flow (upload/record, check job status, verify output & metadata update).
 
-### Phase 7c: Final Testing & Refinement
-- [ ] Perform comprehensive manual testing of all flows (Generation, Ranking, Line Regen, STS).
+### Phase 7c: Voice Design Integration (Complete)
+- [x] Backend: Implement `utils_elevenlabs.create_voice_previews`.
+- [x] Backend: Implement `utils_elevenlabs.save_generated_voice`.
+- [x] Backend: Implement `POST /api/voice-design/previews` route in `app.py`.
+- [x] Backend: Implement `POST /api/voice-design/save` route in `app.py`.
+- [x] Frontend: Define voice design types in `types.ts`.
+- [x] Frontend: Implement `api.createVoicePreviews`.
+- [x] Frontend: Implement `api.saveVoiceFromPreview`.
+- [x] Frontend: Create `VoiceDesignPage.tsx` component and add routing.
+- [x] Frontend: Implement UI layout and state management in `VoiceDesignPage.tsx` (Iterative Hold/Save workflow).
+- [x] Frontend: Implement workflow logic (API calls) in `VoiceDesignPage.tsx`.
+- [x] Frontend: Implement `VoiceContext` for managing/refreshing voice list.
+- [x] Frontend: Refactor `VoiceSelector` to use `VoiceContext`.
+- [x] Frontend: Integrate `refetchVoices` call into `VoiceDesignPage.tsx` save success.
+- [x] Checkpoint Test: Manually test Voice Design flow (create previews, hold, save voice, verify list update).
+
+### Phase 7d: Final Testing & Refinement
+- [ ] Perform comprehensive manual testing of all flows (Generation, Ranking, Line Regen, STS, Voice Design).
 - [ ] Review and enhance logging.
 - [ ] Address any bugs found.
 - [ ] Refine UI/UX.

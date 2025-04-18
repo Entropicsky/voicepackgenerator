@@ -3,8 +3,36 @@
 This project provides a web-based tool for:
 1.  Generating multiple takes of voice lines using the ElevenLabs API based on an input script.
 2.  Ranking the generated takes on a line-by-line basis to select the best options.
+3.  **(New!)** Designing new voices directly from text prompts using the ElevenLabs Voice Design API.
 
 Built with Flask (backend API), Celery (background tasks), Redis (task queue), React/TypeScript/Vite (frontend), and Docker Compose for environment management.
+
+## Features
+
+*   **Voice Design:**
+    *   Create new ElevenLabs voices using text prompts and settings (loudness, quality, guidance).
+    *   Generate multiple audio previews for a voice description.
+    *   Iteratively "Hold" promising previews across generation batches.
+    *   Save selected held previews directly to your ElevenLabs voice library.
+*   **Batch Generation:**
+    *   Select one or more ElevenLabs voices.
+    *   Upload a CSV script (LineKey, Text).
+    *   Configure number of takes per line and randomization ranges (Stability, Similarity, Style, Speed).
+    *   Submit generation job to a background Celery worker.
+*   **Job Tracking:**
+    *   View history of submitted generation jobs.
+    *   See live status updates polled from Celery/Database.
+*   **Ranking:**
+    *   View generated batches.
+    *   Listen to takes line-by-line.
+    *   Assign ranks (1-5) to takes within each line.
+    *   Rank assignments automatically cascade within the line.
+    *   Download ranked batch audio.
+    *   Lock completed batches.
+*   **Line Regeneration/STS:**
+    *   Regenerate specific lines using new TTS settings.
+    *   Generate new takes using Speech-to-Speech (STS) from uploaded audio or microphone input.
+    *   Track regeneration job status inline on the ranking page.
 
 ## Project Structure
 

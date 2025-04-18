@@ -1,154 +1,149 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { api } from '../../api';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Checkbox, Table, Input, Select } from '@mantine/core';
 import { VoiceOption } from '../../types';
-import useDebouncedCallback from '../../hooks/useDebouncedCallback';
+import { useVoiceContext } from '../../contexts/VoiceContext';
 
 interface VoiceSelectorProps {
-  selectedVoices: string[]; // Array of selected voice IDs
+  selectedVoices: string[];
   onChange: (selectedIds: string[]) => void;
 }
 
-const SEARCH_DEBOUNCE = 300; // Debounce search input
-
 const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoices, onChange }) => {
-  const [allFetchedVoices, setAllFetchedVoices] = useState<VoiceOption[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const { voices, loading, error: fetchError } = useVoiceContext();
 
-  // State for filters and sorting
-  const [searchTerm, setSearchTerm] = useState<string>('');
-  const [filterCategory, setFilterCategory] = useState<string>('all'); // Default to 'all'
-  const [sortBy, setSortBy] = useState<'name' | 'created_at_unix' | 'category'>('category'); // Default sort
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [sortOrder, setSortOrder] = useState<string>('name_asc');
 
-  const debouncedSetSearchTerm = useDebouncedCallback(setSearchTerm, SEARCH_DEBOUNCE);
-
-  // Fetch voices when filters/sort change
-  useEffect(() => {
-    const fetchVoices = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        // Pass the selected category directly to the API if not 'all'
-        const apiCategory = filterCategory === 'all' ? undefined : filterCategory;
-        const apiSort = sortBy === 'category' ? 'name' : sortBy;
-        const apiSortDir = sortDirection;
-
-        console.log(`Fetching with category: ${apiCategory}, search: ${searchTerm}`); // Log params
-
-        const voices = await api.getVoices({
-            search: searchTerm || undefined,
-            category: apiCategory,
-            sort: apiSort,
-            sort_direction: apiSortDir,
-            page_size: 100
-        });
-        setAllFetchedVoices(voices);
-      } catch (err: any) {
-        setError(`Failed to load voices: ${err.message}`);
-        console.error(err);
-        setAllFetchedVoices([]); // Clear list on error
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchVoices();
-  }, [searchTerm, filterCategory, sortBy, sortDirection]);
-
-  // Client-side sorting (Prioritize specific categories if needed, then apply selected sort)
-  const displayedVoices = useMemo(() => {
-    // API handles filtering by category, so we just sort the results
-    return [...allFetchedVoices].sort((a, b) => {
-        // --- Optional: Prioritize certain categories --- 
-        const priorityOrder = ['generated', 'cloned']; // Voices likely created by the user
-        const catA = a.category || '';
-        const catB = b.category || '';
-        const priorityA = priorityOrder.indexOf(catA);
-        const priorityB = priorityOrder.indexOf(catB);
-
-        // If one has priority and the other doesn't (or has lower priority)
-        if (priorityA !== -1 && (priorityB === -1 || priorityA < priorityB)) return -1;
-        if (priorityB !== -1 && (priorityA === -1 || priorityB < priorityA)) return 1;
-        // If priorities are the same or neither are priority categories, proceed to selected sort
-
-        // --- Apply Selected Sort --- 
-        const field = sortBy;
-        const dir = sortDirection === 'asc' ? 1 : -1;
-
-        if (field === 'category') { // Client-side category sort
-            return catA.localeCompare(catB) * dir;
-        }
-
-        const valA = field === 'name' ? (a[field] || '') : 0; // Only support name sort from API for now
-        const valB = field === 'name' ? (b[field] || '') : 0;
-
-        if (typeof valA === 'string' && typeof valB === 'string') {
-            return valA.localeCompare(valB) * dir;
-        }
-        return 0;
-    });
-  }, [allFetchedVoices, sortBy, sortDirection]);
-
-  const handleCheckboxChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const { value, checked } = event.target;
-    let newSelectedVoices: string[];
-
+  const handleSelectChange = (voiceId: string, checked: boolean) => {
     if (checked) {
-      newSelectedVoices = [...selectedVoices, value];
+      onChange([...selectedVoices, voiceId]);
     } else {
-      newSelectedVoices = selectedVoices.filter(id => id !== value);
+      onChange(selectedVoices.filter(id => id !== voiceId));
     }
-    onChange(newSelectedVoices);
   };
 
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      onChange(filteredAndSortedVoices.map(v => v.voice_id));
+    } else {
+      onChange([]);
+    }
+  };
+
+  const filteredAndSortedVoices = useMemo(() => {
+    let filtered = voices;
+
+    if (categoryFilter !== 'all') {
+      filtered = filtered.filter(v => v.category === categoryFilter);
+    }
+
+    if (searchTerm) {
+      filtered = filtered.filter(v => 
+        v.name.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+
+    const [sortKey, sortDir] = sortOrder.split('_');
+    filtered.sort((a, b) => {
+        let valA = a.name.toLowerCase();
+        let valB = b.name.toLowerCase();
+        
+        if (valA < valB) return sortDir === 'asc' ? -1 : 1;
+        if (valA > valB) return sortDir === 'asc' ? 1 : -1;
+        return 0;
+    });
+
+    return filtered;
+  }, [voices, searchTerm, categoryFilter, sortOrder]);
+
+  const allFilteredSelected = filteredAndSortedVoices.length > 0 && 
+                             filteredAndSortedVoices.every(v => selectedVoices.includes(v.voice_id));
+  const isIndeterminate = !allFilteredSelected && 
+                         filteredAndSortedVoices.some(v => selectedVoices.includes(v.voice_id));
+
+  const categories = useMemo(() => {
+      const uniqueCategories = new Set<string>();
+      voices.forEach(v => {
+          if(v.category) uniqueCategories.add(v.category);
+      });
+      return Array.from(uniqueCategories).sort();
+  }, [voices]);
+
   return (
-    <div>
-      <h4>Available Voices (Select one or more):</h4>
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '10px', alignItems: 'center' }}>
-        <input 
-            type="text"
-            placeholder="Search voices..."
-            onChange={(e) => debouncedSetSearchTerm(e.target.value)}
-            style={{ padding: '5px' }}
+    <div style={{ border: '1px solid #ccc', padding: '15px', borderRadius: '5px', backgroundColor: '#fff' }}>
+      <h4>Select Voices for Generation</h4>
+      
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '15px', flexWrap: 'wrap' }}>
+        <Input 
+          placeholder="Search voices..." 
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          style={{ flexGrow: 1, minWidth: '150px' }}
         />
-        <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} style={{ padding: '5px' }}>
-            <option value="all">All Categories</option>
-            <option value="generated">Generated</option>
-            <option value="cloned">Cloned</option>
-            <option value="professional">Professional</option>
-            <option value="premade">Premade</option>
-            {/* Add workspace, community, default if needed */}
-        </select>
-         <button onClick={() => { setSortBy('name'); setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')}}>
-             Sort by Name ({sortBy === 'name' ? (sortDirection === 'asc' ? '↑' : '↓') : '-'})
-         </button>
+        <Select
+          placeholder="Filter by category"
+          value={categoryFilter}
+          onChange={(value) => setCategoryFilter(value || 'all')}
+          data={[
+            { value: 'all', label: 'All Categories' },
+            ...categories.map(cat => ({ value: cat, label: cat }))
+          ]}
+          clearable
+          style={{ minWidth: '150px' }}
+        />
+         <Select
+          placeholder="Sort by"
+          value={sortOrder}
+          onChange={(value) => setSortOrder(value || 'name_asc')}
+          data={[
+            { value: 'name_asc', label: 'Name (A-Z)' },
+            { value: 'name_desc', label: 'Name (Z-A)' },
+          ]}
+           style={{ minWidth: '130px' }}
+        />
       </div>
 
-      <div style={{ maxHeight: '250px', overflowY: 'scroll', border: '1px solid #ccc', padding: '10px' }}>
-        {loading && <p>Loading voices...</p>}
-        {error && <p style={{ color: 'red' }}>{error}</p>}
-        {!loading && !error && displayedVoices.length === 0 && (
-          <p>No voices found matching criteria.</p>
-        )}
-        {!loading && !error && displayedVoices.length > 0 && (
-          displayedVoices.map((voice) => (
-            <div key={voice.voice_id}>
-              <input
-                type="checkbox"
-                id={`voice-${voice.voice_id}`}
-                value={voice.voice_id}
-                checked={selectedVoices.includes(voice.voice_id)}
-                onChange={handleCheckboxChange}
-              />
-              <label htmlFor={`voice-${voice.voice_id}`}>
-                  {voice.name} 
-                  <small style={{color: '#555'}}> ({voice.category || 'Unknown'} / {voice.voice_id})</small>
-              </label>
-            </div>
-          ))
-        )}
-      </div>
+      {loading && <p>Loading voices...</p>}
+      {fetchError && <p style={{ color: 'red' }}>{fetchError}</p>}
+      
+      {!loading && !fetchError && (
+        <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+          <Table stickyHeader striped highlightOnHover withTableBorder withColumnBorders>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th style={{ width: '50px' }}>
+                  <Checkbox 
+                    checked={allFilteredSelected}
+                    indeterminate={isIndeterminate}
+                    onChange={(e) => handleSelectAll(e.currentTarget.checked)}
+                    title="Select/Deselect All Visible"
+                  />
+                </Table.Th>
+                <Table.Th>Name</Table.Th>
+                <Table.Th>Category</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {filteredAndSortedVoices.map(voice => (
+                <Table.Tr key={voice.voice_id}>
+                  <Table.Td>
+                    <Checkbox 
+                      checked={selectedVoices.includes(voice.voice_id)}
+                      onChange={(e) => handleSelectChange(voice.voice_id, e.currentTarget.checked)}
+                    />
+                  </Table.Td>
+                  <Table.Td>{voice.name}</Table.Td>
+                  <Table.Td>{voice.category || 'N/A'}</Table.Td>
+                </Table.Tr>
+              ))}
+               {filteredAndSortedVoices.length === 0 && (
+                   <Table.Tr><Table.Td colSpan={3} align="center">No voices match filters.</Table.Td></Table.Tr>
+               )}
+            </Table.Tbody>
+          </Table>
+        </div>
+      )}
     </div>
   );
 };
