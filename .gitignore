@@ -28,4 +28,11 @@ Thumbs.db
 # Database files
 *.db
 *.sqlite
-*.sqlite3 
+*.sqlite3
+
+# Agent/Tooling specific directories
+.cursor/
+.specstory/
+
+# General dot directories (if desired - might be too broad?)
+# .*/ 
