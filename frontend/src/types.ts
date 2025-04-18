@@ -211,4 +211,14 @@ export interface ScriptLineCreateOrUpdate {
     order_index: number;
 }
 
+// Define payload for line regeneration
+export interface RegenerateLinePayload {
+    line_key: string;
+    line_text: string;
+    num_new_takes: number;
+    settings: Partial<GenerationConfig>; // Only need TTS settings part
+    replace_existing: boolean;
+    update_script?: boolean;
+}
+
 // --- END Script Management Types ---

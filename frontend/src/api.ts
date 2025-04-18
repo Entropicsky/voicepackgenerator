@@ -17,7 +17,9 @@ import {
   // NEW: Import Script types (define these in types.ts next)
   ScriptMetadata, 
   Script, 
-  ScriptLineCreateOrUpdate
+  ScriptLineCreateOrUpdate,
+  // Import the RegenerateLinePayload interface from types.ts
+  RegenerateLinePayload
 } from './types';
 
 // Define options for filtering/sorting voices
@@ -34,15 +36,6 @@ interface GetVoicesOptions {
 // NEW: Options for getModels
 interface GetModelsOptions {
     capability?: 'tts' | 'sts';
-}
-
-// Define payload for line regeneration
-interface RegenerateLinePayload {
-    line_key: string;
-    line_text: string;
-    num_new_takes: number;
-    settings: Partial<GenerationConfig>; // Only need TTS settings part
-    replace_existing: boolean;
 }
 
 // NEW: Payload for creating a script
@@ -147,6 +140,7 @@ export const api = {
   // New endpoint for regenerating line takes
   regenerateLineTakes: async (batchId: string, payload: RegenerateLinePayload): Promise<GenerationStartResponse> => {
       const url = `${API_BASE}/api/batch/${batchId}/regenerate_line`;
+      console.log(`[API] Regenerating line ${payload.line_key} with payload:`, payload);
       const response = await fetch(url, {
           method: 'POST',
           headers: {

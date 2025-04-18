@@ -3,6 +3,7 @@ import { GenerationConfig, Take, ModelOption } from '../../types';
 import { api } from '../../api';
 import Slider from 'rc-slider'; // Assuming rc-slider is installed
 import 'rc-slider/assets/index.css';
+import { Checkbox } from '@mantine/core'; // Import Checkbox
 
 interface RegenerationModalProps {
   batchId: string;
@@ -27,6 +28,7 @@ const RegenerationModal: React.FC<RegenerationModalProps> = ({
   const [lineText, setLineText] = useState<string>('');
   const [numTakes, setNumTakes] = useState<number>(DEFAULT_NUM_TAKES);
   const [replaceExisting, setReplaceExisting] = useState<boolean>(false);
+  const [updateScript, setUpdateScript] = useState<boolean>(false); // <-- New State
   
   // TTS Range Settings State
   const [stabilityRange, setStabilityRange] = useState<[number, number]>(DEFAULT_STABILITY_RANGE);
@@ -126,7 +128,8 @@ const RegenerationModal: React.FC<RegenerationModalProps> = ({
             line_text: lineText,
             num_new_takes: numTakes,
             settings: settingsPayload,
-            replace_existing: replaceExisting
+            replace_existing: replaceExisting,
+            update_script: updateScript // <-- Pass the flag
         });
         console.log(`Line regeneration job submitted: DB ID ${response.job_id}, Task ID ${response.task_id}`);
         onRegenJobStarted(lineKey, response.task_id);
@@ -157,7 +160,7 @@ const RegenerationModal: React.FC<RegenerationModalProps> = ({
         <h3>Regenerate Takes for Line: "{lineKey}"</h3>
         <form onSubmit={handleSubmit}>
             {/* Line Text */} 
-            <div style={{ marginBottom: '15px' }}>
+            <div style={{ marginBottom: '5px' }}> {/* Reduced margin */}
                 <label htmlFor="lineText">Line Text:</label><br/>
                 <textarea 
                     id="lineText" 
@@ -166,6 +169,16 @@ const RegenerationModal: React.FC<RegenerationModalProps> = ({
                     rows={3} 
                     style={{ width: '100%', boxSizing: 'border-box' }}
                     required
+                />
+            </div>
+
+            {/* NEW: Update Script Checkbox */}
+            <div style={{ marginBottom: '15px' }}>
+                <Checkbox
+                    id="updateScriptCheckbox"
+                    label="Update this line in the original script"
+                    checked={updateScript}
+                    onChange={(event) => setUpdateScript(event.currentTarget.checked)}
                 />
             </div>
 

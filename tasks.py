@@ -320,8 +320,7 @@ def run_generation(self,
             db_job.result_message = error_msg
             try:
                 db.commit()
-            except Exception as db_err:
-                print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] Failed to update job status to FAILURE: {db_err}")
+            except: 
                 db.rollback()
         
         # Update Celery state
@@ -341,7 +340,8 @@ def regenerate_line_takes(self,
                           line_text: str, 
                           num_new_takes: int, 
                           settings_json: str, 
-                          replace_existing: bool):
+                          replace_existing: bool,
+                          update_script: bool = False):
     """Generates new takes for a specific line within an existing batch."""
     task_id = self.request.id
     print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] Received line regeneration task for Batch '{batch_id}', Line '{line_key}'")
@@ -466,11 +466,46 @@ def regenerate_line_takes(self,
         utils_fs.save_metadata(batch_dir, metadata)
         print(f"[Task ID: {task_id}] Updated metadata for batch {batch_id} after regenerating line {line_key}.")
 
+        # Update script if requested
+        script_update_message = ""
+        if update_script and len(newly_generated_takes_meta) > 0:
+            try:
+                # Instead of looking for batch_id in generation_history, 
+                # we'll look for script lines that match the line_key
+                script_lines = db.query(models.ScriptLine).filter(
+                    models.ScriptLine.line_key == line_key
+                ).all()
+                
+                if script_lines:
+                    updated_scripts = []
+                    for script_line in script_lines:
+                        # Get the script
+                        script = db.query(models.Script).get(script_line.script_id)
+                        if script:
+                            # Update the line
+                            script_line.text = line_text
+                            updated_scripts.append(script.name)
+                    
+                    if updated_scripts:
+                        db.commit()
+                        script_names = ", ".join(f"'{name}'" for name in updated_scripts)
+                        script_update_message = f" Script(s) {script_names} updated with the new line text."
+                        print(f"[Task ID: {task_id}] Updated script line '{line_key}' in scripts: {script_names}")
+                    else:
+                        script_update_message = f" Found matching lines, but couldn't find associated scripts."
+                        print(f"[Task ID: {task_id}] Could not find scripts for line '{line_key}'.")
+                else:
+                    script_update_message = f" No scripts found with line key '{line_key}'."
+                    print(f"[Task ID: {task_id}] No scripts found with line key '{line_key}'.")
+            except Exception as e:
+                script_update_message = f" Error updating script: {str(e)}"
+                print(f"[Task ID: {task_id}] Error updating script for batch {batch_id}: {e}")
+
         # --- Update DB Job --- 
         final_status = "SUCCESS" if failures == 0 else "COMPLETED_WITH_ERRORS" if failures < num_new_takes else "FAILURE"
-        result_msg = f"Regenerated line '{line_key}'. Added {len(newly_generated_takes_meta)} takes ({failures} failures). Replaced existing: {replace_existing}. Archived: {len(archived_files)} files."
+        result_msg = f"Regenerated line '{line_key}'. Added {len(newly_generated_takes_meta)} takes ({failures} failures). Replaced existing: {replace_existing}. Archived: {len(archived_files)} files.{script_update_message}"
         if final_status == "FAILURE":
-             result_msg = f"Failed to regenerate any takes for line '{line_key}'. ({failures} failures). Replaced existing: {replace_existing}. Archived: {len(archived_files)} files."
+             result_msg = f"Failed to regenerate any takes for line '{line_key}'. ({failures} failures). Replaced existing: {replace_existing}. Archived: {len(archived_files)} files.{script_update_message}"
              
         db_job.status = final_status
         db_job.completed_at = datetime.utcnow()
@@ -491,8 +526,7 @@ def regenerate_line_takes(self,
             db_job.result_message = error_msg
             try:
                 db.commit()
-            except Exception as db_err:
-                print(f"[...] Failed to update job status to FAILURE: {db_err}")
+            except: 
                 db.rollback()
         self.update_state(state='FAILURE', meta={'status': error_msg, 'db_id': generation_job_db_id})
         raise e
@@ -634,8 +668,10 @@ def run_speech_to_speech_line(self,
         print(f"[...] {error_msg}")
         if db_job: # Update DB if possible
             db_job.status = "FAILURE"; db_job.completed_at = datetime.utcnow(); db_job.result_message = error_msg
-            try: db.commit()
-            except: db.rollback()
+            try: 
+                db.commit()
+            except: 
+                db.rollback()
         self.update_state(state='FAILURE', meta={'status': error_msg, 'db_id': generation_job_db_id})
         raise e # Re-raise
     finally:

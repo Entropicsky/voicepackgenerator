@@ -184,20 +184,22 @@
     *   [x] Implement `POST /api/scripts` endpoint (Create New & Import CSV)
     *   [x] Implement `PUT /api/scripts/<script_id>` endpoint (Update metadata & lines)
     *   [x] Implement `DELETE /api/scripts/<script_id>` endpoint
+    *   [x] Implement `PATCH /api/scripts/<script_id>/archive` endpoint
     *   [x] Modify `POST /api/generate` to accept `script_id`
     *   [x] Modify `tasks.run_generation` Celery task to handle `script_id`
-*   [ ] **Phase 2: Frontend Implementation**
-    *   [ ] Add script API functions to `frontend/src/api.ts`
-    *   [ ] Create `ScriptsPage.tsx` (`/scripts` route)
-    *   [ ] Create `ScriptEditor.tsx` component
-    *   [ ] Create script editor page/route (`/scripts/:scriptId`)
-    *   [ ] Update `GenerationPage.tsx`/`GenerationForm.tsx` with script selection UI
-    *   [ ] Add "Scripts" link to main navigation
+*   [x] **Phase 2: Frontend Implementation**
+    *   [x] Add script API functions to `frontend/src/api.ts`
+    *   [x] Create `ManageScriptsPage.tsx` (`/scripts` route)
+    *   [x] Create `ScriptEditor.tsx` component
+    *   [x] Create script editor page/route (`/scripts/:scriptId`)
+    *   [x] Update `GenerationPage.tsx`/`GenerationForm.tsx` with script selection UI
+    *   [x] Add "Scripts" link to main navigation
+    *   [x] Implement Archive/Unarchive functionality (UI toggle, buttons, API calls)
 *   [ ] **Phase 3: Testing & Refinement**
     *   [ ] Write backend unit & integration tests
     *   [ ] Write frontend component & interaction tests
     *   [ ] Perform E2E testing (including backward compatibility)
-    *   [ ] Update documentation (`agentnotes.md`, `notebook.md`, etc.)
+    *   [x] Update documentation (`agentnotes.md`, `notebook.md`, etc.)
     *   [ ] Code review and cleanup
 
 ## Phase 1: Script Management Backend & Basic UI
@@ -222,9 +224,11 @@
 
 ## Phase 2: Integration with Generation
 
-- [ ] Modify GenerationConfig / API to accept `script_id`
-- [ ] Update Generation UI (`GenerationForm.tsx`) to allow selecting script from DB
-- [ ] Ensure backend `generate` endpoint uses lines from specified script ID
+- [x] Modify GenerationConfig / API to accept `script_id`
+- [x] Update Generation UI (`GenerationForm.tsx`) to allow selecting script from DB
+- [x] Ensure backend `generate` endpoint uses lines from specified script ID
+- [x] Add "Update script" option to regeneration modal
+- [x] Implement script update functionality when regenerating takes
 - [ ] Testing (Generation job submission with script ID)
 
 ## Known Issues / Future Work

@@ -120,4 +120,36 @@ Ranking relies primarily on filesystem interactions (`metadata.json`, symlinks) 
 *   Hard refresh the browser.
 
 **Known Issues:**
-*   The Vite development server (`npm run dev`) is unstable/unreliable within Docker on the development macOS machine, and also exhibited caching/file watching issues when run locally. Avoid using it for now. 
+*   The Vite development server (`npm run dev`) is unstable/unreliable within Docker on the development macOS machine, and also exhibited caching/file watching issues when run locally. Avoid using it for now.
+
+## Celery Worker Task Updates (April 18, 2025 Session)
+
+**Problem:** When adding a new parameter to a Celery task function, we encountered an error: `regenerate_line_takes() takes 8 positional arguments but 9 were given`.
+
+**Root Cause:**
+* The application architecture separates the backend API (Flask in `backend/app.py`) from the task processing (Celery in `tasks.py`).
+* The API endpoint was updated to pass the new parameter, but the Celery worker container was still running the old version of the task function.
+* We had only restarted the backend container but not the worker container, which is a separate service.
+
+**Project Architecture Insights:**
+* The application uses separate containers for different services:
+  * `frontend` - Nginx container serving the React frontend
+  * `backend` - Flask API service handling HTTP requests
+  * `worker` - Celery worker processing background tasks
+  * `redis` - Message broker for Celery task queue
+
+**Resolution:**
+1. Identified the correct function signature mismatch between backend API endpoint and Celery task
+2. Updated the Celery task to include the new parameter
+3. Copied the updated `tasks.py` file to the worker container
+4. Restarted the worker service to pick up the changes
+
+**Additional Issue Found:**
+* Our task code was attempting to access a non-existent field (`generation_history`) in the Script model
+* Fixed the script update logic to use a more direct approach (finding scripts by line_key)
+
+**Deployment Workflow for Task Changes:**
+* Update the task code in `tasks.py`
+* Copy to worker container: `docker compose cp tasks.py worker:/app/`
+* Restart worker: `docker compose restart worker`
+* Alternatively, for more thorough updates: `docker compose build worker && docker compose up -d --force-recreate worker` 

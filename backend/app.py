@@ -864,6 +864,7 @@ def regenerate_line(batch_id):
     num_new_takes = data['num_new_takes']
     settings = data['settings'] # This should be the GenerationConfig subset
     replace_existing = data['replace_existing']
+    update_script = data.get('update_script', False)  # Get optional update_script flag, default to False
     settings_json = json.dumps(settings)
 
     db: Session = next(models.get_db())
@@ -891,7 +892,7 @@ def regenerate_line(batch_id):
         # Enqueue Celery task
         task = tasks.regenerate_line_takes.delay(
             db_job_id, batch_id, line_key, line_text, 
-            num_new_takes, settings_json, replace_existing
+            num_new_takes, settings_json, replace_existing, update_script  # Pass update_script flag to the task
         )
         print(f"Enqueued line regen task: Celery ID {task.id}, DB Job ID {db_job_id}")
 
