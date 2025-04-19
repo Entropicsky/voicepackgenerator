@@ -39,11 +39,11 @@ services:
 
   worker:
     build:
-      # Worker uses the same Dockerfile as backend
+      # Worker uses Dockerfile in backend directory with project-root context
       context: .
       dockerfile: backend/Dockerfile
     volumes:
-      # Mount entire project dir
+      # Mount entire project directory for live code reload
       - .:/app
     working_dir: /app # Run from project root
     env_file:

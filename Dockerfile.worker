@@ -1,0 +1,36 @@
+# Worker Dockerfile for Heroku (project-root context)
+FROM python:3.11-alpine
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+
+# Set workdir
+WORKDIR /app
+
+# Install system dependencies and root CAs
+RUN apk update && apk add --no-cache git sqlite ca-certificates && update-ca-certificates
+
+# Install pip dependencies
+COPY backend/requirements.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY backend /app/backend
+WORKDIR /app/backend
+
+# Expose port (optional for worker)
+EXPOSE 5000
+
+# Env vars for Flask app (if used)
+ENV FLASK_APP=app.py
+ENV FLASK_ENV=production
+
+# Ensure output directory exists
+RUN mkdir -p /app/output/audio
+
+# Initialize database
+RUN touch /app/jobs.db && python -c 'from models import init_db; init_db()'
+
+# Start Celery worker
+CMD ["celery", "-A", "backend.celery_app:celery", "worker", "--loglevel=info"] 

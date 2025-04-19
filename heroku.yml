@@ -10,7 +10,7 @@ build:
       dockerfile: Dockerfile # Use Dockerfile at root
     # api process removed
     worker:
-      dockerfile: backend/Dockerfile
+      dockerfile: Dockerfile.worker
 
 run:
   # Run the consolidated start script for web
