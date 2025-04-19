@@ -13,7 +13,7 @@ import base64
 from sqlalchemy import func, Boolean
 import csv
 from flask_migrate import Migrate
-from werkzeug.middleware.proxy_fix import ProxyFix
+# from werkzeug.middleware.proxy_fix import ProxyFix # Temporarily disabled
 import time # For timing
 import logging # For better logging
 
@@ -37,9 +37,9 @@ logging.basicConfig(level=logging.INFO)
 
 # Add ProxyFix middleware to handle X-Forwarded-* headers correctly
 # Trust 2 proxies (Heroku Router + Nginx Web Dyno)
-app.wsgi_app = ProxyFix(
-    app.wsgi_app, x_for=2, x_proto=1, x_host=1, x_prefix=1
-)
+# app.wsgi_app = ProxyFix(
+#     app.wsgi_app, x_for=2, x_proto=1, x_host=1, x_prefix=1
+# ) # Temporarily disabled
 
 # Initialize Flask-Migrate
 # Ensure the database engine is available
