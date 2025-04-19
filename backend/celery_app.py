@@ -40,9 +40,9 @@ celery = Celery(
     broker=broker_url,
     backend=result_backend,
     # include tasks explicitly here now that it's simpler
-    include=['backend.tasks'],
-    broker_use_ssl=broker_connection_options, # Pass the determined options
-    redis_backend_use_ssl=redis_backend_connection_options # Pass the determined options
+    include=['backend.tasks']
+    # broker_use_ssl=broker_connection_options, # Let rediss:// scheme handle SSL
+    # redis_backend_use_ssl=redis_backend_connection_options # Let rediss:// scheme handle SSL
 )
 
 # Optional configuration settings
@@ -55,5 +55,5 @@ celery.conf.update(
 )
 
 print(f"Celery App: Configured with broker={broker_url}, backend={result_backend}")
-print(f"Celery App: Broker SSL options={broker_connection_options}")
-print(f"Celery App: Backend SSL options={redis_backend_connection_options}") 
+# print(f"Celery App: Broker SSL options={broker_connection_options}") # Removed args, log less relevant
+# print(f"Celery App: Backend SSL options={redis_backend_connection_options}") # Removed args, log less relevant 
