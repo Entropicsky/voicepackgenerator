@@ -14,20 +14,20 @@ envsubst < /app/frontend/nginx.conf > /tmp/nginx.conf
 # Use the absolute path to the generated config file
 nginx -c /tmp/nginx.conf -g 'daemon off;' &
 
+# Define internal port for Gunicorn
+export GUNI_PORT=5000
+
 # Start gunicorn
-# Bind to localhost as nginx is proxying internally
-# Use gevent worker, increased timeout, access logging, and debug level error logging
-# Ensure Gunicorn runs from the correct directory where backend.app can be found
+# Bind explicitly to internal localhost:PORT
+# Use sync worker for debugging stability
 cd /app/backend
 gunicorn backend.app:app \
-    --bind 127.0.0.1:5000 \
+    --bind 127.0.0.1:${GUNI_PORT} \
     --timeout 120 \
-    -k gevent \
+    -k sync \
     --log-level debug \
     --access-logfile - \
-    --error-logfile - 
-    # Removed header limit for now, ProxyFix should handle it
-    # --limit-request-field_size 16384 
+    --error-logfile -
 
 # Wait for any process to exit
 wait -n

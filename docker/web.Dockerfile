@@ -24,8 +24,8 @@ RUN apk update && apk add --no-cache \
 
 # Install pip dependencies (Copy requirements FIRST for caching)
 # Source path is relative to the build context (root)
-COPY ./backend/requirements.txt /app/requirements.txt 
-RUN pip install --no-cache-dir -r /app/requirements.txt
+COPY backend/requirements.txt requirements.txt 
+RUN pip install --no-cache-dir -r requirements.txt
 
 # --- Node Builder Stage (for Frontend) ---
 FROM node:20-slim as node-builder
