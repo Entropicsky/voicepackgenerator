@@ -735,11 +735,13 @@ def update_take_rank(batch_id, filename):
     if new_rank is not None:
         try:
             new_rank = int(new_rank)
-            if not (1 <= new_rank <= 5):
+            # Allow 1-5 for ranked, 6 for trashed, null for unranked/restored
+            if not (1 <= new_rank <= 6):
                 raise ValueError()
         except (ValueError, TypeError):
-            return make_api_response(error="Invalid rank value. Must be integer 1-5 or null.", status_code=400)
-    # Allow rank to be null to un-rank
+            # Update error message to include 6
+            return make_api_response(error="Invalid rank value. Must be integer 1-6 or null.", status_code=400)
+    # Allow rank to be null to un-rank/restore
 
     try:
         batch_dir = utils_fs.get_batch_dir(AUDIO_ROOT, batch_id)
