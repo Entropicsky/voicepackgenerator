@@ -3,9 +3,10 @@ from celery import Celery
 import os
 import ssl
 
-# Use the REDIS_TLS_URL with SSL disabled for Heroku Redis
-broker_url = os.getenv('CELERY_BROKER_URL', 'redis://redis:6379/0')
-result_backend = os.getenv('CELERY_RESULT_BACKEND', 'redis://redis:6379/0')
+# Prefer TLS-enabled Redis URL on Heroku, falling back to standard Redis URL or Celery-specific vars
+redis_url = os.environ.get('REDIS_TLS_URL') or os.environ.get('REDIS_URL')
+broker_url = redis_url or os.getenv('CELERY_BROKER_URL', 'redis://redis:6379/0')
+result_backend = redis_url or os.getenv('CELERY_RESULT_BACKEND', 'redis://redis:6379/0')
 
 # Default connection options (empty)
 broker_transport_opts = {}

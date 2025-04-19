@@ -11,27 +11,13 @@ export DOLLAR='$'
 envsubst < /app/frontend/nginx.conf > /tmp/nginx.conf
 
 # Start nginx using the generated config file, running in the background
-# Use the absolute path to the generated config file
-nginx -c /tmp/nginx.conf -g 'daemon off;' &
+nginx -c /tmp/nginx.conf &
 
-# Define internal port for Gunicorn
-export GUNI_PORT=5000
-
-# Start gunicorn
-# Bind explicitly to internal localhost:PORT
-# Use sync worker for debugging stability
-gunicorn backend.app:app \
-    --bind 127.0.0.1:${GUNI_PORT} \
+# Exec gunicorn with multiple workers and threads
+exec gunicorn backend.app:app \
+    --bind 0.0.0.0:5000 \
+    --workers 2 \
+    --threads 4 \
     --timeout 120 \
-    -k sync \
-    --log-level debug \
     --access-logfile - \
-    --error-logfile -
-    # Removed header limit for now, ProxyFix should handle it
-    # --limit-request-field_size 16384
-
-# Wait for any process to exit
-wait -n
-
-# Exit with status of process that exited first
-exit $? 
+    --error-logfile - 
