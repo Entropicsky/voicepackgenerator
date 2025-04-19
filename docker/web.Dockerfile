@@ -8,7 +8,8 @@ ENV PYTHONUNBUFFERED 1
 
 WORKDIR /app
 
-# Install Python build dependencies
+# Install dependencies
+# Add build-base etc. for gevent C extensions
 RUN apk update && apk add --no-cache \
     build-base \
     libffi-dev \
@@ -21,17 +22,16 @@ RUN apk update && apk add --no-cache \
     nginx \
     gettext
 
-# Install pip dependencies
-COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install pip dependencies (Copy requirements FIRST for caching)
+COPY backend/requirements.txt /app/backend/requirements.txt
+RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 
 # --- Node Builder Stage (for Frontend) ---
 FROM node:20-slim as node-builder
-WORKDIR /app/frontend
-# Copy only package files first for caching
-COPY frontend/package*.json ./
+# Set working directory INSIDE /app to match final structure assumption
+WORKDIR /app/frontend 
+COPY frontend/package*.json .
 RUN npm install
-# Copy the rest of the frontend code
 COPY frontend/ .
 RUN npm run build
 
@@ -47,23 +47,22 @@ COPY backend/ /app/backend/
 COPY --from=node-builder /app/frontend/dist /app/frontend/dist/
 
 # Copy Nginx config template (will be processed by start.sh)
+# The start.sh script expects it at /app/frontend/nginx.conf
 COPY frontend/nginx.conf /app/frontend/nginx.conf
 
 # Copy startup script and make executable
-COPY start.sh .
+COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
 # Ensure output directory exists (although volume mount is better locally)
 RUN mkdir -p /app/backend/output/audio
 
-# Database initialization (Optional here, as start.sh could handle it, 
-# but doing it here ensures it exists if gunicorn starts before db init)
-# Note: This runs relative to WORKDIR /app
+# Database initialization (relative to WORKDIR /app)
 RUN touch /app/backend/jobs.db && cd /app/backend && python -c 'from models import init_db; init_db()'
 
 # Expose the port Nginx will listen on (set by $PORT)
 # Heroku uses $PORT, so this is mainly informational for Docker
 EXPOSE 8080 
 
-# Run the startup script
+# Run the startup script (ensure it uses correct paths relative to /app)
 CMD ["/app/start.sh"] 
