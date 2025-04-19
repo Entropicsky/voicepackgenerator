@@ -182,12 +182,24 @@ const VoiceDesignPage: React.FC = () => {
 
   // --- Render --- 
   return (
-    <div>
+    <div style={{ width: '100%', maxWidth: '100%', padding: '0 20px' }}>
       <h2>Voice Design</h2>
-      <div style={{ display: 'flex', gap: '30px' }}>
+      <div style={{ 
+        display: 'flex', 
+        gap: '20px', 
+        flexWrap: 'nowrap', 
+        minHeight: '650px',
+        width: '100%'
+      }}>
         
         {/* Left Column: Configuration */}
-        <div style={{ flex: 1, border: '1px solid #eee', padding: '20px', borderRadius: '5px' }}>
+        <div style={{ 
+          width: '35%', 
+          minWidth: '350px', 
+          border: '1px solid #eee', 
+          padding: '20px', 
+          borderRadius: '5px' 
+        }}>
           <h4>1. Configure Voice</h4>
 
           <div style={{ marginBottom: '15px' }}>
@@ -258,7 +270,12 @@ const VoiceDesignPage: React.FC = () => {
         </div>
 
         {/* Right Column: Results & Saving */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <div style={{ 
+          width: '65%',
+          display: 'flex', 
+          flexDirection: 'column', 
+          gap: '20px' 
+        }}>
           
           {/* Section for Latest Previews */}
           <div style={{ border: '1px solid #eee', padding: '20px', borderRadius: '5px' }}>

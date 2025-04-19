@@ -1,0 +1,41 @@
+/* Force light mode with highest priority */
+:root {
+  color-scheme: light !important;
+  color: #213547 !important;
+  background-color: #ffffff !important;
+}
+
+body {
+  color: #213547 !important;
+  background-color: #ffffff !important;
+}
+
+html, #root, #app, .app, main, div {
+  background-color: #ffffff !important;
+  color: #213547 !important;
+}
+
+/* Override dark mode buttons */
+button {
+  background-color: #f0f0f0 !important;
+  color: #213547 !important;
+  border: 1px solid #ccc !important;
+}
+
+button:hover {
+  background-color: #e5e5e5 !important;
+  border-color: #4a51e1 !important;
+}
+
+/* Force all text to be dark */
+h1, h2, h3, h4, h5, h6, p, span, div, a, label, input, textarea, select {
+  color: #213547 !important;
+}
+
+/* Disable all media queries for dark mode */
+@media (prefers-color-scheme: dark) {
+  * {
+    background-color: #ffffff !important;
+    color: #213547 !important;
+  }
+} 
