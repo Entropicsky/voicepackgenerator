@@ -3,14 +3,14 @@
 # Exit immediately if a command exits with a non-zero status.
 set -e
 
-# Ensure the target directory exists
+# Ensure the target directory exists (though likely unnecessary now)
 mkdir -p /etc/nginx/conf.d/
 
-# Substitute PORT into the Nginx snippet and write to a temporary config file
+# Substitute PORT into the Nginx template and write to the main Nginx config file
 export DOLLAR='$'
-envsubst '$PORT $DOLLAR' < /app/frontend/nginx.conf > /tmp/nginx.conf 
-# Start nginx with the temporary config (daemon off), explicitly specifying the config file
-nginx -c /tmp/nginx.conf -g 'daemon off;' &
+envsubst '$PORT $DOLLAR' < /app/frontend/nginx.conf > /etc/nginx/nginx.conf 
+# Start nginx using the main config file (daemon off)
+nginx -g 'daemon off;' &
 
 # Exec gunicorn with multiple workers and threads
 exec gunicorn backend.app:app \

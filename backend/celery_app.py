@@ -16,39 +16,33 @@ broker_url = redis_tls_url or redis_url or celery_broker_url or default_url
 # Configure SSL context *only* if the final determined URL uses the 'rediss://' scheme
 ssl_opts = {}
 if broker_url.startswith('rediss://'):
-    # Using CERT_NONE based on previous attempt, but Heroku might require CERT_REQUIRED.
-    # This needs verification during Heroku testing.
-    # ssl_opts = {'ssl_cert_reqs': ssl.CERT_NONE} 
-    # Example if CERT_REQUIRED is needed:
-    # ssl_opts = {'ssl_cert_reqs': ssl.CERT_REQUIRED}
-    # -- NEW APPROACH: Append SSL option to URL --
-    if '?' not in broker_url:
-        broker_url += "?ssl_cert_reqs=none"
-    else:
-        broker_url += "&ssl_cert_reqs=none"
-    # Also specify the CA certs location for verification - KEEPING this in case 'none' still needs it implicitly
-    broker_url += "&ssl_ca_certs=/etc/ssl/certs/ca-certificates.crt"
-    # Clear ssl_opts as it's now in the URL
-    ssl_opts = {}
+    # Reverting to dictionary approach, using CERT_NONE for now to ensure connection.
+    # Security Warning: CERT_NONE is vulnerable to MITM attacks.
+    ssl_opts = {'ssl_cert_reqs': ssl.CERT_NONE}
+    # If connection works, consider trying CERT_REQUIRED with CA certs:
+    # ssl_opts = {
+    #     'ssl_cert_reqs': ssl.CERT_REQUIRED,
+    #     'ssl_ca_certs': '/etc/ssl/certs/ca-certificates.crt'
+    # }
 
+# Note: No longer appending to broker_url string
 result_backend = broker_url
 
-# Instantiate Celery with direct broker/backend URLs and conditional SSL options
+# Instantiate Celery using broker_use_ssl / redis_backend_use_ssl
 celery = Celery(
     'backend.tasks',
-    broker=broker_url,
-    backend=result_backend,
+    broker=broker_url, # Use the base URL
+    backend=result_backend, # Use the base URL
     include=['backend.tasks'],
-    # Pass SSL options only if they exist (i.e., if broker_url started with rediss://)
-    # -- REMOVED: SSL options handled by URL parameters now --
-    # broker_use_ssl=ssl_opts or None,
-    # result_backend_use_ssl=ssl_opts or None,
+    # Pass the SSL options dictionary if it was populated (i.e., rediss://)
+    broker_use_ssl=ssl_opts or None,
+    redis_backend_use_ssl=ssl_opts or None, # Use redis_backend_use_ssl for Celery >= 5.2
 )
 
 # Update other Celery configuration settings
 celery.conf.update(
     task_serializer='json',
-    accept_content=['json'],  # Ensure tasks use json
+    accept_content=['json'],
     result_serializer='json',
     timezone='UTC',
     enable_utc=True,
@@ -56,7 +50,7 @@ celery.conf.update(
 
 # Updated print statements for better debugging
 print(f"Celery App: Determined broker_url = {broker_url}")
-# print(f"Celery App: Using SSL context = {ssl_opts if ssl_opts else 'No SSL'}") # No longer relevant
+print(f"Celery App: Using SSL context via options = {ssl_opts if ssl_opts else 'No SSL'}")
 # Keep the final print statements for consistency if needed elsewhere
 # print(f"Celery App: Configured with broker={broker_url}, backend={result_backend}")
 # print(f"Celery App: Broker transport options={ssl_opts}")
