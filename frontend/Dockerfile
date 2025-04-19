@@ -6,17 +6,26 @@ FROM node:20-slim as builder
 WORKDIR /app
 COPY package*.json ./
 # Clean potential stale caches/dependencies/output
-RUN rm -rf node_modules && rm -rf dist && rm -rf .vite 
+# RUN rm -rf node_modules && rm -rf dist && rm -rf .vite 
 RUN npm install
 COPY . .
 RUN npm run build
 
 # Stage 2: Serve static files with Nginx
-FROM nginx:alpine
-# Copy custom Nginx configuration
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+FROM nginx:alpine as final
+
 # Copy built static files from the builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html
-# Expose Nginx default port
+
+# Copy the Nginx config *template*
+COPY nginx.template.conf /etc/nginx/nginx.template.conf
+
+# Add a script to process the template and start Nginx
+COPY entrypoint.sh /docker-entrypoint-custom.sh
+RUN chmod +x /docker-entrypoint-custom.sh
+
+# Expose standard Nginx port (will be mapped by docker-compose)
 EXPOSE 80
-# Nginx default CMD will start the server (no CMD needed here) 
+
+# Use custom entrypoint
+CMD ["/docker-entrypoint-custom.sh"] 
