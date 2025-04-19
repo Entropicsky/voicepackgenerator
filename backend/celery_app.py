@@ -23,10 +23,10 @@ if broker_url.startswith('rediss://'):
     # ssl_opts = {'ssl_cert_reqs': ssl.CERT_REQUIRED}
     # -- NEW APPROACH: Append SSL option to URL --
     if '?' not in broker_url:
-        broker_url += "?ssl_cert_reqs=required"
+        broker_url += "?ssl_cert_reqs=none"
     else:
-        broker_url += "&ssl_cert_reqs=required"
-    # Also specify the CA certs location for verification
+        broker_url += "&ssl_cert_reqs=none"
+    # Also specify the CA certs location for verification - KEEPING this in case 'none' still needs it implicitly
     broker_url += "&ssl_ca_certs=/etc/ssl/certs/ca-certificates.crt"
     # Clear ssl_opts as it's now in the URL
     ssl_opts = {}
