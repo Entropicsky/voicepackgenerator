@@ -26,6 +26,8 @@ if broker_url.startswith('rediss://'):
         broker_url += "?ssl_cert_reqs=required"
     else:
         broker_url += "&ssl_cert_reqs=required"
+    # Also specify the CA certs location for verification
+    broker_url += "&ssl_ca_certs=/etc/ssl/certs/ca-certificates.crt"
     # Clear ssl_opts as it's now in the URL
     ssl_opts = {}
 
