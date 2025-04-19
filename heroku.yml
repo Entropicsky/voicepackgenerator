@@ -1,7 +1,15 @@
-<file name=backend/Dockerfile path=/Users/stewchisam/voicepackgenerator/backend/Dockerfile>
-# Other Dockerfile content
-COPY backend/requirements.txt ./requirements.txt
-# Other Dockerfile content
-COPY backend /app/backend
-# Other Dockerfile content
-</file>
+setup:
+  addons:
+    - plan: heroku-redis
+      as: REDIS
+
+build:
+  docker:
+    web: backend/Dockerfile        # Flask API & DB migrations
+    worker: backend/Dockerfile     # Celery worker – reuse the same image
+    frontend: frontend/Dockerfile  # Vite/NGINX static site
+
+run:
+  web: gunicorn app:app --bind 0.0.0.0:$PORT
+  worker: celery -A celery_app.celery worker --loglevel=info
+  frontend: nginx -g 'daemon off;'
