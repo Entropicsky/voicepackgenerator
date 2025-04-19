@@ -5,15 +5,13 @@ setup:
 
 build:
   docker:
-    # Restore standard setup: web=frontend, api=backend
-    web: frontend/Dockerfile
-    api: backend/Dockerfile
+    # Consolidated web dyno using Nginx + Gunicorn
+    web: docker/web.Dockerfile
+    # api process removed
     worker: backend/Dockerfile
 
 run:
-  # Restore standard setup: web=nginx, api=gunicorn
-  web: sh -c "envsubst '\$PORT' < /etc/nginx/conf.d/default.conf > /etc/nginx/conf.d/default.conf.tmp && mv /etc/nginx/conf.d/default.conf.tmp /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
-  # Use gevent worker and debug logging
-  # Add access logging to stdout
-  api: gunicorn backend.app:app --bind 0.0.0.0:$PORT --timeout 120 -k gevent --log-level debug --access-logfile -
+  # Run the consolidated start script
+  web: sh start.sh
+  # api process removed
   worker: celery -A backend.celery_app:celery worker --loglevel=info

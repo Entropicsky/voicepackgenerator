@@ -36,9 +36,9 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
 # Add ProxyFix middleware to handle X-Forwarded-* headers correctly
-# Trust 2 proxies (Heroku Router + Nginx Web Dyno)
+# Trust 1 proxy (Heroku Router) since Nginx is now internal
 app.wsgi_app = ProxyFix(
-    app.wsgi_app, x_for=2, x_proto=1, x_host=1, x_prefix=1
+    app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1
 ) # Re-enabled
 
 # Initialize Flask-Migrate
