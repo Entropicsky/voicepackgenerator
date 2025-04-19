@@ -5,13 +5,13 @@ setup:
 
 build:
   docker:
-    # Temporarily run backend directly as web for debugging
-    web: backend/Dockerfile
-    # api: backend/Dockerfile # Disabled for debugging
+    # Restore standard setup: web=frontend, api=backend
+    web: frontend/Dockerfile
+    api: backend/Dockerfile
     worker: backend/Dockerfile
 
 run:
-  # Temporarily run backend directly as web
-  web: gunicorn backend.app:app --bind 0.0.0.0:$PORT --timeout 120
-  # api: gunicorn backend.app:app --bind 0.0.0.0:$PORT --timeout 120 # Disabled for debugging
+  # Restore standard setup: web=nginx, api=gunicorn
+  web: sh -c "envsubst '\$PORT' < /etc/nginx/conf.d/default.conf > /etc/nginx/conf.d/default.conf.tmp && mv /etc/nginx/conf.d/default.conf.tmp /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
+  api: gunicorn backend.app:app --bind 0.0.0.0:$PORT --timeout 120
   worker: celery -A backend.celery_app:celery worker --loglevel=info

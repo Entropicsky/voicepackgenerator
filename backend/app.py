@@ -13,7 +13,7 @@ import base64
 from sqlalchemy import func, Boolean
 import csv
 from flask_migrate import Migrate
-# from werkzeug.middleware.proxy_fix import ProxyFix # Temporarily disabled
+from werkzeug.middleware.proxy_fix import ProxyFix # Re-enabled
 import time # For timing
 import logging # For better logging
 
@@ -37,9 +37,9 @@ logging.basicConfig(level=logging.INFO)
 
 # Add ProxyFix middleware to handle X-Forwarded-* headers correctly
 # Trust 2 proxies (Heroku Router + Nginx Web Dyno)
-# app.wsgi_app = ProxyFix(
-#     app.wsgi_app, x_for=2, x_proto=1, x_host=1, x_prefix=1
-# ) # Temporarily disabled
+app.wsgi_app = ProxyFix(
+    app.wsgi_app, x_for=2, x_proto=1, x_host=1, x_prefix=1
+) # Re-enabled
 
 # Initialize Flask-Migrate
 # Ensure the database engine is available
@@ -77,6 +77,13 @@ def make_api_response(data: dict = None, error: str = None, status_code: int = 2
     return jsonify(response_data), status_code
 
 # --- API Endpoints --- #
+
+@app.route('/debug-routes')
+def debug_routes():
+    # IMPORTANT: Remove this in production!
+    output = str(app.url_map)
+    logging.info(f"Debug Routes: {output}")
+    return Response(output, mimetype='text/plain')
 
 @app.route('/api/ping')
 def ping():
