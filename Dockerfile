@@ -47,7 +47,7 @@ COPY backend /app/backend/
 COPY --from=node-builder /app/frontend/dist /app/frontend/dist/
 
 # Copy Nginx config template (needed by start.sh)
-COPY frontend/nginx.conf /app/frontend/nginx.conf
+COPY frontend/nginx.template.conf /app/frontend/nginx.conf
 
 # Copy startup script and make executable (needed for CMD)
 COPY start.sh /app/start.sh
