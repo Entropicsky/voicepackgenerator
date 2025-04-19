@@ -20,7 +20,6 @@ COPY backend/requirements.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application code into the container
-# Copy the backend directory content into the WORKDIR (/app)
 COPY backend /app/backend
 WORKDIR /app/backend
 # Make port 5000 available to the world outside this container
