@@ -15,9 +15,9 @@ import csv
 from flask_migrate import Migrate
 
 # Import celery app instance from root
-from celery_app import celery_app
+from .celery_app import celery_app
 # Import tasks from root
-import tasks
+from . import tasks
 # Import utils from backend package
 from . import utils_elevenlabs
 from . import utils_fs
