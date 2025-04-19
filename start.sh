@@ -3,6 +3,9 @@
 # Exit immediately if a command exits with a non-zero status.
 set -e
 
+# Ensure the target directory exists
+mkdir -p /etc/nginx/conf.d/
+
 # Substitute PORT into the Nginx snippet and write to conf.d for default main config
 export DOLLAR='$'
 envsubst '$PORT $DOLLAR' < /app/frontend/nginx.conf > /etc/nginx/conf.d/default.conf
