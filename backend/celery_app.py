@@ -1,31 +1,37 @@
 # backend/celery_app.py
-# Option B: Smart Redis TLS URL selection
+# Option B: Smart Redis TLS URL selection - REVISED
 from celery import Celery
 import os
 import ssl
 
-# Determine raw Redis URL (prefer TLS, fallback to plain, then CELERY_BROKER_URL, then default)
-raw_url = os.environ.get('REDIS_TLS_URL') or os.environ.get('REDIS_URL') or os.getenv('CELERY_BROKER_URL') or 'redis://redis:6379/0'
+# Determine raw Redis URL (prioritize TLS, then plain, then generic broker, then default)
+redis_tls_url = os.environ.get('REDIS_TLS_URL')
+redis_url = os.environ.get('REDIS_URL')
+celery_broker_url = os.getenv('CELERY_BROKER_URL')
+default_url = 'redis://redis:6379/0' # Default for local Docker
 
-# Upgrade scheme and configure SSL options
-if raw_url.startswith('redis://'):
-    broker_url = raw_url.replace('redis://', 'rediss://', 1)
+# Select the URL based on priority
+broker_url = redis_tls_url or redis_url or celery_broker_url or default_url
+
+# Configure SSL context *only* if the final determined URL uses the 'rediss://' scheme
+ssl_opts = {}
+if broker_url.startswith('rediss://'):
+    # Using CERT_NONE based on previous attempt, but Heroku might require CERT_REQUIRED.
+    # This needs verification during Heroku testing.
     ssl_opts = {'ssl_cert_reqs': ssl.CERT_NONE}
-elif raw_url.startswith('rediss://'):
-    broker_url = raw_url
-    ssl_opts = {'ssl_cert_reqs': ssl.CERT_REQUIRED}
-else:
-    broker_url = raw_url
-    ssl_opts = {}
+    # Example if CERT_REQUIRED is needed:
+    # ssl_opts = {'ssl_cert_reqs': ssl.CERT_REQUIRED}
+
 
 result_backend = broker_url
 
-# Instantiate Celery with direct broker/backend URLs and SSL options
+# Instantiate Celery with direct broker/backend URLs and conditional SSL options
 celery = Celery(
     'backend.tasks',
     broker=broker_url,
     backend=result_backend,
     include=['backend.tasks'],
+    # Pass SSL options only if they exist (i.e., if broker_url started with rediss://)
     broker_use_ssl=ssl_opts or None,
     result_backend_use_ssl=ssl_opts or None,
 )
@@ -39,6 +45,10 @@ celery.conf.update(
     enable_utc=True,
 )
 
-print(f"Celery App: Configured with broker={broker_url}, backend={result_backend}")
-print(f"Celery App: Broker transport options={ssl_opts}")
-print(f"Celery App: Result backend transport options={ssl_opts}") 
+# Updated print statements for better debugging
+print(f"Celery App: Determined broker_url = {broker_url}")
+print(f"Celery App: Using SSL context = {ssl_opts if ssl_opts else 'No SSL'}")
+# Keep the final print statements for consistency if needed elsewhere
+# print(f"Celery App: Configured with broker={broker_url}, backend={result_backend}")
+# print(f"Celery App: Broker transport options={ssl_opts}")
+# print(f"Celery App: Result backend transport options={ssl_opts}") 
