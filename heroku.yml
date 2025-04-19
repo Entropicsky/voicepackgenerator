@@ -1,4 +1,4 @@
-setup:
+<file name=0 path=/Users/stewchisam/voicepackgenerator/heroku.yml>setup:
   addons:
     - plan: heroku-redis
       as: REDIS
@@ -11,5 +11,6 @@ build:
 
 run:
   web: gunicorn backend.app:app --bind 0.0.0.0:$PORT
-  worker: celery -A backend.celery_app.celery worker --loglevel=info
+  worker: celery -A backend.celery_app:celery worker --loglevel=info
   frontend: nginx -g 'daemon off;'
+</file>

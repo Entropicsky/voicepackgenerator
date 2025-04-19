@@ -8,11 +8,11 @@ result_backend = os.getenv('CELERY_RESULT_BACKEND', 'redis://redis:6379/0')
 
 celery_app = Celery(
     # Using the filename as the main name is common
-    'tasks', # Corresponds to tasks.py
+    'backend.tasks', # Corresponds to backend/tasks.py
     broker=broker_url,
     backend=result_backend,
     # include tasks explicitly here now that it's simpler
-    include=['tasks']
+    include=['backend.tasks']
 )
 
 # Optional configuration settings
