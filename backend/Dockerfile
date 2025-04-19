@@ -15,7 +15,7 @@ RUN apk update && apk add --no-cache git sqlite
 
 # Install pip dependencies
 # Copy only requirements to leverage Docker cache
-COPY backend/requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application code into the container
