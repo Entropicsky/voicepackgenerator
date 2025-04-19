@@ -8,19 +8,25 @@ broker_url = os.getenv('CELERY_BROKER_URL', 'redis://redis:6379/0')
 result_backend = os.getenv('CELERY_RESULT_BACKEND', 'redis://redis:6379/0')
 
 # Configure SSL options for Heroku Redis
-broker_options = {}
-backend_options = {}
-
-# If using SSL (rediss:// protocol), add the required SSL settings
+# First, make sure to set the ssl_cert_reqs parameter directly in the URL
 if broker_url.startswith('rediss://'):
-    broker_options = {
-        'ssl_cert_reqs': ssl.CERT_NONE
-    }
+    # Parse the URL and add ssl cert parameter
+    if '?' not in broker_url:
+        broker_url += '?ssl_cert_reqs=CERT_NONE'
+    else:
+        broker_url += '&ssl_cert_reqs=CERT_NONE'
 
 if result_backend.startswith('rediss://'):
-    backend_options = {
-        'ssl_cert_reqs': ssl.CERT_NONE
-    }
+    # Parse the URL and add ssl cert parameter
+    if '?' not in result_backend:
+        result_backend += '?ssl_cert_reqs=CERT_NONE'
+    else:
+        result_backend += '&ssl_cert_reqs=CERT_NONE'
+
+# Redis backend options
+redis_backend_options = {
+    'ssl_cert_reqs': ssl.CERT_NONE
+}
 
 celery = Celery(
     # Using the filename as the main name is common
@@ -29,9 +35,8 @@ celery = Celery(
     backend=result_backend,
     # include tasks explicitly here now that it's simpler
     include=['backend.tasks'],
-    # Add the broker and backend options
-    broker_transport_options=broker_options,
-    redis_backend_options=backend_options
+    # Add Redis backend options
+    redis_backend_options=redis_backend_options
 )
 
 # Optional configuration settings
@@ -41,6 +46,10 @@ celery.conf.update(
     result_serializer='json',
     timezone='UTC',
     enable_utc=True,
+    # Set broker options directly here too
+    broker_use_ssl={
+        'ssl_cert_reqs': ssl.CERT_NONE
+    }
 )
 
 print(f"Celery App: Configured with broker={broker_url}, backend={result_backend}") 
