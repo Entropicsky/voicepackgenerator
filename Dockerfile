@@ -8,7 +8,7 @@ ENV PYTHONUNBUFFERED 1
 
 WORKDIR /app
 
-# Install dependencies first
+# Install dependencies and TLS root certificates
 RUN apk update && apk add --no-cache \
     build-base \
     libffi-dev \
@@ -16,7 +16,9 @@ RUN apk update && apk add --no-cache \
     git \
     sqlite \
     nginx \
-    gettext
+    gettext \
+    ca-certificates \
+  && update-ca-certificates
 
 # Copy full project into image so requirements file is available
 COPY . /app

@@ -11,16 +11,17 @@ WORKDIR /app
 # Install system dependencies
 # Add git for potential VCS requirements in pip packages
 # Add sqlite for Flask-Migrate/Alembic support with SQLite
-RUN apk update && apk add --no-cache git sqlite
+# Add ca-certificates and update-ca-certificates for TLS validation
+RUN apk update && apk add --no-cache git sqlite ca-certificates && update-ca-certificates
 
 # Install pip dependencies
 # Copy only requirements to leverage Docker cache
-COPY requirements.txt .
+COPY backend/requirements.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application code into the container
 # Copy the backend directory content into the WORKDIR (/app)
-COPY . /app/backend
+COPY backend /app/backend
 WORKDIR /app/backend
 # Make port 5000 available to the world outside this container
 # Note: For production, consider using a different port or reverse proxy

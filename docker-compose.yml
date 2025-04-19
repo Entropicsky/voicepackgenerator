@@ -51,8 +51,8 @@ services:
     environment:
       - AUDIO_ROOT=/app/output
       - PYTHONPATH=/app # Explicitly add project root to path
-    # Command uses app defined in root celery_app.py
-    command: celery -A celery_app worker --loglevel=INFO
+    # Command uses backend.celery_app module
+    command: celery -A backend.celery_app:celery worker --loglevel=INFO
     depends_on:
       - redis
     restart: unless-stopped
