@@ -18,9 +18,9 @@ import logging # For better logging
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 # Import celery app instance from root
-from .celery_app import celery
+from backend.celery_app import celery
 # Import tasks from root
-from . import tasks
+from backend import tasks
 # Import utils from backend package
 from . import utils_elevenlabs
 from . import utils_fs
@@ -36,9 +36,9 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
 # Add ProxyFix middleware to handle X-Forwarded-* headers correctly
-# Trust 1 proxy (Heroku Router) since Nginx is now internal
+# Trust 2 proxies (Heroku Router + Nginx Web Dyno)
 app.wsgi_app = ProxyFix(
-    app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1
+    app.wsgi_app, x_for=2, x_proto=1, x_host=1, x_prefix=1
 )
 
 # Initialize Flask-Migrate
@@ -77,18 +77,6 @@ def make_api_response(data: dict = None, error: str = None, status_code: int = 2
     return jsonify(response_data), status_code
 
 # --- API Endpoints --- #
-
-@app.route('/')
-def index():
-    # Added for debugging proxy/routing
-    return "API Root OK"
-
-@app.route('/debug-routes')
-def debug_routes():
-    # IMPORTANT: Remove this in production!
-    output = str(app.url_map)
-    logging.info(f"Debug Routes: {output}")
-    return Response(output, mimetype='text/plain')
 
 @app.route('/api/ping')
 def ping():

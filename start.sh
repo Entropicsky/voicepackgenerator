@@ -20,7 +20,6 @@ export GUNI_PORT=5000
 # Start gunicorn
 # Bind explicitly to internal localhost:PORT
 # Use sync worker for debugging stability
-cd /app/backend
 gunicorn backend.app:app \
     --bind 127.0.0.1:${GUNI_PORT} \
     --timeout 120 \
