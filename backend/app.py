@@ -15,7 +15,7 @@ import csv
 from flask_migrate import Migrate
 
 # Import celery app instance from root
-from .celery_app import celery_app
+from .celery_app import celery
 # Import tasks from root
 from . import tasks
 # Import utils from backend package
@@ -211,8 +211,8 @@ def start_generation():
 def get_task_status(task_id):
     """Endpoint to check the status of a generation task."""
     try:
-        # Use the celery_app instance imported from root
-        task_result = AsyncResult(task_id, app=celery_app)
+        # Use the celery instance imported from the module
+        task_result = AsyncResult(task_id, app=celery)
 
         response_data = {
             'task_id': task_id,

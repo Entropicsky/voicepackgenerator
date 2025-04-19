@@ -6,7 +6,7 @@ import os
 broker_url = os.getenv('CELERY_BROKER_URL', 'redis://redis:6379/0')
 result_backend = os.getenv('CELERY_RESULT_BACKEND', 'redis://redis:6379/0')
 
-celery_app = Celery(
+celery = Celery(
     # Using the filename as the main name is common
     'backend.tasks', # Corresponds to backend/tasks.py
     broker=broker_url,
@@ -16,7 +16,7 @@ celery_app = Celery(
 )
 
 # Optional configuration settings
-celery_app.conf.update(
+celery.conf.update(
     task_serializer='json',
     accept_content=['json'],  # Ensure tasks use json
     result_serializer='json',
