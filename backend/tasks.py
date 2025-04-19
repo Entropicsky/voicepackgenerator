@@ -1,5 +1,5 @@
 # backend/tasks.py
-from celery_app import celery_app
+from .celery_app import celery
 from backend import utils_elevenlabs, utils_fs, models # Import models
 from sqlalchemy.orm import Session
 import time
@@ -15,7 +15,7 @@ import base64
 
 print("Celery Worker: Loading tasks.py...")
 
-@celery_app.task(bind=True, name='tasks.run_generation')
+@celery.task(bind=True, name='tasks.run_generation')
 def run_generation(self, 
                    generation_job_db_id: int, 
                    config_json: str, 
@@ -332,7 +332,7 @@ def run_generation(self,
 
 # --- New Task for Line Regeneration --- #
 
-@celery_app.task(bind=True, name='tasks.regenerate_line_takes')
+@celery.task(bind=True, name='tasks.regenerate_line_takes')
 def regenerate_line_takes(self, 
                           generation_job_db_id: int, 
                           batch_id: str, 
@@ -535,7 +535,7 @@ def regenerate_line_takes(self,
 
 # --- New Task for Speech-to-Speech Line Regeneration --- #
 
-@celery_app.task(bind=True, name='tasks.run_speech_to_speech_line')
+@celery.task(bind=True, name='tasks.run_speech_to_speech_line')
 def run_speech_to_speech_line(self,
                               generation_job_db_id: int,
                               batch_id: str,
@@ -678,7 +678,7 @@ def run_speech_to_speech_line(self,
         db.close()
 
 # --- Placeholder Task (Keep or Remove) ---
-# @celery_app.task(bind=True)
+# @celery.task(bind=True)
 # def placeholder_task(self):
 #     task_id = self.request.id
 #     print(f"Running placeholder_task (ID: {task_id})...")
