@@ -1,17 +1,16 @@
 # backend/celery_app.py
 from celery import Celery
 import os
+import ssl
 
-# Note: For Docker, ensure these env vars point to the 'redis' service name
+# Use the REDIS_TLS_URL with SSL disabled for Heroku Redis
 broker_url = os.getenv('CELERY_BROKER_URL', 'redis://redis:6379/0')
 result_backend = os.getenv('CELERY_RESULT_BACKEND', 'redis://redis:6379/0')
 
-# Convert rediss:// URLs to redis:// to avoid SSL issues
-if broker_url.startswith('rediss://'):
-    broker_url = broker_url.replace('rediss://', 'redis://')
-    
-if result_backend.startswith('rediss://'):
-    result_backend = result_backend.replace('rediss://', 'redis://')
+# Configure Redis connection parameters for SSL
+redis_options = {
+    'ssl_cert_reqs': ssl.CERT_NONE
+}
 
 celery = Celery(
     # Using the filename as the main name is common
@@ -19,7 +18,9 @@ celery = Celery(
     broker=broker_url,
     backend=result_backend,
     # include tasks explicitly here now that it's simpler
-    include=['backend.tasks']
+    include=['backend.tasks'],
+    broker_use_ssl=redis_options,
+    redis_backend_use_ssl=redis_options
 )
 
 # Optional configuration settings
