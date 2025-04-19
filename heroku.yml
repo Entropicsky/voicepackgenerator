@@ -5,11 +5,17 @@ setup:
 
 build:
   docker:
-    web: backend/Dockerfile        # Flask API & DB migrations
-    worker: backend/Dockerfile     # Celery worker – reuse the same image
-    frontend: frontend/Dockerfile  # Vite/NGINX static site
+    # 'web' should serve the user-facing Nginx frontend
+    web: frontend/Dockerfile
+    # 'api' will run the Flask backend API
+    api: backend/Dockerfile
+    # 'worker' runs Celery using the same backend image
+    worker: backend/Dockerfile
 
 run:
-  web: gunicorn backend.app:app --bind 0.0.0.0:$PORT
+  # 'web' now starts Nginx via envsubst for $PORT handling
+  web: sh -c "envsubst '\$PORT' < /etc/nginx/conf.d/default.conf > /etc/nginx/conf.d/default.conf.tmp && mv /etc/nginx/conf.d/default.conf.tmp /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
+  # 'api' runs the Gunicorn/Flask backend
+  api: gunicorn backend.app:app --bind 0.0.0.0:$PORT
+  # 'worker' runs Celery
   worker: celery -A backend.celery_app:celery worker --loglevel=info
-  frontend: sh -c "envsubst '\$PORT' < /etc/nginx/conf.d/default.conf > /etc/nginx/conf.d/default.conf.tmp && mv /etc/nginx/conf.d/default.conf.tmp /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
