@@ -23,13 +23,15 @@ RUN apk update && apk add --no-cache \
     gettext
 
 # Install pip dependencies (Copy requirements FIRST for caching)
-COPY backend/requirements.txt /app/backend/requirements.txt
-RUN pip install --no-cache-dir -r /app/backend/requirements.txt
+# Source path is relative to the build context (root)
+COPY ./backend/requirements.txt /app/requirements.txt 
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # --- Node Builder Stage (for Frontend) ---
 FROM node:20-slim as node-builder
 # Set working directory INSIDE /app to match final structure assumption
 WORKDIR /app/frontend 
+# Source paths relative to build context
 COPY frontend/package*.json .
 RUN npm install
 COPY frontend/ .
@@ -40,24 +42,25 @@ FROM python-base as final
 
 WORKDIR /app
 
-# Copy Python backend code
-COPY backend/ /app/backend/
+# Copy Python backend code (from project root/backend to /app/backend)
+COPY backend /app/backend/
 
 # Copy built frontend static files from node-builder stage
 COPY --from=node-builder /app/frontend/dist /app/frontend/dist/
 
-# Copy Nginx config template (will be processed by start.sh)
+# Copy Nginx config template (from project root/frontend to /app/frontend)
 # The start.sh script expects it at /app/frontend/nginx.conf
 COPY frontend/nginx.conf /app/frontend/nginx.conf
 
-# Copy startup script and make executable
+# Copy startup script (from project root to /app)
 COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
 # Ensure output directory exists (although volume mount is better locally)
 RUN mkdir -p /app/backend/output/audio
 
-# Database initialization (relative to WORKDIR /app)
+# Database initialization (cd into backend first)
+# Make sure the DB file path matches what's expected by models.py
 RUN touch /app/backend/jobs.db && cd /app/backend && python -c 'from models import init_db; init_db()'
 
 # Expose the port Nginx will listen on (set by $PORT)
