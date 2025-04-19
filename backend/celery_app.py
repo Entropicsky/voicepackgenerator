@@ -1,41 +1,33 @@
 # backend/celery_app.py
+# Option B: Smart Redis TLS URL selection
 from celery import Celery
 import os
 import ssl
 
-# Prefer TLS-enabled Redis URL on Heroku, falling back to standard Redis URL or Celery-specific vars
-redis_url = os.environ.get('REDIS_TLS_URL') or os.environ.get('REDIS_URL')
-broker_url = redis_url or os.getenv('CELERY_BROKER_URL', 'redis://redis:6379/0')
-result_backend = redis_url or os.getenv('CELERY_RESULT_BACKEND', 'redis://redis:6379/0')
+# Determine raw Redis URL (prefer TLS, fallback to plain, then CELERY_BROKER_URL, then default)
+raw_url = os.environ.get('REDIS_TLS_URL') or os.environ.get('REDIS_URL') or os.getenv('CELERY_BROKER_URL') or 'redis://redis:6379/0'
 
-# Default connection options (empty)
-broker_transport_opts = {}
-result_backend_transport_opts = {}
+# Upgrade scheme and configure SSL options
+if raw_url.startswith('redis://'):
+    broker_url = raw_url.replace('redis://', 'rediss://', 1)
+    ssl_opts = {'ssl_cert_reqs': ssl.CERT_NONE}
+elif raw_url.startswith('rediss://'):
+    broker_url = raw_url
+    ssl_opts = {'ssl_cert_reqs': ssl.CERT_REQUIRED}
+else:
+    broker_url = raw_url
+    ssl_opts = {}
 
-# Only enable TLS when explicitly using REDIS_TLS_URL env var
-tls_env_url = os.environ.get('REDIS_TLS_URL')
-if tls_env_url:
-    # Celery broker and backend both use the redis_url env var when TLS is desired
-    if broker_url.startswith('redis://'):
-        broker_transport_opts = {'ssl_cert_reqs': ssl.CERT_NONE}
-        broker_url = broker_url.replace('redis://', 'rediss://', 1)
-    elif broker_url.startswith('rediss://'):
-        broker_transport_opts = {'ssl_cert_reqs': ssl.CERT_REQUIRED}
-    
-    if result_backend.startswith('redis://'):
-        result_backend_transport_opts = {'ssl_cert_reqs': ssl.CERT_NONE}
-        result_backend = result_backend.replace('redis://', 'rediss://', 1)
-    elif result_backend.startswith('rediss://'):
-        result_backend_transport_opts = {'ssl_cert_reqs': ssl.CERT_REQUIRED}
+result_backend = broker_url
 
-# Instantiate Celery with SSL options for Redis
+# Instantiate Celery with direct broker/backend URLs and SSL options
 celery = Celery(
-    'backend.tasks', # Corresponds to backend/tasks.py
+    'backend.tasks',
     broker=broker_url,
     backend=result_backend,
     include=['backend.tasks'],
-    broker_use_ssl=broker_transport_opts,
-    result_backend_use_ssl=result_backend_transport_opts,
+    broker_use_ssl=ssl_opts or None,
+    result_backend_use_ssl=ssl_opts or None,
 )
 
 # Update other Celery configuration settings
@@ -48,5 +40,5 @@ celery.conf.update(
 )
 
 print(f"Celery App: Configured with broker={broker_url}, backend={result_backend}")
-print(f"Celery App: Broker transport options={broker_transport_opts}")
-print(f"Celery App: Result backend transport options={result_backend_transport_opts}") 
+print(f"Celery App: Broker transport options={ssl_opts}")
+print(f"Celery App: Result backend transport options={ssl_opts}") 
