@@ -43,6 +43,8 @@ WORKDIR /app
 # Copy backend code (needed at runtime by Gunicorn)
 COPY backend /app/backend/
 
+# Ensure the Nginx root directory exists
+RUN mkdir -p /usr/share/nginx/html
 # Copy frontend build artifacts to the correct Nginx root directory
 COPY --from=node-builder /app/frontend/dist /usr/share/nginx/html/
 
