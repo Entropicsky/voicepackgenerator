@@ -39,6 +39,7 @@ services:
     environment:
       # Set Flask environment for development
       - FLASK_ENV=development
+      - FLASK_DEBUG=1 # Enable Flask debugger
       # Set the audio root relative to WORKDIR inside container
       # Needs to match the volume mount target above
       - AUDIO_ROOT=/app/output
