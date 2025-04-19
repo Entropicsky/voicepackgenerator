@@ -4,6 +4,7 @@ import { RankingProvider, useRanking } from '../contexts/RankingContext';
 import CurrentLineTakes from '../components/ranking/CurrentLineTakes';
 import CurrentLineRankedPanel from '../components/ranking/CurrentLineRankedPanel';
 import LineNavigation from '../components/ranking/LineNavigation';
+import TrashPanel from '../components/ranking/TrashPanel';
 
 // Inner component to access context data
 const RankingUI: React.FC = () => {
@@ -75,7 +76,10 @@ const RankingUI: React.FC = () => {
       <div style={{ display: 'flex', flexDirection: 'row', gap: '15px' }}>
           <LineNavigation />        {/* flex: 1 */}
           <CurrentLineTakes />      {/* flex: 3 */}
-          <CurrentLineRankedPanel />{/* flex: 1 */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+              <CurrentLineRankedPanel />{/* Takes remaining vertical space */}
+              <TrashPanel />            {/* Sits below ranked panel */}
+          </div>
       </div>
     </div>
   );

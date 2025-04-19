@@ -369,20 +369,22 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
   }, [batchId, isLocked]);
 
   // --- Memoized Ranked Takes for CURRENTLY SELECTED line ---
-  const currentLineRankedTakes = useMemo<(Take | null)[]>(() => {
-    const ranks: (Take | null)[] = Array(5).fill(null);
-    if (selectedLineKey && batchMetadata?.takes) {
-        const lineTakes = batchMetadata.takes.filter((t: Take) => t.line === selectedLineKey);
-        for (const take of lineTakes) {
-            if (take.rank !== null && take.rank >= 1 && take.rank <= 5) {
-                if (ranks[take.rank - 1] === null) {
-                  ranks[take.rank - 1] = take;
-                }
-            }
-        }
-    }
-    return ranks;
-  }, [batchMetadata, selectedLineKey]);
+  // Calculate directly without useMemo
+  const calculateRankedTakes = () => {
+      const ranks: (Take | null)[] = Array(5).fill(null);
+      if (selectedLineKey && batchMetadata?.takes) {
+          const lineTakes = batchMetadata.takes.filter((t: Take) => t.line === selectedLineKey);
+          for (const take of lineTakes) {
+              if (take.rank !== null && take.rank >= 1 && take.rank <= 5) {
+                  if (ranks[take.rank - 1] === null) {
+                    ranks[take.rank - 1] = take;
+                  }
+              }
+          }
+      }
+      return ranks;
+  };
+  const currentLineRankedTakes = calculateRankedTakes();
 
   // --- Context Value ---
   const value: RankingContextType = {

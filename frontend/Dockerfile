@@ -5,10 +5,11 @@
 FROM node:20-slim as builder
 WORKDIR /app
 COPY package*.json ./
-# Clean potential stale caches/dependencies/output
-# RUN rm -rf node_modules && rm -rf dist && rm -rf .vite 
-RUN npm install
+# Force clean install inside Docker
+RUN rm -rf node_modules && npm install
 COPY . .
+# Ensure dist dir is removed before build
+RUN rm -rf dist
 RUN npm run build
 
 # Stage 2: Serve static files with Nginx

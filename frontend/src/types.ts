@@ -53,6 +53,8 @@ export interface TaskStatus {
   info: any;
 }
 
+// This interface defines the config received from the /api/generate endpoint
+// AND the settings used for regeneration (potentially subset via Partial)
 export interface GenerationConfig {
   skin_name: string;
   voice_ids: string[];
@@ -67,6 +69,23 @@ export interface GenerationConfig {
   speed_range?: [number, number]; // [min, max]
   // Keep speaker boost as a single boolean
   use_speaker_boost?: boolean;
+}
+
+// Type for the payload sent when regenerating a line
+// Uses Partial<GenerationConfig> to send only relevant range settings
+export interface RegenerateLinePayload {
+    line_key: string;
+    line_text: string;
+    num_new_takes: number;
+    settings: Partial<GenerationConfig>; // Send relevant ranges
+    replace_existing: boolean;
+    update_script?: boolean;
+}
+
+// Response from starting any async job (generate, regenerate, STS)
+export interface JobSubmissionResponse {
+  task_id: string | null; // Celery Task ID (can be null if submit fails)
+  job_id: number;        // Database Job ID
 }
 
 // Represents detailed batch info from the enhanced /api/batches endpoint
@@ -209,16 +228,6 @@ export interface ScriptLineCreateOrUpdate {
     line_key: string;
     text: string;
     order_index: number;
-}
-
-// Define payload for line regeneration
-export interface RegenerateLinePayload {
-    line_key: string;
-    line_text: string;
-    num_new_takes: number;
-    settings: Partial<GenerationConfig>; // Only need TTS settings part
-    replace_existing: boolean;
-    update_script?: boolean;
 }
 
 // --- END Script Management Types ---

@@ -74,3 +74,16 @@ button:focus-visible {
   }
 }
 */
+
+/* Override rc-slider handle color to match Mantine primary blue */
+.rc-slider-handle {
+  background-color: #228be6 !important; /* Mantine primary blue (approx) */
+  border-color: #228be6 !important;     /* Match border */
+}
+
+/* Optional: Adjust focus/hover state if needed */
+.rc-slider-handle:focus,
+.rc-slider-handle:hover,
+.rc-slider-handle:active {
+  box-shadow: 0 0 0 5px rgba(34, 139, 230, 0.2) !important; /* Lighter blue shadow */
+}

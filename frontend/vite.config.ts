@@ -1,32 +1,39 @@
+import { fileURLToPath, URL } from 'node:url'
+
 import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import pluginReactSWC from '@vitejs/plugin-react-swc'
+// import basicSsl from '@vitejs/plugin-basic-ssl' // Removed unused SSL plugin
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    pluginReactSWC(),
+    // basicSsl(), // Enable if HTTPS is needed locally, ensure certs are trusted
+  ],
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url))
+    }
+  },
   server: {
-    // Make server accessible externally (within Docker network and via port mapping)
-    host: '0.0.0.0',
-    port: 5173,
-    // Explicitly configure watcher to ignore the config file itself
-    // and node_modules, and use polling as it's often needed in Docker.
+    host: '0.0.0.0', // Allow access from network
+    port: 5174, // Use a different port than the static build Nginx
+    strictPort: true, // Don't automatically pick another port
+    // Add polling for file watching reliability
     watch: {
-      ignored: ['**/vite.config.ts', '**/node_modules/**'],
       usePolling: true,
-      interval: 1000 // Optional: adjust polling interval if needed
+      interval: 100, // Optional: Check frequency in ms
     },
-    // Add proxy settings here
+    // Proxy API requests to the backend container running on localhost:5001
     proxy: {
-      // Point back to backend service name for container-to-container communication
       '/api': {
-        target: 'http://backend:5000',
+        target: 'http://localhost:5001',
         changeOrigin: true,
-        secure: false,
+        // rewrite: (path) => path.replace(/^\/api/, ''), // Only if backend doesn't expect /api prefix
       },
       '/audio': {
-        target: 'http://backend:5000',
+        target: 'http://localhost:5001',
         changeOrigin: true,
-        secure: false,
       }
     }
   }

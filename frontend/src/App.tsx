@@ -16,6 +16,27 @@ import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
 import '@mantine/dates/styles.css';
 import 'rc-slider/assets/index.css';
+import {
+  QueryClient,
+  QueryClientProvider,
+} from '@tanstack/react-query';
+
+// Create a client
+const queryClient = new QueryClient();
+
+// NEW: Wrapper component to correctly call useParams
+const RankingPageRouteWrapper: React.FC = () => {
+  const { batchId } = useParams<{ batchId: string }>();
+  if (!batchId) {
+    // Handle case where batchId is missing, maybe redirect or show error
+    return <p>Error: Missing Batch ID in URL.</p>;
+  }
+  return (
+    <RankingProvider batchId={batchId}>
+      <RankingPage />
+    </RankingProvider>
+  );
+};
 
 const App: React.FC = () => {
   const [opened, { toggle }] = useDisclosure();
@@ -57,11 +78,7 @@ const App: React.FC = () => {
                 <Route path="/scripts/new" element={<ScriptEditorPage />} />
                 <Route path="/scripts/:scriptId" element={<ScriptEditorPage />} />
                 <Route path="/voice-design" element={<VoiceDesignPage />} />
-                <Route path="/batch/:batchId" element={
-                  <RankingProvider batchId={useParams().batchId!}>
-                    <RankingPage />
-                  </RankingProvider>
-                } />
+                <Route path="/batch/:batchId" element={<RankingPageRouteWrapper />} />
                 <Route path="/batches" element={<BatchesPage />} />
                 <Route path="/jobs" element={<JobsPage />} />
                 <Route path="/" element={<GenerationPage />} />

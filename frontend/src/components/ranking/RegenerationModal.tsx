@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { GenerationConfig, Take, ModelOption } from '../../types';
 import { api } from '../../api';
 import Slider from 'rc-slider'; // Assuming rc-slider is installed
@@ -45,6 +45,7 @@ const RegenerationModal: React.FC<RegenerationModalProps> = ({
 
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null); // Add Ref
 
   // Effect to handle Escape key press for closing the modal
   useEffect(() => {
@@ -91,6 +92,26 @@ const RegenerationModal: React.FC<RegenerationModalProps> = ({
     };
     fetchModels();
   }, []);
+
+  // NEW: Handler for the insert pause button
+  const handleInsertPause = () => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const text = textarea.value;
+      const pauseTag = '<break time="0.5s" />';
+      const newText = text.substring(0, start) + pauseTag + text.substring(end);
+      
+      setLineText(newText);
+
+      // Move cursor to after the inserted tag
+      setTimeout(() => {
+        textarea.selectionStart = textarea.selectionEnd = start + pauseTag.length;
+        textarea.focus();
+      }, 0);
+    }
+  };
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -159,15 +180,22 @@ const RegenerationModal: React.FC<RegenerationModalProps> = ({
       <div style={modalStyle} onClick={(e) => e.stopPropagation()}> {/* Prevent closing when clicking inside modal */} 
         <h3>Regenerate Takes for Line: "{lineKey}"</h3>
         <form onSubmit={handleSubmit}>
-            {/* Line Text */} 
-            <div style={{ marginBottom: '5px' }}> {/* Reduced margin */}
-                <label htmlFor="lineText">Line Text:</label><br/>
+            {/* Line Text - MODIFIED */}
+            <div style={{ marginBottom: '5px' }}> 
+                {/* Use HStack for Label + Button */}
+                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}> 
+                  <label htmlFor="lineText">Line Text:</label>
+                  <button type="button" onClick={handleInsertPause} style={{padding: '2px 5px', fontSize: '0.8em'}}>
+                    Insert 0.5s Pause
+                  </button>
+                </div>
                 <textarea 
                     id="lineText" 
+                    ref={textareaRef} // Add ref
                     value={lineText} 
                     onChange={e => setLineText(e.target.value)}
                     rows={3} 
-                    style={{ width: '100%', boxSizing: 'border-box' }}
+                    style={{ width: '100%', boxSizing: 'border-box', marginTop: '5px' }}
                     required
                 />
             </div>

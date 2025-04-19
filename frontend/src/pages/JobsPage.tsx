@@ -176,7 +176,8 @@ const JobsPage: React.FC = () => {
 
     return (
       <>
-        <td>
+        {/* Apply status color directly to TD */}
+        <td style={{ border: '1px solid #ddd', padding: '8px', verticalAlign: 'top', backgroundColor: getStatusColor(liveStatuses[job.celery_task_id || '']?.status || job.status) }}>
           <small>
             {params ? (
               <>
@@ -200,7 +201,8 @@ const JobsPage: React.FC = () => {
             )}
           </small>
         </td>
-        <td>
+        {/* Apply status color directly to TD */}
+        <td style={{ border: '1px solid #ddd', padding: '8px', verticalAlign: 'top', backgroundColor: getStatusColor(liveStatuses[job.celery_task_id || '']?.status || job.status) }}>
           <small>
             <div><strong>Result:</strong> {job.result_message || 'N/A'}</div>
             
@@ -212,7 +214,8 @@ const JobsPage: React.FC = () => {
                      <Link 
                         key={`${targetBatchId}-link`}
                         to={`/batch/${targetBatchId}`} 
-                        style={{marginRight: '5px', fontWeight: 'bold'}}
+                        // Add !important to color
+                        style={{marginRight: '5px', fontWeight: 'bold', color: '#007bff !important', textDecoration: 'underline'}}
                      >
                          [View/Rank Batch]
                      </Link>
@@ -228,7 +231,13 @@ const JobsPage: React.FC = () => {
                         {batchIds.map((batchId: string) => (
                             <li key={batchId}>
                                 {batchId} 
-                                <Link key={`${batchId}-rank`} to={`/batch/${batchId}`} style={{ marginLeft: '5px' }}>[Rank]</Link>
+                                <Link 
+                                  key={`${batchId}-rank`} 
+                                  to={`/batch/${batchId}`} 
+                                  // Add !important to color
+                                  style={{ marginLeft: '5px', color: '#007bff !important', textDecoration: 'underline' }}>
+                                  [Rank]
+                                </Link>
                             </li>
                         ))}
                     </ul>
@@ -275,10 +284,17 @@ const JobsPage: React.FC = () => {
           </thead>
           <tbody>
             {jobs.map(job => (
-              <tr key={job.id} style={{ backgroundColor: getStatusColor(liveStatuses[job.celery_task_id || '']?.status || job.status) }}>
-                <td style={{ border: '1px solid #ddd', padding: '8px', verticalAlign: 'top' }}>{job.submitted_at ? new Date(job.submitted_at).toLocaleString() : 'N/A'}</td>
-                <td style={{ border: '1px solid #ddd', padding: '8px', verticalAlign: 'top' }}>{renderJobStatus(job)}</td>
-                {renderJobDetails(job)}
+              // Remove background color from TR
+              <tr key={job.id} /* style={{ backgroundColor: getStatusColor(...) }} */ > 
+                {/* Apply status color directly to TD */}
+                <td style={{ border: '1px solid #ddd', padding: '8px', verticalAlign: 'top', backgroundColor: getStatusColor(liveStatuses[job.celery_task_id || '']?.status || job.status) }}>
+                  {job.submitted_at ? new Date(job.submitted_at).toLocaleString() : 'N/A'}
+                </td>
+                {/* Apply status color directly to TD */}
+                <td style={{ border: '1px solid #ddd', padding: '8px', verticalAlign: 'top', backgroundColor: getStatusColor(liveStatuses[job.celery_task_id || '']?.status || job.status) }}>
+                  {renderJobStatus(job)}
+                </td>
+                {renderJobDetails(job)} {/* renderJobDetails now applies color to its TDs */} 
               </tr>
             ))}
           </tbody>

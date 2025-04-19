@@ -14,7 +14,8 @@ const CurrentLineTakes: React.FC = () => {
       selectedLineKey, 
       batchMetadata, 
       lineRegenerationStatus,
-      startLineRegeneration
+      startLineRegeneration,
+      setTakeRankWithinLine
   } = useRanking();
   const [showRegenModal, setShowRegenModal] = useState<boolean>(false);
   const [showStsModal, setShowStsModal] = useState<boolean>(false);
@@ -63,7 +64,8 @@ const CurrentLineTakes: React.FC = () => {
     );
   }
 
-  const currentLineTakes = takesByLine[selectedLineKey!] || [];
+  // Calculate inboxTakes directly without useMemo
+  const inboxTakes = (takesByLine[selectedLineKey!] || []).filter(take => take.rank === null);
 
   return (
     <div style={{flex: 3, marginRight: '15px', maxHeight: '80vh', overflowY: 'auto', padding: '10px'}}> 
@@ -92,13 +94,16 @@ const CurrentLineTakes: React.FC = () => {
               )}
           </div>
       </div>
-      {currentLineTakes.length === 0 ? (
-        <p>No takes found for this line.</p>
+      {inboxTakes.length === 0 ? (
+        <p>No unranked takes found for this line (Inbox is empty).</p>
       ) : (
         <div> 
-          {/* Takes are already sorted by number in context effect */}
-          {currentLineTakes.map((take: Take) => (
-              <TakeRow key={take.file} take={take} />
+          {inboxTakes.map((take: Take) => (
+              <TakeRow 
+                  key={take.file} 
+                  take={take} 
+                  showRankButtons={true}
+                  onTrash={() => setTakeRankWithinLine(take.file, 6)} />
             ))}
         </div>
       )}
@@ -108,7 +113,7 @@ const CurrentLineTakes: React.FC = () => {
           <RegenerationModal 
               batchId={batchMetadata.batch_id}
               lineKey={selectedLineKey}
-              currentTakes={currentLineTakes}
+              currentTakes={takesByLine[selectedLineKey!] || []}
               onClose={handleCloseRegenModal}
               onRegenJobStarted={handleRegenJobStarted}
           />

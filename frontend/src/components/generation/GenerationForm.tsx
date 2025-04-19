@@ -3,7 +3,8 @@ import { GenerationConfig, ModelOption, ScriptMetadata } from '../../types';
 import Slider from 'rc-slider';
 import 'rc-slider/assets/index.css';
 import { api } from '../../api';
-import { Select } from '@mantine/core';
+import { Select, Button, TextInput, NumberInput, Checkbox, Text } from '@mantine/core';
+import { useForm, isNotEmpty } from '@mantine/form';
 
 interface GenerationFormProps {
   selectedVoiceIds: string[];
@@ -20,27 +21,37 @@ const DEFAULT_SPEAKER_BOOST = true;
 const DEFAULT_MODEL_ID = "eleven_multilingual_v2";
 
 const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSubmit, isSubmitting }) => {
-  // Basic Info
-  const [skinName, setSkinName] = useState<string>('MyNewSkin');
-  const [variants, setVariants] = useState<number>(3);
-  const [error, setError] = useState<string | null>(null);
+  // Use Mantine Form for validation
+  const form = useForm({
+    initialValues: {
+      skinName: 'MyNewSkin',
+      variants: 3,
+      selectedScriptId: null as string | null,
+      selectedModelId: DEFAULT_MODEL_ID,
+      stabilityRange: DEFAULT_STABILITY_RANGE,
+      similarityRange: DEFAULT_SIMILARITY_RANGE,
+      styleRange: DEFAULT_STYLE_RANGE,
+      speedRange: DEFAULT_SPEED_RANGE,
+      speakerBoost: DEFAULT_SPEAKER_BOOST,
+    },
+    validate: {
+      skinName: isNotEmpty('Skin Name is required'),
+      variants: (value) => (value <= 0 ? 'Takes must be at least 1' : null),
+      selectedScriptId: isNotEmpty('Please select a script'),
+      selectedVoiceIds: (value, values) => (selectedVoiceIds.length === 0 ? 'Please select at least one voice' : null),
+      // Add range validation if needed
+    },
+    // Add a reference to selectedVoiceIds for validation purposes
+    validateInputOnBlur: true,
+  });
 
-  // DB Script State
+  // Script State (keep separate from form state for fetching)
   const [availableScripts, setAvailableScripts] = useState<ScriptMetadata[]>([]);
-  const [selectedScriptId, setSelectedScriptId] = useState<string | null>(null); // Store as string for Select component
   const [scriptsLoading, setScriptsLoading] = useState<boolean>(false);
   const [scriptsError, setScriptsError] = useState<string | null>(null);
 
-  // TTS Range Settings State
-  const [stabilityRange, setStabilityRange] = useState<[number, number]>(DEFAULT_STABILITY_RANGE);
-  const [similarityRange, setSimilarityRange] = useState<[number, number]>(DEFAULT_SIMILARITY_RANGE);
-  const [styleRange, setStyleRange] = useState<[number, number]>(DEFAULT_STYLE_RANGE);
-  const [speedRange, setSpeedRange] = useState<[number, number]>(DEFAULT_SPEED_RANGE);
-  const [speakerBoost, setSpeakerBoost] = useState<boolean>(DEFAULT_SPEAKER_BOOST);
-
-  // Model Selection State
+  // Model State (keep separate)
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
-  const [selectedModelId, setSelectedModelId] = useState<string>(DEFAULT_MODEL_ID);
   const [modelsLoading, setModelsLoading] = useState<boolean>(true);
   const [modelsError, setModelsError] = useState<string | null>(null);
 
@@ -54,7 +65,7 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
             setAvailableModels(models);
             // Ensure default is valid, fallback if needed
             if (!models.find(m => m.model_id === DEFAULT_MODEL_ID)) {
-                 setSelectedModelId(models[0]?.model_id || ''); // Select first available if default missing
+                 form.setFieldValue('selectedModelId', models[0]?.model_id || ''); // Select first available if default missing
             }
         } catch (err: any) {
              setModelsError(`Failed to load models: ${err.message}`);
@@ -74,8 +85,8 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
       .then(scripts => {
         setAvailableScripts(scripts);
         // Reset selection if current one disappears?
-        if (selectedScriptId && !scripts.find(s => s.id.toString() === selectedScriptId)) {
-          setSelectedScriptId(null);
+        if (form.values.selectedScriptId && !scripts.find(s => s.id.toString() === form.values.selectedScriptId)) {
+          form.setFieldValue('selectedScriptId', null);
         }
       })
       .catch(err => {
@@ -86,50 +97,25 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
   }, []);
 
   // Handle form submission
-  const handleSubmit = (event: React.FormEvent) => {
-    event.preventDefault();
-    setError(null);
-
+  const handleFormSubmit = (values: typeof form.values) => {
+    // Add validation for selected voices again just before submit
     if (selectedVoiceIds.length === 0) {
-      setError('Please select at least one voice.');
-      return;
-    }
-    
-    if (!selectedScriptId) {
-      setError('Please select a script from the list.');
-      return;
-    }
-    
-    if (variants <= 0) {
-      setError('Variants per line must be at least 1.');
-      return;
-    }
-    // Ensure ranges are valid (min <= max)
-    if (stabilityRange[0] > stabilityRange[1] || 
-        similarityRange[0] > similarityRange[1] ||
-        styleRange[0] > styleRange[1] ||
-        speedRange[0] > speedRange[1]) {
-        setError('Invalid range: Min value cannot be greater than Max value for TTS settings.');
-        return;
+        form.setFieldError('selectedVoiceIds', 'Please select at least one voice');
+        return; 
     }
 
-    // Build config
-    const baseConfig = {
-      skin_name: skinName,
-      voice_ids: selectedVoiceIds,
-      variants_per_line: variants,
-      stability_range: stabilityRange,
-      similarity_boost_range: similarityRange,
-      style_range: styleRange,
-      speed_range: speedRange,
-      use_speaker_boost: speakerBoost,
-      model_id: selectedModelId
-    };
-
+    // Build config from validated form values
     const finalConfig: GenerationConfig = {
-      ...baseConfig,
-      script_id: parseInt(selectedScriptId, 10), // Convert string ID back to number
-      // script_csv_content is never set
+      skin_name: values.skinName,
+      voice_ids: selectedVoiceIds,
+      variants_per_line: values.variants,
+      stability_range: values.stabilityRange,
+      similarity_boost_range: values.similarityRange,
+      style_range: values.styleRange,
+      speed_range: values.speedRange,
+      use_speaker_boost: values.speakerBoost,
+      model_id: values.selectedModelId,
+      script_id: parseInt(values.selectedScriptId!, 10), // Already validated not null
     };
 
     onSubmit(finalConfig);
@@ -138,43 +124,35 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
   // Helper to format slider value
   const formatSliderValue = (value: number) => value.toFixed(2);
 
-  // Check if submit should be disabled
-  const isSubmitDisabled = isSubmitting
-    || selectedVoiceIds.length === 0
-    || !selectedScriptId;
-
   return (
-    <form onSubmit={handleSubmit} style={{ border: '1px solid #ccc', padding: '15px', marginTop: '15px' }}>
+    // Use Mantine form
+    <form onSubmit={form.onSubmit(handleFormSubmit)} style={{ border: '1px solid #ccc', padding: '15px', marginTop: '15px' }}>
       <h4>Generation Parameters:</h4>
-      {error && <p style={{ color: 'red' }}>Error: {error}</p>}
-      <div>
-        <label htmlFor="skinName">Skin Name: </label>
-        <input
-          type="text"
-          id="skinName"
-          value={skinName}
-          onChange={(e) => setSkinName(e.target.value)}
-          required
-        />
-      </div>
-      <div style={{ marginTop: '10px' }}>
-        <label htmlFor="variants">Takes per Line: </label>
-        <input
-          type="number"
-          id="variants"
-          value={variants}
-          onChange={(e) => setVariants(parseInt(e.target.value, 10) || 1)}
-          min="1"
-          required
-        />
-      </div>
+       {/* Display overall form error if needed, or rely on field errors */}
+       {/* {form.errors && <Text color="red">Please fix errors</Text>} */}
+       
+      {/* Use Mantine TextInput */}
+      <TextInput
+        label="Skin Name"
+        placeholder="Enter a name for this skin/batch"
+        required
+        {...form.getInputProps('skinName')}
+      />
+      {/* Use Mantine NumberInput */}
+      <NumberInput
+        label="Takes per Line"
+        placeholder="Number of takes per script line"
+        required
+        min={1}
+        mt="md"
+        {...form.getInputProps('variants')}
+      />
 
-      <div style={{ marginTop: '10px' }}>
-        <Select
+      {/* Use Mantine Select with consistent styling */}
+      <Select
           label="Select Script"
           placeholder="Choose a script..."
-          value={selectedScriptId}
-          onChange={setSelectedScriptId}
+          required
           data={availableScripts.map(script => ({
             value: script.id.toString(),
             label: `${script.name} (${script.line_count} lines, updated ${new Date(script.updated_at).toLocaleDateString()})`
@@ -182,91 +160,87 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
           searchable
           nothingFoundMessage={scriptsLoading ? "Loading scripts..." : scriptsError ? "Error loading scripts" : "No scripts found"}
           disabled={scriptsLoading || !!scriptsError}
-          required
-          error={scriptsError}
+          error={scriptsError || form.errors.selectedScriptId} // Show fetch error or validation error
           mt="md"
+          {...form.getInputProps('selectedScriptId')}
+          // Add style props for consistency if needed
+          // styles={{ input: { borderColor: form.errors.selectedScriptId ? 'red' : undefined } }}
         />
-      </div>
 
-      <div style={{ marginTop: '10px' }}>
-        <label htmlFor="modelSelect">Model: </label>
-        <select 
-            id="modelSelect" 
-            value={selectedModelId} 
-            onChange={e => setSelectedModelId(e.target.value)} 
+      {/* Use Mantine Select for Model */}
+      <Select 
+            label="Model"
+            placeholder="Select a model..."
+            required
+            mt="md"
+            value={form.values.selectedModelId} 
+            onChange={(_value) => form.setFieldValue('selectedModelId', _value || DEFAULT_MODEL_ID)} 
             disabled={modelsLoading || !!modelsError}
-        >
-            {modelsLoading && <option>Loading models...</option>}
-            {modelsError && <option>Error loading models</option>}
-            {!modelsLoading && !modelsError && availableModels.map(model => (
-                <option key={model.model_id} value={model.model_id}>
-                    {model.name} ({model.model_id})
-                </option>
+            data={availableModels.map(model => (
+                { value: model.model_id, label: `${model.name} (${model.model_id})` }
             ))}
-        </select>
-        {modelsError && <span style={{ color: 'red', marginLeft: '10px' }}>{modelsError}</span>}
-      </div>
+             nothingFoundMessage={modelsLoading ? "Loading models..." : modelsError ? "Error loading models" : "No models found"}
+             error={modelsError}
+            // {...form.getInputProps('selectedModelId')}
+        />
 
       <div style={{ marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #eee' }}>
           <h5>Voice Setting Ranges (Randomized per Take):</h5>
           
+          {/* Use Text for labels */}
+          {/* ... Slider components remain the same, but update state via form.setFieldValue ... */}
           <div style={{ marginBottom: '15px', padding: '0 10px' }}>
-              <label>Stability Range: [{formatSliderValue(stabilityRange[0])} - {formatSliderValue(stabilityRange[1])}]</label>
+              <Text size="sm">Stability Range: [{formatSliderValue(form.values.stabilityRange[0])} - {formatSliderValue(form.values.stabilityRange[1])}]</Text>
               <Slider 
-                  range
-                  min={0} max={1} step={0.01} allowCross={false}
-                  value={stabilityRange} 
-                  onChange={(value: number | number[]) => setStabilityRange(value as [number, number])} 
+                  range min={0} max={1} step={0.01} allowCross={false}
+                  value={form.values.stabilityRange} 
+                  onChange={(value: number | number[]) => form.setFieldValue('stabilityRange', value as [number, number])} 
               />
-              <div style={{display: 'flex', justifyContent: 'space-between'}}><small>More Variable</small><small>More Stable</small></div>
+              <div style={{display: 'flex', justifyContent: 'space-between'}}><Text size="xs">More Variable</Text><Text size="xs">More Stable</Text></div>
+          </div>
+          {/* ... Repeat slider pattern for Similarity, Style, Speed using form.values and form.setFieldValue ... */}
+          <div style={{ marginBottom: '15px', padding: '0 10px' }}>
+              <Text size="sm">Similarity Boost Range: [{formatSliderValue(form.values.similarityRange[0])} - {formatSliderValue(form.values.similarityRange[1])}]</Text>
+              <Slider 
+                  range min={0} max={1} step={0.01} allowCross={false}
+                  value={form.values.similarityRange} 
+                  onChange={(value: number | number[]) => form.setFieldValue('similarityRange', value as [number, number])} 
+              />
+               <div style={{display: 'flex', justifyContent: 'space-between'}}><Text size="xs">Low</Text><Text size="xs">High</Text></div>
+          </div>
+          <div style={{ marginBottom: '15px', padding: '0 10px' }}>
+              <Text size="sm">Style Exaggeration Range: [{formatSliderValue(form.values.styleRange[0])} - {formatSliderValue(form.values.styleRange[1])}]</Text>
+              <Slider 
+                  range min={0} max={1} step={0.01} allowCross={false}
+                  value={form.values.styleRange} 
+                  onChange={(value: number | number[]) => form.setFieldValue('styleRange', value as [number, number])} 
+              />
+               <div style={{display: 'flex', justifyContent: 'space-between'}}><Text size="xs">None</Text><Text size="xs">Exaggerated</Text></div>
+          </div>
+          <div style={{ marginBottom: '15px', padding: '0 10px' }}>
+              <Text size="sm">Speed Range: [{formatSliderValue(form.values.speedRange[0])} - {formatSliderValue(form.values.speedRange[1])}]</Text>
+              <Slider 
+                  range min={0.5} max={2.0} step={0.05} allowCross={false}
+                  value={form.values.speedRange} 
+                  onChange={(value: number | number[]) => form.setFieldValue('speedRange', value as [number, number])} 
+              />
+               <div style={{display: 'flex', justifyContent: 'space-between'}}><Text size="xs">Slower</Text><Text size="xs">Faster</Text></div>
           </div>
 
-          <div style={{ marginBottom: '15px', padding: '0 10px' }}>
-              <label>Similarity Boost Range: [{formatSliderValue(similarityRange[0])} - {formatSliderValue(similarityRange[1])}]</label>
-              <Slider 
-                  range
-                  min={0} max={1} step={0.01} allowCross={false}
-                  value={similarityRange} 
-                  onChange={(value: number | number[]) => setSimilarityRange(value as [number, number])} 
-              />
-               <div style={{display: 'flex', justifyContent: 'space-between'}}><small>Low</small><small>High</small></div>
-          </div>
-
-          <div style={{ marginBottom: '15px', padding: '0 10px' }}>
-              <label>Style Exaggeration Range: [{formatSliderValue(styleRange[0])} - {formatSliderValue(styleRange[1])}]</label>
-              <Slider 
-                  range
-                  min={0} max={1} step={0.01} allowCross={false}
-                  value={styleRange} 
-                  onChange={(value: number | number[]) => setStyleRange(value as [number, number])} 
-              />
-               <div style={{display: 'flex', justifyContent: 'space-between'}}><small>None</small><small>Exaggerated</small></div>
-          </div>
-
-          <div style={{ marginBottom: '15px', padding: '0 10px' }}>
-              <label>Speed Range: [{formatSliderValue(speedRange[0])} - {formatSliderValue(speedRange[1])}]</label>
-              <Slider 
-                  range
-                  min={0.5} max={2.0} step={0.05} allowCross={false}
-                  value={speedRange} 
-                  onChange={(value: number | number[]) => setSpeedRange(value as [number, number])} 
-              />
-               <div style={{display: 'flex', justifyContent: 'space-between'}}><small>Slower</small><small>Faster</small></div>
-          </div>
-
-          <div style={{ marginBottom: '10px' }}>
-              <input 
-                  type="checkbox" id="speakerBoost" 
-                  checked={speakerBoost} onChange={e => setSpeakerBoost(e.target.checked)}
-              />
-              <label htmlFor="speakerBoost"> Speaker Boost</label>
-              <small> (Fixed for all takes in job)</small>
-          </div>
+          {/* Use Mantine Checkbox */}
+           <Checkbox
+            mt="md"
+            label="Speaker Boost (Fixed for all takes in job)"
+            {...form.getInputProps('speakerBoost', { type: 'checkbox' })}
+           />
       </div>
       
-      <button type="submit" disabled={isSubmitDisabled} style={{ marginTop: '15px' }}>
-        {isSubmitting ? 'Generating...' : 'Start Generation Job'}
-      </button>
+      {/* Use Mantine Button - disabled state handled by form validity */}
+      <Button type="submit" loading={isSubmitting} mt="lg">
+        Start Generation Job
+      </Button>
+       {/* Add voice selection error message if needed */} 
+       {form.errors.selectedVoiceIds && <Text color="red" size="sm" mt="xs">{form.errors.selectedVoiceIds}</Text>}
     </form>
   );
 };
