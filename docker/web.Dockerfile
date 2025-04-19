@@ -22,6 +22,13 @@ RUN apk update && apk add --no-cache \
     nginx \
     gettext
 
+# === DEBUG: Inspect build context ===
+RUN echo "Listing /app directory:"
+RUN ls -la /app
+RUN echo "Listing / directory:"
+RUN ls -la /
+RUN echo "=== End Debug Listing ==="
+
 # Install pip dependencies (Copy requirements FIRST for caching)
 # Source path is relative to the build context (root)
 COPY backend/requirements.txt requirements.txt 
