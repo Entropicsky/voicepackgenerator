@@ -8,7 +8,6 @@ build:
     # Consolidated web dyno using Nginx + Gunicorn
     web:
       dockerfile: Dockerfile # Use Dockerfile at root
-      context: . # Explicitly set build context to project root
     # api process removed
     worker: backend/Dockerfile
 
