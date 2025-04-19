@@ -7,8 +7,9 @@ set -e
 # Note: Using /tmp/ for the substituted config avoids potential permission issues
 # in /etc/nginx/conf.d/ and ensures the original template isn't overwritten.
 export DOLLAR='$'
-# Use /tmp/nginx.conf as the destination for the substituted config
-envsubst < /app/frontend/nginx.conf > /tmp/nginx.conf
+# Use /tmp/nginx.conf as the destination for the substituted config,
+# only substituting PORT and DOLLAR variables
+envsubst '$PORT $DOLLAR' < /app/frontend/nginx.conf > /tmp/nginx.conf
 
 # Start nginx using the generated config file, running in the background
 nginx -c /tmp/nginx.conf &
