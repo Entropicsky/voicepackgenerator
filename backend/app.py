@@ -13,6 +13,7 @@ import base64
 from sqlalchemy import func, Boolean
 import csv
 from flask_migrate import Migrate
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 # Import celery app instance from root
 from .celery_app import celery
@@ -28,6 +29,12 @@ from . import models # Import the models module
 load_dotenv()
 
 app = Flask(__name__)
+
+# Add ProxyFix middleware to handle X-Forwarded-* headers correctly
+# Trust 2 proxies (Heroku Router + Nginx Web Dyno)
+app.wsgi_app = ProxyFix(
+    app.wsgi_app, x_for=2, x_proto=1, x_host=1, x_prefix=1
+)
 
 # Initialize Flask-Migrate
 # Ensure the database engine is available
