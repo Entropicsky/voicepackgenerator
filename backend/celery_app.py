@@ -18,9 +18,9 @@ ssl_opts = {}
 if broker_url.startswith('rediss://'):
     # Using CERT_NONE based on previous attempt, but Heroku might require CERT_REQUIRED.
     # This needs verification during Heroku testing.
-    ssl_opts = {'ssl_cert_reqs': ssl.CERT_NONE}
+    # ssl_opts = {'ssl_cert_reqs': ssl.CERT_NONE} 
     # Example if CERT_REQUIRED is needed:
-    # ssl_opts = {'ssl_cert_reqs': ssl.CERT_REQUIRED}
+    ssl_opts = {'ssl_cert_reqs': ssl.CERT_REQUIRED}
 
 
 result_backend = broker_url
