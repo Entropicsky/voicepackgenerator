@@ -14,6 +14,8 @@ from sqlalchemy import func, Boolean
 import csv
 from flask_migrate import Migrate
 from werkzeug.middleware.proxy_fix import ProxyFix
+import time # For timing
+import logging # For better logging
 
 # Import celery app instance from root
 from .celery_app import celery
@@ -29,6 +31,9 @@ from . import models # Import the models module
 load_dotenv()
 
 app = Flask(__name__)
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 
 # Add ProxyFix middleware to handle X-Forwarded-* headers correctly
 # Trust 2 proxies (Heroku Router + Nginx Web Dyno)
@@ -308,8 +313,14 @@ def list_generation_jobs():
 @app.route('/api/scripts', methods=['GET'])
 def list_scripts():
     """Lists available scripts from the database."""
-    db: Session = next(models.get_db())
+    start_time = time.time()
+    logging.info("Entered /api/scripts endpoint")
+    db: Session = None
     try:
+        logging.info("Attempting to get DB session...")
+        db = next(models.get_db())
+        logging.info("DB session acquired.")
+        
         # Get filter and sort parameters
         include_archived = request.args.get('include_archived', 'false').lower() == 'true'
         sort_by = request.args.get('sort_by', 'updated_at')
@@ -338,6 +349,7 @@ def list_scripts():
         )
         
         # Base query
+        logging.info(f"Building base query for scripts (include_archived={include_archived})...")
         scripts_query = (
             db.query(
                 models.Script,
@@ -353,7 +365,11 @@ def list_scripts():
         # Apply sorting
         scripts_query = scripts_query.order_by(order_by_attr)
         
+        logging.info(f"Executing scripts query (sort_by={sort_by}, direction={sort_direction})...")
+        query_start_time = time.time()
         scripts_with_counts = scripts_query.all()
+        query_end_time = time.time()
+        logging.info(f"Query executed in {query_end_time - query_start_time:.4f} seconds. Found {len(scripts_with_counts)} scripts.")
 
         script_list = [
             {
@@ -367,12 +383,19 @@ def list_scripts():
             }
             for script, line_count in scripts_with_counts
         ]
+        end_time = time.time()
+        logging.info(f"Successfully processed /api/scripts in {end_time - start_time:.4f} seconds.")
         return make_api_response(data=script_list)
     except Exception as e:
-        print(f"Error listing scripts: {e}")
+        end_time = time.time()
+        logging.exception(f"Error in /api/scripts after {end_time - start_time:.4f} seconds: {e}") # Log full traceback
         return make_api_response(error="Failed to list scripts", status_code=500)
     finally:
-        db.close()
+        if db and db.is_active:
+            logging.info("Closing DB session for /api/scripts.")
+            db.close()
+        else:
+            logging.warning("DB session was not active or not acquired for /api/scripts at cleanup.")
 
 @app.route('/api/scripts/<int:script_id>', methods=['GET'])
 def get_script_details(script_id):
