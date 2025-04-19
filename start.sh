@@ -28,9 +28,11 @@ gunicorn backend.app:app \
     --log-level debug \
     --access-logfile - \
     --error-logfile -
+    # Removed header limit for now, ProxyFix should handle it
+    # --limit-request-field_size 16384
 
 # Wait for any process to exit
 wait -n
-  
+
 # Exit with status of process that exited first
 exit $? 
