@@ -11,6 +11,18 @@ services:
       - redis_data:/data
     restart: unless-stopped
 
+  db: # NEW: Postgres Service
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: postgres # Default user
+      POSTGRES_PASSWORD: password # Use a more secure password if needed outside local dev
+    ports:
+      - "5432:5432" # Expose PostgreSQL port to host
+    volumes:
+      - pgdata:/var/lib/postgresql/data # Persist PostgreSQL data
+    restart: unless-stopped
+
   backend:
     build:
       context: .
@@ -31,10 +43,13 @@ services:
       # Needs to match the volume mount target above
       - AUDIO_ROOT=/app/output
       - PYTHONPATH=/app # Explicitly add project root to path
+      # Add DATABASE_URL for local Postgres
+      - DATABASE_URL=postgresql://postgres:password@db:5432/app
     # Command to run the Flask dev server (host 0.0.0.0 makes it accessible)
     command: flask --app backend.app:app run --host=0.0.0.0 --port=5000
     depends_on:
       - redis # Ensure Redis is running before backend starts
+      - db    # Ensure Postgres is running before backend starts
     restart: unless-stopped
 
   worker:
@@ -51,10 +66,13 @@ services:
     environment:
       - AUDIO_ROOT=/app/output
       - PYTHONPATH=/app # Explicitly add project root to path
+      # Add DATABASE_URL for local Postgres
+      - DATABASE_URL=postgresql://postgres:password@db:5432/app
     # Command uses backend.celery_app module
     command: celery -A backend.celery_app:celery worker --loglevel=INFO
     depends_on:
       - redis
+      - db    # Ensure Postgres is running before worker starts
     restart: unless-stopped
 
   frontend:
@@ -76,3 +94,4 @@ services:
 volumes:
   # Define the named volume for Redis persistence
   redis_data: 
+  pgdata: # NEW: Define the named volume for Postgres data 

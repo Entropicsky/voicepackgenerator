@@ -9,7 +9,7 @@ ENV PYTHONUNBUFFERED 1
 WORKDIR /app
 
 # Install system dependencies and root CAs
-RUN apk update && apk add --no-cache git sqlite ca-certificates && update-ca-certificates
+RUN apk update && apk add --no-cache git ca-certificates && update-ca-certificates
 
 # Install pip dependencies
 COPY backend/requirements.txt requirements.txt
@@ -30,7 +30,7 @@ ENV FLASK_ENV=production
 RUN mkdir -p /app/output/audio
 
 # Initialize database
-RUN touch /app/jobs.db && python -c 'from models import init_db; init_db()'
+# RUN touch /app/jobs.db && python -c 'from models import init_db; init_db()'
 
 # Start Celery worker
 CMD ["celery", "-A", "backend.celery_app:celery", "worker", "--loglevel=info"] 

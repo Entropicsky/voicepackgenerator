@@ -14,7 +14,6 @@ RUN apk update && apk add --no-cache \
     libffi-dev \
     openssl-dev \
     git \
-    sqlite \
     nginx \
     gettext \
     ca-certificates \
@@ -56,10 +55,6 @@ RUN chmod +x /app/start.sh
 
 # Ensure output directory exists 
 RUN mkdir -p /app/backend/output/audio
-
-# Database initialization (cd into backend first)
-# Make sure the DB file path matches what's expected by models.py
-RUN touch /app/backend/jobs.db && cd /app/backend && python -c 'from models import init_db; init_db()'
 
 # Expose the port Nginx will listen on (set by $PORT)
 EXPOSE 8080 

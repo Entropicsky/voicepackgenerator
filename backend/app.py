@@ -43,7 +43,7 @@ app.wsgi_app = ProxyFix(
 
 # Initialize Flask-Migrate
 # Ensure the database engine is available
-migrate = Migrate(app, models.engine) # Assumes models.engine is the SQLAlchemy engine
+migrate = Migrate(app, models.engine) # Pass the SQLAlchemy engine from models.py
 
 # Initialize Database
 try:
