@@ -5,17 +5,13 @@ setup:
 
 build:
   docker:
-    # 'web' should serve the user-facing Nginx frontend
-    web: frontend/Dockerfile
-    # 'api' will run the Flask backend API
-    api: backend/Dockerfile
-    # 'worker' runs Celery using the same backend image
+    # Temporarily run backend directly as web for debugging
+    web: backend/Dockerfile
+    # api: backend/Dockerfile # Disabled for debugging
     worker: backend/Dockerfile
 
 run:
-  # 'web' now starts Nginx via envsubst for $PORT handling
-  web: sh -c "envsubst '\$PORT' < /etc/nginx/conf.d/default.conf > /etc/nginx/conf.d/default.conf.tmp && mv /etc/nginx/conf.d/default.conf.tmp /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
-  # 'api' runs the Gunicorn/Flask backend with increased timeout
-  api: gunicorn backend.app:app --bind 0.0.0.0:$PORT --timeout 120
-  # 'worker' runs Celery
+  # Temporarily run backend directly as web
+  web: gunicorn backend.app:app --bind 0.0.0.0:$PORT --timeout 120
+  # api: gunicorn backend.app:app --bind 0.0.0.0:$PORT --timeout 120 # Disabled for debugging
   worker: celery -A backend.celery_app:celery worker --loglevel=info
