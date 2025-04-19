@@ -78,6 +78,11 @@ def make_api_response(data: dict = None, error: str = None, status_code: int = 2
 
 # --- API Endpoints --- #
 
+@app.route('/')
+def index():
+    # Added for debugging proxy/routing
+    return "API Root OK"
+
 @app.route('/debug-routes')
 def debug_routes():
     # IMPORTANT: Remove this in production!
