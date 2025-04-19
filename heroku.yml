@@ -2,6 +2,9 @@ setup:
   addons:
     - plan: heroku-redis
       as: REDIS
+    # Add postgresql addon definition (or ensure it's already here)
+    - plan: heroku-postgresql
+      as: DATABASE # Use DATABASE to align with DATABASE_URL
 
 build:
   docker:
@@ -11,6 +14,12 @@ build:
     # api process removed
     worker:
       dockerfile: Dockerfile.worker
+
+# NEW: Release phase to run migrations
+release:
+  command:
+    - flask --app backend.app:app db upgrade
+  image: web # Run migrations using the web image which has Flask-Migrate
 
 run:
   # Run the consolidated start script for web
