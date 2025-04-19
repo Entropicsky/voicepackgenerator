@@ -18,4 +18,5 @@ Flask-Migrate
 Flask-Cors
 
 # Added for production deployment
-gunicorn 
+gunicorn
+gevent 

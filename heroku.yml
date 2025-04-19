@@ -13,5 +13,6 @@ build:
 run:
   # Restore standard setup: web=nginx, api=gunicorn
   web: sh -c "envsubst '\$PORT' < /etc/nginx/conf.d/default.conf > /etc/nginx/conf.d/default.conf.tmp && mv /etc/nginx/conf.d/default.conf.tmp /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
-  api: gunicorn backend.app:app --bind 0.0.0.0:$PORT --timeout 120
+  # Use gevent worker and debug logging
+  api: gunicorn backend.app:app --bind 0.0.0.0:$PORT --timeout 120 -k gevent --log-level debug
   worker: celery -A backend.celery_app:celery worker --loglevel=info
