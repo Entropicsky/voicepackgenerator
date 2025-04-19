@@ -98,22 +98,22 @@ const BatchesPage: React.FC = () => {
   }
 
   return (
-    <div>
-      <h2>Available Batches</h2>
+    <div style={{ width: '100%', maxWidth: '100%' }}>
+      <h2>Voiceover Sessions</h2>
       {batches.length === 0 ? (
         <p>No batches found in the output directory.</p>
       ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
                 <tr>
-                    <th style={thStyle} onClick={() => handleSort('batch_id')}>Batch ID{renderSortArrow('batch_id')}</th>
+                    <th style={thStyle} onClick={() => handleSort('batch_id')}>Session ID{renderSortArrow('batch_id')}</th>
                     <th style={thStyle} onClick={() => handleSort('skin')}>Skin{renderSortArrow('skin')}</th>
                     <th style={thStyle} onClick={() => handleSort('voice')}>Voice{renderSortArrow('voice')}</th>
                     <th style={thStyle} onClick={() => handleSort('num_lines')}>Lines{renderSortArrow('num_lines')}</th>
                     <th style={thStyle} onClick={() => handleSort('takes_per_line')}>Takes/Line{renderSortArrow('takes_per_line')}</th>
                     <th style={thStyle} onClick={() => handleSort('created_at_sortkey')}>Created{renderSortArrow('created_at_sortkey')}</th>
                     <th style={thStyle} onClick={() => handleSort('status')}>Status{renderSortArrow('status')}</th>
-                    <th style={{...thStyle, cursor: 'default'}}>Actions</th>
+                    <th style={{...thStyle, cursor: 'default', width: '150px'}}>Actions</th>
                 </tr>
             </thead>
             <tbody>

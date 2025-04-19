@@ -29,6 +29,12 @@ const App: React.FC = () => {
             header={{ height: 60 }}
             navbar={{ width: 200, breakpoint: 'sm', collapsed: { mobile: !opened } }}
             padding="md"
+            styles={{
+              main: {
+                width: '100%',
+                maxWidth: '100%'
+              }
+            }}
           >
             <AppShell.Header>
               <Group h="100%" px="md">
@@ -39,10 +45,10 @@ const App: React.FC = () => {
 
             <AppShell.Navbar p="md">
               <NavLink label="Voice Design" component={Link} to="/voice-design" onClick={toggle} />
-              <NavLink label="Generate" component={Link} to="/" onClick={toggle} />
               <NavLink label="Scripts" component={Link} to="/scripts" onClick={toggle} />
+              <NavLink label="Generate" component={Link} to="/" onClick={toggle} />
               <NavLink label="Jobs" component={Link} to="/jobs" onClick={toggle} />
-              <NavLink label="Batches" component={Link} to="/batches" onClick={toggle} />
+              <NavLink label="VO Editing" component={Link} to="/batches" onClick={toggle} />
             </AppShell.Navbar>
 
             <AppShell.Main>

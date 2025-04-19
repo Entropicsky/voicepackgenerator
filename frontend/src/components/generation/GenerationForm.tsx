@@ -3,7 +3,7 @@ import { GenerationConfig, ModelOption, ScriptMetadata } from '../../types';
 import Slider from 'rc-slider';
 import 'rc-slider/assets/index.css';
 import { api } from '../../api';
-import { Radio, Select, Group } from '@mantine/core';
+import { Select } from '@mantine/core';
 
 interface GenerationFormProps {
   selectedVoiceIds: string[];
@@ -25,18 +25,11 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
   const [variants, setVariants] = useState<number>(3);
   const [error, setError] = useState<string | null>(null);
 
-  // --- NEW: Script Source State --- 
-  type ScriptSourceMode = 'csv' | 'db';
-  const [scriptSourceMode, setScriptSourceMode] = useState<ScriptSourceMode>('csv');
-  // CSV State
-  const [scriptFile, setScriptFile] = useState<File | null>(null);
-  const [scriptContent, setScriptContent] = useState<string | null>(null);
   // DB Script State
   const [availableScripts, setAvailableScripts] = useState<ScriptMetadata[]>([]);
   const [selectedScriptId, setSelectedScriptId] = useState<string | null>(null); // Store as string for Select component
   const [scriptsLoading, setScriptsLoading] = useState<boolean>(false);
   const [scriptsError, setScriptsError] = useState<string | null>(null);
-  // --- End Script Source State --- 
 
   // TTS Range Settings State
   const [stabilityRange, setStabilityRange] = useState<[number, number]>(DEFAULT_STABILITY_RANGE);
@@ -73,51 +66,24 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
     fetchModels();
   }, []);
 
-  // --- NEW: Fetch available scripts when DB mode is selected --- 
+  // Fetch available scripts on mount
   useEffect(() => {
-      if (scriptSourceMode === 'db') {
-          setScriptsLoading(true);
-          setScriptsError(null);
-          api.listScripts(false)
-              .then(scripts => {
-                  setAvailableScripts(scripts);
-                  // Reset selection if current one disappears?
-                  if (selectedScriptId && !scripts.find(s => s.id.toString() === selectedScriptId)) {
-                      setSelectedScriptId(null);
-                  }
-              })
-              .catch(err => {
-                  setScriptsError(`Failed to load scripts: ${err.message}`);
-                  console.error(err);
-              })
-              .finally(() => setScriptsLoading(false));
-      }
-  }, [scriptSourceMode]); // Refetch when mode changes to 'db'
-
-  // Handle CSV File Upload
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      if (file.type === 'text/csv' || file.name.endsWith('.csv')) {
-        setScriptFile(file);
-        setError(null); // Clear general error
-        const reader = new FileReader();
-        reader.onload = (e) => setScriptContent(e.target?.result as string);
-        reader.onerror = () => {
-          setError('Error reading script file.');
-          setScriptContent(null);
-        };
-        reader.readAsText(file);
-      } else {
-        setError('Please upload a valid CSV file.');
-        setScriptFile(null);
-        setScriptContent(null);
-      }
-    } else {
-      setScriptFile(null);
-      setScriptContent(null);
-    }
-  };
+    setScriptsLoading(true);
+    setScriptsError(null);
+    api.listScripts(false)
+      .then(scripts => {
+        setAvailableScripts(scripts);
+        // Reset selection if current one disappears?
+        if (selectedScriptId && !scripts.find(s => s.id.toString() === selectedScriptId)) {
+          setSelectedScriptId(null);
+        }
+      })
+      .catch(err => {
+        setScriptsError(`Failed to load scripts: ${err.message}`);
+        console.error(err);
+      })
+      .finally(() => setScriptsLoading(false));
+  }, []);
 
   // Handle form submission
   const handleSubmit = (event: React.FormEvent) => {
@@ -129,20 +95,10 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
       return;
     }
     
-    // --- NEW: Validate script source based on mode --- 
-    let scriptInputValid = false;
-    if (scriptSourceMode === 'csv' && scriptContent) {
-        scriptInputValid = true;
-    } else if (scriptSourceMode === 'db' && selectedScriptId) {
-        scriptInputValid = true;
+    if (!selectedScriptId) {
+      setError('Please select a script from the list.');
+      return;
     }
-    if (!scriptInputValid) {
-         setError(scriptSourceMode === 'csv' 
-            ? 'Please upload a script CSV file.'
-            : 'Please select a script from the list.');
-         return;
-    }
-    // --- End script source validation ---
     
     if (variants <= 0) {
       setError('Variants per line must be at least 1.');
@@ -157,7 +113,7 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
         return;
     }
 
-    // Build config based on mode
+    // Build config
     const baseConfig = {
       skin_name: skinName,
       voice_ids: selectedVoiceIds,
@@ -170,24 +126,11 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
       model_id: selectedModelId
     };
 
-    let finalConfig: GenerationConfig;
-    if (scriptSourceMode === 'csv' && scriptContent) {
-        finalConfig = {
-            ...baseConfig,
-            script_csv_content: scriptContent,
-            // script_id explicitly undefined or null
-        };
-    } else if (scriptSourceMode === 'db' && selectedScriptId) {
-         finalConfig = {
-            ...baseConfig,
-            script_id: parseInt(selectedScriptId, 10), // Convert string ID back to number
-             // script_csv_content explicitly undefined or null
-        };
-    } else {
-        // Should be caught by validation above, but safety check
-        setError("Invalid script configuration.");
-        return;
-    }
+    const finalConfig: GenerationConfig = {
+      ...baseConfig,
+      script_id: parseInt(selectedScriptId, 10), // Convert string ID back to number
+      // script_csv_content is never set
+    };
 
     onSubmit(finalConfig);
   };
@@ -196,10 +139,9 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
   const formatSliderValue = (value: number) => value.toFixed(2);
 
   // Check if submit should be disabled
-  const isSubmitDisabled = isSubmitting 
-      || selectedVoiceIds.length === 0 
-      || (scriptSourceMode === 'csv' && !scriptContent)
-      || (scriptSourceMode === 'db' && !selectedScriptId);
+  const isSubmitDisabled = isSubmitting
+    || selectedVoiceIds.length === 0
+    || !selectedScriptId;
 
   return (
     <form onSubmit={handleSubmit} style={{ border: '1px solid #ccc', padding: '15px', marginTop: '15px' }}>
@@ -227,56 +169,25 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
         />
       </div>
 
-      {/* --- NEW: Script Source Selection --- */}
-      <Radio.Group
-          name="scriptSource"
-          label="Script Source"
-          value={scriptSourceMode}
-          onChange={(value) => setScriptSourceMode(value as ScriptSourceMode)}
+      <div style={{ marginTop: '10px' }}>
+        <Select
+          label="Select Script"
+          placeholder="Choose a script..."
+          value={selectedScriptId}
+          onChange={setSelectedScriptId}
+          data={availableScripts.map(script => ({
+            value: script.id.toString(),
+            label: `${script.name} (${script.line_count} lines, updated ${new Date(script.updated_at).toLocaleDateString()})`
+          }))}
+          searchable
+          nothingFoundMessage={scriptsLoading ? "Loading scripts..." : scriptsError ? "Error loading scripts" : "No scripts found"}
+          disabled={scriptsLoading || !!scriptsError}
+          required
+          error={scriptsError}
           mt="md"
-      >
-          <Group mt="xs">
-              <Radio value="csv" label="Upload CSV File" />
-              <Radio value="db" label="Select Existing Script" />
-          </Group>
-      </Radio.Group>
+        />
+      </div>
 
-      {scriptSourceMode === 'csv' && (
-          <div style={{ marginTop: '10px', paddingLeft: '20px' }}>
-              <label htmlFor="scriptCsv">Script CSV File: </label>
-              <input
-                  type="file"
-                  id="scriptCsv"
-                  accept=".csv"
-                  onChange={handleFileChange}
-                  required={scriptSourceMode === 'csv'} // Only required in this mode
-              />
-              {scriptFile && <span> ({scriptFile.name})</span>}
-          </div>
-      )}
-
-      {scriptSourceMode === 'db' && (
-           <div style={{ marginTop: '10px', paddingLeft: '20px' }}>
-               <Select
-                   label="Select Script"
-                   placeholder="Choose a script..."
-                   value={selectedScriptId}
-                   onChange={setSelectedScriptId}
-                   data={availableScripts.map(script => ({
-                       value: script.id.toString(),
-                       label: `${script.name} (${script.line_count} lines, updated ${new Date(script.updated_at).toLocaleDateString()})`
-                   }))}
-                   searchable
-                   nothingFoundMessage={scriptsLoading ? "Loading scripts..." : scriptsError ? "Error loading scripts" : "No scripts found"}
-                   disabled={scriptsLoading || !!scriptsError}
-                   required={scriptSourceMode === 'db'}
-                   error={scriptsError}
-               />
-           </div>
-      )}
-      {/* --- End Script Source Selection --- */}
-
-      {/* Model Selection */}
       <div style={{ marginTop: '10px' }}>
         <label htmlFor="modelSelect">Model: </label>
         <select 
@@ -296,11 +207,9 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
         {modelsError && <span style={{ color: 'red', marginLeft: '10px' }}>{modelsError}</span>}
       </div>
 
-      {/* TTS Settings Section with Range Sliders */} 
       <div style={{ marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #eee' }}>
           <h5>Voice Setting Ranges (Randomized per Take):</h5>
           
-          {/* Stability Range */} 
           <div style={{ marginBottom: '15px', padding: '0 10px' }}>
               <label>Stability Range: [{formatSliderValue(stabilityRange[0])} - {formatSliderValue(stabilityRange[1])}]</label>
               <Slider 
@@ -312,7 +221,6 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
               <div style={{display: 'flex', justifyContent: 'space-between'}}><small>More Variable</small><small>More Stable</small></div>
           </div>
 
-          {/* Similarity Range */} 
           <div style={{ marginBottom: '15px', padding: '0 10px' }}>
               <label>Similarity Boost Range: [{formatSliderValue(similarityRange[0])} - {formatSliderValue(similarityRange[1])}]</label>
               <Slider 
@@ -324,7 +232,6 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
                <div style={{display: 'flex', justifyContent: 'space-between'}}><small>Low</small><small>High</small></div>
           </div>
 
-          {/* Style Range */} 
           <div style={{ marginBottom: '15px', padding: '0 10px' }}>
               <label>Style Exaggeration Range: [{formatSliderValue(styleRange[0])} - {formatSliderValue(styleRange[1])}]</label>
               <Slider 
@@ -336,8 +243,7 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
                <div style={{display: 'flex', justifyContent: 'space-between'}}><small>None</small><small>Exaggerated</small></div>
           </div>
 
-           {/* Speed Range */} 
-           <div style={{ marginBottom: '15px', padding: '0 10px' }}>
+          <div style={{ marginBottom: '15px', padding: '0 10px' }}>
               <label>Speed Range: [{formatSliderValue(speedRange[0])} - {formatSliderValue(speedRange[1])}]</label>
               <Slider 
                   range
@@ -348,7 +254,6 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
                <div style={{display: 'flex', justifyContent: 'space-between'}}><small>Slower</small><small>Faster</small></div>
           </div>
 
-          {/* Speaker Boost */} 
           <div style={{ marginBottom: '10px' }}>
               <input 
                   type="checkbox" id="speakerBoost" 

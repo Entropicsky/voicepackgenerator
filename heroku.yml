@@ -1,0 +1,13 @@
+setup:
+  addons:
+    - plan: heroku-redis
+      as: REDIS
+build:
+  docker:
+    web: backend/Dockerfile      # Flask API
+    worker: backend/Dockerfile   # re‑use image
+    frontend: frontend/Dockerfile
+run:
+  web: gunicorn backend.app:app --bind 0.0.0.0:$PORT
+  worker: celery -A celery_app.celery worker --loglevel=info
+  frontend: nginx -g 'daemon off;'
