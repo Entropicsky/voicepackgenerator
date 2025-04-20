@@ -10,9 +10,12 @@ WORKDIR /app
 
 # Install system dependencies
 # Add git for potential VCS requirements in pip packages
-# Add sqlite for Flask-Migrate/Alembic support with SQLite
+# Remove sqlite as it's no longer needed
 # Add ca-certificates and update-ca-certificates for TLS validation
-RUN apk update && apk add --no-cache git sqlite ca-certificates && update-ca-certificates
+# Add ffmpeg for pydub audio processing
+RUN apk update && \
+    apk add --no-cache git ca-certificates ffmpeg && \
+    update-ca-certificates
 
 # Install pip dependencies
 # Copy only requirements to leverage Docker cache
@@ -37,7 +40,7 @@ RUN mkdir -p /app/output/audio
 # Create the database file if it doesn't exist and initialize schema
 # This RUN step ensures the DB exists before the CMD tries to access it
 # We touch the file first, then initialize.
-RUN touch /app/jobs.db && python -c 'from models import init_db; init_db()'
+# RUN touch /app/jobs.db && python -c 'from models import init_db; init_db()' # Removed SQLite init
 
 # Run app.py when the container launches
 # Use gunicorn for potentially better performance/handling multiple workers

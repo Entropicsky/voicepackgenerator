@@ -19,7 +19,10 @@ import {
   ScriptLineCreateOrUpdate,
   // Import the RegenerateLinePayload interface from types.ts
   RegenerateLinePayload,
-  BatchListInfo
+  BatchListInfo,
+  // Crop Take Types (assuming simple response for now)
+  CropTakePayload,
+  CropTakeResponse
 } from './types';
 
 // Define options for filtering/sorting voices
@@ -332,5 +335,23 @@ export const api = {
       body: JSON.stringify({ archive }),
     });
     return handleApiResponse<ScriptMetadata>(response);
+  },
+
+  // --- Audio Cropping (NEW) --- //
+  cropTake: async (batchPrefix: string, filename: string, startTime: number, endTime: number): Promise<CropTakeResponse> => {
+    const encodedBatchPrefix = encodeURIComponent(batchPrefix);
+    const encodedFilename = encodeURIComponent(filename);
+    const url = `${API_BASE}/api/batch/${encodedBatchPrefix}/takes/${encodedFilename}/crop`;
+    console.log(`[API cropTake] Cropping ${filename} in ${batchPrefix} from ${startTime} to ${endTime}. URL: ${url}`);
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ startTime, endTime }),
+    });
+    // Expects { data: { task_id: "...", message: "..." } } or error
+    // Return the full response including task_id
+    return handleApiResponse<CropTakeResponse>(response);
   },
 }; 

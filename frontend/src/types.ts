@@ -77,9 +77,9 @@ export interface RegenerateLinePayload {
     line_key: string;
     line_text: string;
     num_new_takes: number;
-    settings: Partial<GenerationConfig>; // Send relevant ranges
+    settings: GenerationSettings; // Re-use generation settings type
     replace_existing: boolean;
-    update_script?: boolean;
+    update_script?: boolean; // Optional: Update script DB
 }
 
 // Response from starting any async job (generate, regenerate, STS)
@@ -141,15 +141,30 @@ export interface BatchMetadata {
 // Payload for STS request
 export interface SpeechToSpeechPayload {
     line_key: string;
-    source_audio_b64: string; // data:audio/...;base64,... string
+    source_audio_b64: string; // Base64 encoded audio data URI
     num_new_takes: number;
     target_voice_id: string;
     model_id: string;
-    settings: { // Specific STS settings
-        stability?: number;
-        similarity_boost?: number;
-    };
+    settings: StsSettings; // Specific settings for STS
     replace_existing: boolean;
+}
+
+export interface StsSettings {
+    stability?: number | null;
+    similarity_boost?: number | null;
+}
+
+// --- NEW: Audio Cropping Types --- //
+// Payload sent from frontend
+export interface CropTakePayload {
+    startTime: number; // seconds
+    endTime: number;   // seconds
+}
+
+// Response received from backend (includes Celery task ID)
+export interface CropTakeResponse {
+    task_id: string;
+    message: string;
 }
 
 // --- NEW: Voice Design Types --- //

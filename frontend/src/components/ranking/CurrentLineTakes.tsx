@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useRanking } from '../../contexts/RankingContext';
 import TakeRow from './TakeRow';
 import { Take } from '../../types';
 import RegenerationModal from './RegenerationModal';
 import SpeechToSpeechModal from './SpeechToSpeechModal';
+import { Modal, Text, Box, Button, Paper } from '@mantine/core';
+import AudioEditModal from './AudioEditModal';
 
 // This component is no longer responsible for rendering takes,
 // as RankSlots handles grouping and rendering by rank.
@@ -16,11 +18,14 @@ const CurrentLineTakes: React.FC = () => {
       lineRegenerationStatus,
       startLineRegeneration,
       setTakeRankWithinLine,
-      batchId
+      batchId,
+      startCropTaskTracking
   } = useRanking();
   console.log(`[CurrentLineTakes] Received batchId from context: ${batchId}`);
   const [showRegenModal, setShowRegenModal] = useState<boolean>(false);
   const [showStsModal, setShowStsModal] = useState<boolean>(false);
+  const [editingTake, setEditingTake] = useState<Take | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState<boolean>(false);
 
   // Get the current regeneration status for the selected line
   const currentRegenJob = selectedLineKey ? lineRegenerationStatus[selectedLineKey] : null;
@@ -56,6 +61,27 @@ const CurrentLineTakes: React.FC = () => {
     setShowStsModal(false);
   };
 
+  // <<< Handlers for Edit Modal >>>
+  const handleOpenEditModal = (takeToEdit: Take) => {
+    console.log(`[CurrentLineTakes] Opening BASIC edit modal for take:`, takeToEdit);
+    setEditingTake(takeToEdit);
+    setIsEditModalOpen(true);
+  };
+
+  const handleCloseEditModal = () => {
+    console.log(`[CurrentLineTakes] Closing edit modal.`);
+    setIsEditModalOpen(false);
+    setEditingTake(null);
+  };
+
+  // <<< New handler for when crop task is submitted >>>
+  const handleCropStarted = useCallback((taskId: string) => {
+      if (!editingTake) return;
+      console.log(`[CurrentLineTakes] Crop task ${taskId} started for take ${editingTake.file}. Closing editor and starting tracking.`);
+      startCropTaskTracking(editingTake.file, taskId); // Tell context to track
+      handleCloseEditModal(); // Close the editor UI
+  }, [editingTake, startCropTaskTracking]); // Add dependencies
+
   // Handle no line selected state
   if (!selectedLineKey) {
     return (
@@ -71,46 +97,74 @@ const CurrentLineTakes: React.FC = () => {
 
   return (
     <div style={{flex: 3, marginRight: '15px', maxHeight: '80vh', overflowY: 'auto', padding: '10px'}}> 
-      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap'}}>
+      
+      {/* Header Section (Always Visible) */} 
+      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', marginBottom: '15px'}}>
           <h3>Takes for Line: {selectedLineKey}</h3>
           <div>
-              {/* Conditionally render status or buttons */} 
-              {isRegenerating ? (
-                  <div style={{ fontStyle: 'italic', color: 'blue', padding: '5px 10px', border: '1px solid blue', borderRadius: '4px' }}>
-                      🔄 Regenerating... ({currentRegenJob?.status})
-                      {currentRegenJob?.info?.status && <small> ({currentRegenJob.info.status})</small>}
-                  </div>
-              ) : currentRegenJob?.status === 'FAILURE' ? (
-                   <div style={{ fontStyle: 'italic', color: 'red', padding: '5px 10px', border: '1px solid red', borderRadius: '4px' }}>
-                      ❌ Regeneration Failed: {currentRegenJob?.error || 'Unknown error'}
-                   </div>
-              ) : (
-                 <>
-                      <button onClick={handleOpenRegenModal} title={`Regenerate takes for line ${selectedLineKey}`} style={{marginRight: '10px'}} disabled={isRegenerating}>
-                          🔄 Regenerate (TTS)...
-                      </button>
-                      <button onClick={handleOpenStsModal} title={`Generate takes using Speech-to-Speech for line ${selectedLineKey}"}`} disabled={isRegenerating}>
-                          🎤 Speech-to-Speech...
-                      </button>
-                  </>
-              )}
+             {/* Only show Regen/STS buttons when NOT editing */}
+             {!isEditModalOpen && (
+                 <> 
+                    {isRegenerating ? (
+                        <div style={{ fontStyle: 'italic', color: 'blue', padding: '5px 10px', border: '1px solid blue', borderRadius: '4px' }}>
+                            🔄 Regenerating... ({currentRegenJob?.status})
+                            {currentRegenJob?.info?.status && <small> ({currentRegenJob.info.status})</small>}
+                        </div>
+                    ) : currentRegenJob?.status === 'FAILURE' ? (
+                        <div style={{ fontStyle: 'italic', color: 'red', padding: '5px 10px', border: '1px solid red', borderRadius: '4px' }}>
+                            ❌ Regeneration Failed: {currentRegenJob?.error || 'Unknown error'}
+                        </div>
+                    ) : (
+                       <>
+                            <button onClick={handleOpenRegenModal} title={`Regenerate takes for line ${selectedLineKey}`} style={{marginRight: '10px'}} disabled={isRegenerating}>
+                                🔄 Regenerate (TTS)...
+                            </button>
+                            <button onClick={handleOpenStsModal} title={`Generate takes using Speech-to-Speech for line ${selectedLineKey}"}`} disabled={isRegenerating}>
+                                🎤 Speech-to-Speech...
+                            </button>
+                        </>
+                    )}
+                </>
+             )}
           </div>
       </div>
-      {inboxTakes.length === 0 ? (
-        <p>No unranked takes found for this line (Inbox is empty).</p>
+
+      {/* --- Conditionally Render Editor OR Take List --- */} 
+      {isEditModalOpen && editingTake && batchMetadata ? (
+          // --- Render Editor View --- 
+          <Paper shadow="md" p="md" mt="lg" withBorder style={{position: 'relative', zIndex: 10}}>
+              <h4>Editing: {editingTake.file}</h4> 
+              <AudioEditModal 
+                  take={editingTake} 
+                  batchMetadata={batchMetadata}
+                  onCropStarted={handleCropStarted}
+              />
+              <Button variant="light" color="gray" onClick={handleCloseEditModal} mt="sm">
+                  Close Editor
+              </Button>
+          </Paper>
       ) : (
-        <div> 
-          {inboxTakes.map((take: Take) => (
-              <TakeRow 
-                  key={take.file} 
-                  take={take} 
-                  showRankButtons={true}
-                  onTrash={() => setTakeRankWithinLine(take.file, 6)} />
-            ))}
-        </div>
+          // --- Render Take List View --- 
+          <> 
+            {inboxTakes.length === 0 ? (
+              <p>No unranked takes found for this line (Inbox is empty).</p>
+            ) : (
+              <div> 
+                {inboxTakes.map((take: Take) => (
+                    <TakeRow 
+                        key={take.file} 
+                        take={take} 
+                        showRankButtons={true}
+                        onTrash={() => setTakeRankWithinLine(take.file, 6)} 
+                        onEdit={handleOpenEditModal}
+                    />
+                  ))}
+              </div>
+            )}
+          </>
       )}
 
-      {/* Render Modal Conditionally */}  
+      {/* Render Other Modals (Regen/STS) - These use portals by default */}
       {showRegenModal && selectedLineKey && batchId && (
           <RegenerationModal 
               batchId={batchId}

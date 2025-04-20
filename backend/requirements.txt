@@ -33,3 +33,14 @@ pyyaml>=5.4.1  # Required by TTS
 # azure-storage-blob>=12.0.0
 # Cloudflare R2 SDK (uses S3 compatibility)
 boto3>=1.20.0 # Use a recent version 
+
+boto3>=1.34.0,<2.0.0
+celery>=5.3.6,<6.0.0
+redis>=5.0.1,<6.0.0
+psycopg2-binary>=2.9.9,<3.0.0
+alembic>=1.13.1,<2.0.0
+Flask-Migrate>=4.0.7,<5.0.0
+python-dotenv>=1.0.1,<2.0.0
+gunicorn>=21.2.0,<22.0.0
+itsdangerous>=2.1.2,<3.0.0
+pydub>=0.25.1,<0.26.0 # Added for audio cropping 

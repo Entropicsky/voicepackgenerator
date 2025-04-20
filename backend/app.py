@@ -960,6 +960,68 @@ def start_speech_to_speech_line(batch_prefix):
         return make_api_response(error="Failed to start speech-to-speech task", status_code=500)
     finally: db.close()
 
+# --- NEW: Audio Cropping Endpoint --- #
+@app.route('/api/batch/<path:batch_prefix>/takes/<path:filename>/crop', methods=['POST'])
+def crop_take(batch_prefix, filename):
+    """Endpoint to start a Celery task to crop an audio take."""
+    # Basic security/validation
+    if not batch_prefix or '..' in batch_prefix:
+        return make_api_response(error="Invalid batch prefix", status_code=400)
+    if not filename or '..' in filename or not filename.endswith('.mp3'):
+        return make_api_response(error="Invalid filename", status_code=400)
+    if not request.is_json:
+        return make_api_response(error="Request must be JSON", status_code=400)
+    
+    data = request.get_json()
+    start_time = data.get('startTime')
+    end_time = data.get('endTime')
+
+    if start_time is None or end_time is None:
+        return make_api_response(error="Missing required fields: startTime and endTime", status_code=400)
+
+    try:
+        start_seconds = float(start_time)
+        end_seconds = float(end_time)
+        if start_seconds < 0 or end_seconds <= 0 or start_seconds >= end_seconds:
+            raise ValueError("Invalid start/end time values.")
+    except (ValueError, TypeError):
+        return make_api_response(error="Invalid startTime or endTime format. Must be numbers in seconds.", status_code=400)
+
+    # Construct the full R2 object key for the take
+    # Assuming the structure skin/voice/batch/takes/filename
+    r2_object_key = f"{batch_prefix}/takes/{filename}"
+    logging.info(f"Received crop request for R2 key: {r2_object_key}, Start: {start_seconds}, End: {end_seconds}")
+
+    # Optional: Check if batch is locked (we decided to disallow cropping locked batches in the spec)
+    metadata_blob_key = f"{batch_prefix}/metadata.json"
+    try:
+        metadata_bytes = utils_r2.download_blob_to_memory(metadata_blob_key)
+        if metadata_bytes:
+            metadata = json.loads(metadata_bytes.decode('utf-8'))
+            if metadata.get('ranked_at_utc') is not None:
+                logging.warning(f"Attempted to crop take in locked batch: {batch_prefix}")
+                return make_api_response(error="Cannot crop takes in a locked batch.", status_code=403) # 403 Forbidden
+        else:
+             # If metadata doesn't exist, something is wrong, but let task handle R2 key check
+             logging.warning(f"Metadata not found for batch {batch_prefix} during crop request, but proceeding.")
+    except Exception as meta_err:
+        logging.error(f"Error checking batch lock status during crop request for {batch_prefix}: {meta_err}")
+        # Decide if this error should prevent the crop or just be logged
+        # return make_api_response(error="Failed to check batch lock status", status_code=500)
+
+    try:
+        # Enqueue the Celery task
+        task = tasks.crop_audio_take.delay(r2_object_key, start_seconds, end_seconds)
+        logging.info(f"Enqueued crop task with Celery ID: {task.id} for R2 key {r2_object_key}")
+        
+        # Return task ID immediately (or job ID if we were creating one)
+        # Frontend will need to poll task status or just rely on overwrite
+        return make_api_response(data={'task_id': task.id, 'message': 'Crop task started.'}, status_code=202)
+
+    except Exception as e:
+        logging.exception(f"Error enqueueing crop task for {r2_object_key}: {e}")
+        return make_api_response(error="Failed to start audio cropping task", status_code=500)
+
 # --- NEW: Voice Design API Endpoints --- #
 
 @app.route('/api/voice-design/previews', methods=['POST'])

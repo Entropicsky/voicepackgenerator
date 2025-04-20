@@ -12,6 +12,13 @@ interface LineRegenerationJobStatus {
     error?: string | null;
 }
 
+// <<< NEW: Status for Crop Task >>>
+interface CropJobStatus {
+    taskId: string;
+    status: TaskStatus['status'] | 'SUBMITTED'; // Same statuses as regen
+    error?: string | null;
+}
+
 interface RankingContextType {
   batchId: string;
   batchMetadata: BatchMetadata | null;
@@ -30,6 +37,9 @@ interface RankingContextType {
   // >> ADDED: State for single audio playback control
   currentlyPlayingTakeFile: string | null;
   setCurrentlyPlayingTakeFile: (file: string | null) => void;
+  // <<< NEW: Crop Status Tracking >>>
+  cropStatusByTakeFile: Record<string, CropJobStatus>;
+  startCropTaskTracking: (takeFile: string, taskId: string) => void;
 }
 
 const RankingContext = createContext<RankingContextType | undefined>(undefined);
@@ -41,6 +51,7 @@ interface RankingProviderProps {
 
 const DEBOUNCE_DELAY = 500; // ms to wait before sending PATCH request
 const LINE_REGEN_POLL_INTERVAL = 4000; // ms to poll for line regen status
+const CROP_POLL_INTERVAL = 4000; // Same interval as regen for now
 
 export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, children }) => {
   console.log(`[RankingProvider] Initializing with batchId prop: ${batchId}`); 
@@ -54,7 +65,10 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
   const [lineRegenerationStatus, setLineRegenerationStatus] = useState<Record<string, LineRegenerationJobStatus>>({}); 
   // >> ADDED: State for playback control
   const [currentlyPlayingTakeFile, setCurrentlyPlayingTakeFile] = useState<string | null>(null);
-  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null); // Ref for interval ID
+  // <<< NEW: Crop Status State >>>
+  const [cropStatusByTakeFile, setCropStatusByTakeFile] = useState<Record<string, CropJobStatus>>({});
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null); // Ref for regen interval ID
+  const cropPollingIntervalRef = useRef<NodeJS.Timeout | null>(null); // Ref for crop interval ID
 
   // --- Fetch Metadata ---
   const fetchMetadata = useCallback(async () => {
@@ -93,6 +107,7 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
     setSelectedLineKey(null); // Reset selected line when batch ID changes
     setLineRegenerationStatus({}); // Clear regen status on batch change
     setCurrentlyPlayingTakeFile(null); // >> ADDED: Reset playing take on batch change
+    setCropStatusByTakeFile({}); // <<< Reset crop status on batch change >>>
     fetchMetadata();
   }, [fetchMetadata]);
 
@@ -249,6 +264,110 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
     };
   }, [lineRegenerationStatus, fetchTakesForLine, batchId]); // Dependencies: re-run when status changes or batchId changes
 
+  // <<< NEW: Crop Task Tracking Logic >>>
+  const startCropTaskTracking = useCallback((takeFile: string, taskId: string) => {
+      console.log(`[RankingContext] Starting to track crop task ${taskId} for take ${takeFile}`);
+      setCropStatusByTakeFile(prev => ({
+          ...prev,
+          [takeFile]: { taskId, status: 'SUBMITTED', error: null }
+      }));
+      // Trigger polling immediately if not already running (or rely on useEffect dependency)
+  }, []);
+
+  // <<< NEW: Polling effect for active Crop tasks >>>
+  useEffect(() => {
+    const activeCrops = Object.entries(cropStatusByTakeFile)
+        .filter(([_, job]) => job.status !== 'SUCCESS' && job.status !== 'FAILURE');
+
+    const pollCropStatuses = async () => {
+        if (activeCrops.length === 0) {
+             if (cropPollingIntervalRef.current) {
+                 console.log("[RankingContext Crop Polling] No active crops, clearing interval.");
+                 clearInterval(cropPollingIntervalRef.current);
+                 cropPollingIntervalRef.current = null;
+             }
+            return;
+        }
+        
+        console.log(`[RankingContext Crop Polling] Checking status for ${activeCrops.length} active crop tasks...`);
+
+        const statusPromises = activeCrops.map(async ([takeFile, job]) => {
+            try {
+                // Use the SAME task status endpoint
+                const taskStatus = await api.getTaskStatus(job.taskId); 
+                return { takeFile, taskStatus };
+            } catch (err: any) {
+                console.error(`[RankingContext Crop Polling] Error fetching status for crop task ${job.taskId} (file ${takeFile}):`, err);
+                return { takeFile, taskStatus: { task_id: job.taskId, status: 'FAILURE', info: { error: `Failed to fetch status: ${err.message}` } } as TaskStatus };
+            }
+        });
+
+        const results = await Promise.all(statusPromises);
+
+        let stateUpdates: Record<string, CropJobStatus> = {};
+        let stillActive = false;
+
+        results.forEach(({ takeFile, taskStatus }) => {
+            const currentStatus = cropStatusByTakeFile[takeFile];
+            if (currentStatus && currentStatus.status !== taskStatus.status) {
+                console.log(`[RankingContext Crop Polling] Status update for file ${takeFile} (Task ${taskStatus.task_id}): ${currentStatus.status} -> ${taskStatus.status}`);
+                stateUpdates[takeFile] = {
+                    taskId: taskStatus.task_id,
+                    status: taskStatus.status,
+                    error: taskStatus.status === 'FAILURE' ? (taskStatus.info?.error || 'Unknown error') : null
+                };
+
+                if (taskStatus.status !== 'SUCCESS' && taskStatus.status !== 'FAILURE') {
+                    stillActive = true; 
+                }
+                // If SUCCESS, we can potentially clear the status or mark as done
+                // Let's just clear it for now after success
+                if (taskStatus.status === 'SUCCESS') {
+                     console.log(`[RankingContext Crop Polling] Crop for ${takeFile} succeeded. Removing from tracking.`);
+                     // We will remove it after updating state
+                } else if (taskStatus.status === 'FAILURE'){
+                     console.error(`[RankingContext Crop Polling] Crop task ${taskStatus.task_id} for ${takeFile} FAILED: ${stateUpdates[takeFile].error}`);
+                }
+            } else if (currentStatus && currentStatus.status !== 'SUCCESS' && currentStatus.status !== 'FAILURE'){
+                 stillActive = true; // Mark that polling should continue if unchanged and not terminal
+            }
+        });
+
+        if (Object.keys(stateUpdates).length > 0) {
+            setCropStatusByTakeFile(prev => {
+                const newState = { ...prev, ...stateUpdates };
+                // Remove entries that just succeeded
+                Object.entries(stateUpdates).forEach(([file, job]) => {
+                    if (job.status === 'SUCCESS') {
+                        delete newState[file];
+                    }
+                });
+                return newState;
+            });
+        }
+         
+        if (!stillActive && cropPollingIntervalRef.current) {
+            console.log("[RankingContext Crop Polling] All crops terminal or finished, clearing interval.");
+            clearInterval(cropPollingIntervalRef.current);
+            cropPollingIntervalRef.current = null;
+        }
+    };
+
+    if (activeCrops.length > 0 && !cropPollingIntervalRef.current) {
+        console.log("[RankingContext Crop Polling] Active crops detected, setting up interval.");
+        cropPollingIntervalRef.current = setInterval(pollCropStatuses, CROP_POLL_INTERVAL);
+    }
+
+    // Cleanup function
+    return () => {
+        if (cropPollingIntervalRef.current) {
+            console.log("[RankingContext Crop Polling] Cleanup: Clearing interval.");
+            clearInterval(cropPollingIntervalRef.current);
+            cropPollingIntervalRef.current = null;
+        }
+    };
+  }, [cropStatusByTakeFile, batchId]); // Dependencies
+
   // --- Rank Update Logic ---
   const updateApiRank = useCallback(async (updates: { file: string, rank: number | null }[]) => {
     if (!batchId || isLocked || updates.length === 0) return;
@@ -396,6 +515,9 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
     // >> ADDED: Expose playback control state and function
     currentlyPlayingTakeFile,
     setCurrentlyPlayingTakeFile,
+    // <<< NEW: Expose crop status and tracking function >>>
+    cropStatusByTakeFile,
+    startCropTaskTracking
   };
 
   return <RankingContext.Provider value={value}>{children}</RankingContext.Provider>;

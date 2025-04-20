@@ -5,8 +5,9 @@ This project provides a web-based tool for:
 2.  Ranking the generated takes on a line-by-line basis to select the best options.
 3.  **(New!)** Designing new voices directly from text prompts using the ElevenLabs Voice Design API.
 4.  **(New!)** Managing scripts through a database with a full-featured editor and versioning.
+5.  **(New!)** Cropping audio takes directly within the ranking interface.
 
-Built with Flask (backend API), Celery (background tasks), Redis (task queue), React/TypeScript/Vite (frontend), and Docker Compose for environment management.
+Built with Flask (backend API), Celery (background tasks), Redis (task queue), React/TypeScript/Vite (frontend), **pydub** (audio processing), **WaveSurfer.js** (waveform display), and Docker Compose for environment management.
 
 ## Features
 
@@ -29,11 +30,17 @@ Built with Flask (backend API), Celery (background tasks), Redis (task queue), R
 *   **Job Tracking:**
     *   View history of submitted generation jobs.
     *   See live status updates polled from Celery/Database.
-*   **Ranking:**
+*   **Ranking & Editing:**
     *   View generated batches.
     *   Listen to takes line-by-line.
     *   Assign ranks (1-5) to takes within each line.
     *   Rank assignments automatically cascade within the line.
+    *   Move ranked takes up/down or unrank/trash them directly from the ranked panel.
+    *   **(New!)** Edit takes using an inline waveform editor:
+        *   Visualize the audio waveform.
+        *   Select start/end points using draggable regions.
+        *   Preview the selected audio region.
+        *   Save the crop, overwriting the original audio file in R2 via a background task.
     *   Download ranked batch audio.
     *   Lock completed batches.
 *   **Line Regeneration/STS:**
@@ -77,6 +84,7 @@ This project uses Docker Compose for a consistent local development environment.
     *   Docker Desktop installed and running.
     *   Git
     *   An ElevenLabs API Key.
+    *   **(New!)** `ffmpeg` installed on your system (or ensure it's installed in the backend Docker image). `pydub` relies on it.
 
 2.  **Clone the Repository:**
     ```bash
@@ -150,6 +158,7 @@ Deployment to Heroku is managed via `heroku.yml` and uses Docker container build
 *   **Worker Dyno (`worker`):** Builds using `Dockerfile.worker`. Runs the Celery worker directly.
 *   **Migrations:** The `release` phase in `heroku.yml` automatically runs `flask db upgrade` before new code is released, ensuring the Heroku Postgres database schema is up-to-date.
 *   **Environment Variables:** Required variables like `SECRET_KEY`, `ELEVENLABS_API_KEY`, `R2_BUCKET_NAME`, `R2_ENDPOINT_URL`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` must be set manually in the Heroku app's settings (Config Vars). `DATABASE_URL` and `REDIS_URL` are typically set automatically by the addons.
+*   **(New!)** Ensure `ffmpeg` is included in the backend Docker buildpack or build process for Heroku if not using the exact same Dockerfile base.
 
 **Deployment Steps:**
 
@@ -165,3 +174,18 @@ Deployment to Heroku is managed via `heroku.yml` and uses Docker container build
 ## Known Issues
 
 *   The Vite development server (`
+*   **(New!)** Audio Editor rendering relies on `withinPortal={false}` workaround due to conflict between WaveSurfer and Mantine Modal portal. Styling is basic.
+
+## Backlog / Future Features
+
+*   Audio Cropping:
+    *   Improve editor styling when rendered inline.
+    *   Investigate/Fix Mantine Modal portal conflict.
+    *   Add task polling/notifications for crop completion.
+    *   Implement non-destructive cropping (save as new file + metadata update).
+    *   Add Undo functionality.
+    *   Add Volume Normalization/Fade options.
+*   Testing Framework implementation.
+*   Cloudflare Access Authentication (Requires Custom Domain).
+*   Batch action improvements (e.g., bulk delete/archive).
+*   More detailed job progress reporting.
