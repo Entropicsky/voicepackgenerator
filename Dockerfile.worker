@@ -9,7 +9,7 @@ ENV PYTHONUNBUFFERED 1
 WORKDIR /app
 
 # Install system dependencies and root CAs
-RUN apk update && apk add --no-cache git ca-certificates && update-ca-certificates
+RUN apk update && apk add --no-cache git ca-certificates ffmpeg && update-ca-certificates
 
 # Install pip dependencies
 COPY backend/requirements.txt requirements.txt
