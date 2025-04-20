@@ -19,15 +19,17 @@ interface RankingContextType {
   error: string | null;
   takesByLine: Record<string, Take[]>;
   setTakeRankWithinLine: (file: string, rank: number | null) => void;
-  lockCurrentBatch: () => Promise<void>;
   isLocked: boolean;
   selectedLineKey: string | null;
   setSelectedLineKey: (lineKey: string | null) => void;
   currentLineRankedTakes: (Take | null)[]; // Index 0=Rank1, ..., 4=Rank5
   refetchMetadata: () => void;
   // NEW: State and function for tracking line regenerations
-  lineRegenerationStatus: Record<string, LineRegenerationJobStatus>; 
+  lineRegenerationStatus: Record<string, LineRegenerationJobStatus>;
   startLineRegeneration: (lineKey: string, taskId: string) => void;
+  // >> ADDED: State for single audio playback control
+  currentlyPlayingTakeFile: string | null;
+  setCurrentlyPlayingTakeFile: (file: string | null) => void;
 }
 
 const RankingContext = createContext<RankingContextType | undefined>(undefined);
@@ -50,6 +52,8 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
   const [selectedLineKey, setSelectedLineKey] = useState<string | null>(null);
   // NEW: State for line regeneration tracking
   const [lineRegenerationStatus, setLineRegenerationStatus] = useState<Record<string, LineRegenerationJobStatus>>({}); 
+  // >> ADDED: State for playback control
+  const [currentlyPlayingTakeFile, setCurrentlyPlayingTakeFile] = useState<string | null>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null); // Ref for interval ID
 
   // --- Fetch Metadata ---
@@ -88,6 +92,7 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
   useEffect(() => {
     setSelectedLineKey(null); // Reset selected line when batch ID changes
     setLineRegenerationStatus({}); // Clear regen status on batch change
+    setCurrentlyPlayingTakeFile(null); // >> ADDED: Reset playing take on batch change
     fetchMetadata();
   }, [fetchMetadata]);
 
@@ -354,22 +359,6 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
 
   }, [batchMetadata, isLocked, debouncedUpdateApiRank]);
 
-  // --- Lock Batch Logic ---
-   const lockCurrentBatch = useCallback(async () => {
-    if (!batchId || isLocked) return;
-    console.log(`API Call: Locking batch ${batchId}`);
-    try {
-        await api.lockBatch(batchId);
-        setIsLocked(true);
-        // Update local metadata state as well
-        setBatchMetadata((prevMeta: BatchMetadata | null) => prevMeta ? { ...prevMeta, ranked_at_utc: new Date().toISOString() } : null);
-    } catch (err: any) {
-        console.error(`Failed to lock batch ${batchId}:`, err);
-        setError(`Failed to lock batch: ${err.message}`);
-        // Do not set isLocked to true if API fails
-    }
-  }, [batchId, isLocked]);
-
   // --- Memoized Ranked Takes for CURRENTLY SELECTED line ---
   // Calculate directly without useMemo
   const calculateRankedTakes = () => {
@@ -396,7 +385,6 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
     error,
     takesByLine,
     setTakeRankWithinLine,
-    lockCurrentBatch,
     isLocked,
     selectedLineKey,
     setSelectedLineKey,
@@ -404,7 +392,10 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
     refetchMetadata: fetchMetadata,
     // NEW: Expose regeneration state and trigger function
     lineRegenerationStatus,
-    startLineRegeneration 
+    startLineRegeneration,
+    // >> ADDED: Expose playback control state and function
+    currentlyPlayingTakeFile,
+    setCurrentlyPlayingTakeFile,
   };
 
   return <RankingContext.Provider value={value}>{children}</RankingContext.Provider>;

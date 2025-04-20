@@ -85,14 +85,19 @@ This project uses Docker Compose for a consistent local development environment.
     ```
 
 3.  **Configure Local Environment:**
-    *   Copy `.env.example` to `.env`:
+    *   Copy `env.example` to `.env`:
         ```bash
-        cp .env.example .env
+        cp env.example .env
         ```
     *   Edit `.env` and fill in the required values:
         *   `SECRET_KEY`: Generate a random string (e.g., `python3 -c 'import secrets; print(secrets.token_hex(16))'`).
         *   `ELEVENLABS_API_KEY`: Your actual API key from ElevenLabs.
+        *   `R2_BUCKET_NAME`: Your Cloudflare R2 bucket name (e.g., `voicepackgenerator-dev`).
+        *   `R2_ENDPOINT_URL`: Your R2 S3 endpoint (e.g., `https://<account_id>.r2.cloudflarestorage.com`).
+        *   `R2_ACCESS_KEY_ID`: Your R2 Access Key ID.
+        *   `R2_SECRET_ACCESS_KEY`: Your R2 Secret Access Key.
         *   Ensure `CELERY_BROKER_URL` and `CELERY_RESULT_BACKEND` are set to `redis://redis:6379/0` (or your local Redis if configured differently).
+        *   Ensure `DATABASE_URL` is set for the local Postgres container (e.g., `postgresql://postgres:password@db:5432/app`).
 
 4.  **Build and Start Services:**
     *   From the project root directory, run:
@@ -144,7 +149,7 @@ Deployment to Heroku is managed via `heroku.yml` and uses Docker container build
     *   Starts Nginx, which then proxies `/api/` and `/audio/` requests to Gunicorn running on `127.0.0.1:5000`.
 *   **Worker Dyno (`worker`):** Builds using `Dockerfile.worker`. Runs the Celery worker directly.
 *   **Migrations:** The `release` phase in `heroku.yml` automatically runs `flask db upgrade` before new code is released, ensuring the Heroku Postgres database schema is up-to-date.
-*   **Environment Variables:** Required variables like `SECRET_KEY`, `ELEVENLABS_API_KEY`, and `AUDIO_ROOT` must be set manually in the Heroku app's settings (Config Vars). `DATABASE_URL` and `REDIS_URL` are typically set automatically by the addons.
+*   **Environment Variables:** Required variables like `SECRET_KEY`, `ELEVENLABS_API_KEY`, `R2_BUCKET_NAME`, `R2_ENDPOINT_URL`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` must be set manually in the Heroku app's settings (Config Vars). `DATABASE_URL` and `REDIS_URL` are typically set automatically by the addons.
 
 **Deployment Steps:**
 

@@ -19,7 +19,6 @@ const RankingPage: React.FC = () => {
     loading,
     error,
     isLocked,
-    lockCurrentBatch,
     refetchMetadata,
     batchId, // Now available from context!
   } = useRanking();
@@ -46,17 +45,6 @@ const RankingPage: React.FC = () => {
       </Alert>
     );
   }
-
-  const handleLock = async () => {
-    if (window.confirm('Are you sure you want to lock this batch? This cannot be undone easily.')) {
-      try {
-        await lockCurrentBatch();
-        alert('Batch locked successfully!');
-      } catch (err: any) {
-        alert(`Failed to lock batch: ${err.message}`);
-      }
-    }
-  };
 
   return (
     // Use Mantine styling conventions if desired, or keep existing inline styles
@@ -85,9 +73,6 @@ const RankingPage: React.FC = () => {
           >
             Download ZIP
           </Button>
-          {!isLocked && (
-            <Button onClick={handleLock} size="xs">Lock Batch</Button>
-          )}
         </Group>
       </Group>
       
