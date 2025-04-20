@@ -6,7 +6,6 @@ import {
   TaskStatus,
   BatchMetadata,
   GenerationJob,
-  BatchDetailInfo,
   ModelOption,
   SpeechToSpeechPayload,
   Take,
@@ -19,7 +18,8 @@ import {
   Script, 
   ScriptLineCreateOrUpdate,
   // Import the RegenerateLinePayload interface from types.ts
-  RegenerateLinePayload
+  RegenerateLinePayload,
+  BatchListInfo
 } from './types';
 
 // Define options for filtering/sorting voices
@@ -139,8 +139,11 @@ export const api = {
 
   // New endpoint for regenerating line takes
   regenerateLineTakes: async (batchId: string, payload: RegenerateLinePayload): Promise<GenerationStartResponse> => {
-      const url = `${API_BASE}/api/batch/${batchId}/regenerate_line`;
-      console.log(`[API] Regenerating line ${payload.line_key} with payload:`, payload);
+      // Encode the batchId (which is the prefix) before inserting into URL
+      console.log(`[API regenerateLineTakes] Received batchId: ${batchId}`);
+      const encodedBatchId = encodeURIComponent(batchId);
+      const url = `${API_BASE}/api/batch/${encodedBatchId}/regenerate_line`;
+      console.log(`[API] Regenerating line ${payload.line_key} for prefix ${batchId}, URL: ${url}`);
       const response = await fetch(url, {
           method: 'POST',
           headers: {
@@ -154,7 +157,11 @@ export const api = {
 
   // New function for starting STS job
   startSpeechToSpeech: async (batchId: string, payload: SpeechToSpeechPayload): Promise<GenerationStartResponse> => {
-      const url = `${API_BASE}/api/batch/${batchId}/speech_to_speech`;
+      // Encode the batchId (which is the prefix) before inserting into URL
+      console.log(`[API startSpeechToSpeech] Received batchId: ${batchId}`);
+      const encodedBatchId = encodeURIComponent(batchId);
+      const url = `${API_BASE}/api/batch/${encodedBatchId}/speech_to_speech`;
+      console.log(`[API] Starting STS for prefix ${batchId}, URL: ${url}`);
       const response = await fetch(url, {
           method: 'POST',
           headers: {
@@ -167,46 +174,39 @@ export const api = {
   },
 
   // --- Ranking --- //
-  listBatches: async (): Promise<BatchDetailInfo[]> => {
+  listBatches: async (): Promise<BatchListInfo[]> => {
     const response = await fetch(`${API_BASE}/api/batches`);
-    return handleApiResponse<BatchDetailInfo[]>(response);
+    return handleApiResponse<BatchListInfo[]>(response);
   },
 
   getBatchMetadata: async (batchId: string): Promise<BatchMetadata> => {
-    const response = await fetch(`${API_BASE}/api/batch/${batchId}`);
+    // Encode the batchId (prefix) 
+    const encodedBatchId = encodeURIComponent(batchId);
+    const response = await fetch(`${API_BASE}/api/batch/${encodedBatchId}`);
     return handleApiResponse<BatchMetadata>(response);
   },
 
   updateTakeRank: async (batchId: string, filename: string, rank: number | null): Promise<void> => {
-    const response = await fetch(`${API_BASE}/api/batch/${batchId}/take/${filename}`, {
+    // Encode the batchId (prefix) and filename
+    const encodedBatchId = encodeURIComponent(batchId);
+    const encodedFilename = encodeURIComponent(filename);
+    const response = await fetch(`${API_BASE}/api/batch/${encodedBatchId}/take/${encodedFilename}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ rank }),
     });
-    // Expects { data: { status: "..." } } or error
-    await handleApiResponse<any>(response); // Don't need specific return type
-  },
-
-  lockBatch: async (batchId: string): Promise<{ locked: boolean }> => {
-    const response = await fetch(`${API_BASE}/api/batch/${batchId}/lock`, {
-      method: 'POST',
-    });
-    // Expects { data: { locked: true, message?: "..." } }
-    return handleApiResponse<{ locked: boolean }>(response);
+    // Expects { data: { status: "...", updated_take: {...} } } or error
+    await handleApiResponse<any>(response); 
   },
 
   // NEW: Endpoint to get takes for a specific line
   getLineTakes: async (batchId: string, lineKey: string): Promise<Take[]> => {
-    // TODO: Implement backend endpoint GET /api/batch/{batch_id}/line/{line_key}/takes
     console.log(`[API Placeholder] Fetching takes for batch ${batchId}, line ${lineKey}`);
     // Temporarily refetch all metadata and filter - replace with dedicated API call
-    const metadata = await api.getBatchMetadata(batchId); 
+    const metadata = await api.getBatchMetadata(batchId); // Uses the already updated getBatchMetadata
     return metadata.takes.filter(take => take.line === lineKey);
-    // --- Replace above with dedicated API call when backend is ready ---
-    // const response = await fetch(`${API_BASE}/api/batch/${batchId}/line/${encodeURIComponent(lineKey)}/takes`);
-    // return handleApiResponse<Take[]>(response);
   },
 
   // --- NEW: Script Management --- //

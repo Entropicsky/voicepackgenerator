@@ -88,21 +88,30 @@ export interface JobSubmissionResponse {
   job_id: number;        // Database Job ID
 }
 
-// Represents detailed batch info from the enhanced /api/batches endpoint
-export interface BatchDetailInfo {
-  batch_id: string;
-  skin: string;
-  voice: string;
-  num_lines: number;
-  takes_per_line: number; // Max/Configured takes per line
-  num_takes: number; // Total actual takes found in metadata
-  created_at: string | null; // ISO string
-  created_at_sortkey: number; // Timestamp for sorting
-  status: 'Locked' | 'Unlocked';
+// Represents detailed batch info from the LIST endpoint /api/batches
+// This is now based on GenerationJob results and R2 prefix structure
+export interface BatchListInfo {
+  batch_prefix: string; // The full R2 prefix (e.g., skin/voice/batch-id)
+  skin_name: string;
+  voice_name: string; // The voice folder name (e.g., VoiceName-voiceID)
+  id: string; // The original batch ID part (e.g., 20250420-025342-AYEw)
+  generated_at_utc: string | null; // Not currently available from list endpoint
+  // Add placeholder sort key if needed by the table, or remove columns
+  created_at_sortkey?: number; 
 }
 
-// Remove old BatchInfo if it exists
-// export interface BatchInfo { ... }
+// Remove or comment out the old BatchDetailInfo if no longer used
+// export interface BatchDetailInfo {
+//   batch_id: string;
+//   skin: string;
+//   voice: string;
+//   num_lines: number;
+//   takes_per_line: number; 
+//   num_takes: number; 
+//   created_at: string | null; 
+//   created_at_sortkey: number; 
+//   status: 'Locked' | 'Unlocked';
+// }
 
 // ... Take, BatchMetadata ...
 
@@ -119,6 +128,7 @@ export interface Take {
 
 export interface BatchMetadata {
   batch_id: string;
+  batch_prefix?: string;
   skin_name: string;
   voice_name: string;
   generated_at_utc: string; // ISO string timestamp

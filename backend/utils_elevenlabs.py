@@ -180,63 +180,104 @@ def generate_tts_audio(
     delay: int = 5
 ) -> None:
     """Generates TTS audio using V1 API and saves it to output_path."""
-    # Explicitly use V1 URL
-    url = f"{ELEVENLABS_API_V1_URL}/text-to-speech/{voice_id}" 
+    try:
+        audio_bytes = generate_tts_audio_bytes(
+            text=text,
+            voice_id=voice_id,
+            stability=stability,
+            similarity_boost=similarity_boost,
+            style=style,
+            speed=speed,
+            use_speaker_boost=use_speaker_boost,
+            model_id=model_id,
+            output_format=output_format,
+            retries=retries,
+            delay=delay
+        )
+        if audio_bytes:
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            with open(output_path, 'wb') as audio_f:
+                audio_f.write(audio_bytes)
+            print(f"Successfully saved audio to {output_path}")
+        else:
+            # If generate_tts_audio_bytes returns None, it means it failed after retries
+            # Raise an error here to match the previous behavior of the function
+            raise ElevenLabsError(f"Failed to generate TTS audio bytes for voice {voice_id} after retries.")
+
+    except ElevenLabsError as e:
+        # Re-raise errors from the bytes function
+        raise e
+    except OSError as e:
+        # Handle potential errors during file writing
+        raise ElevenLabsError(f"Failed to write audio to {output_path}: {e}") from e
+    except Exception as e:
+        # Catch any other unexpected errors during the process
+        raise ElevenLabsError(f"An unexpected error occurred in generate_tts_audio: {e}") from e
+
+def generate_tts_audio_bytes(
+    text: str,
+    voice_id: str,
+    stability: Optional[float] = None,
+    similarity_boost: Optional[float] = None,
+    style: Optional[float] = None,
+    speed: Optional[float] = None,
+    use_speaker_boost: Optional[bool] = None,
+    model_id: str = "eleven_multilingual_v2",
+    output_format: str = 'mp3_44100_128',
+    retries: int = 3,
+    delay: int = 5
+) -> bytes | None:
+    """Generates TTS audio using V1 API and returns the audio content as bytes."""
+    url = f"{ELEVENLABS_API_V1_URL}/text-to-speech/{voice_id}"
     params = {'output_format': output_format}
     payload = {
         'text': text,
-        'model_id': model_id, # Ensure compatible model for V1
+        'model_id': model_id,
         'voice_settings': {}
     }
 
-    # Add settings only if they are provided (not None)
-    if stability is not None:
-        payload['voice_settings']['stability'] = stability
-    if similarity_boost is not None:
-        payload['voice_settings']['similarity_boost'] = similarity_boost
-    if style is not None:
-        payload['voice_settings']['style'] = style
-    if speed is not None:
-        payload['voice_settings']['speed'] = speed
-    if use_speaker_boost is not None:
-        payload['voice_settings']['use_speaker_boost'] = use_speaker_boost
-
-    # Remove voice_settings if empty
-    if not payload['voice_settings']:
-        del payload['voice_settings']
+    if stability is not None: payload['voice_settings']['stability'] = stability
+    if similarity_boost is not None: payload['voice_settings']['similarity_boost'] = similarity_boost
+    if style is not None: payload['voice_settings']['style'] = style
+    if speed is not None: payload['voice_settings']['speed'] = speed
+    if use_speaker_boost is not None: payload['voice_settings']['use_speaker_boost'] = use_speaker_boost
+    if not payload['voice_settings']: del payload['voice_settings']
 
     attempt = 0
     while attempt < retries:
         try:
-            print(f"Attempt {attempt + 1}/{retries}: Generating TTS for voice {voice_id}...")
+            print(f"Attempt {attempt + 1}/{retries}: Generating TTS bytes for voice {voice_id}...")
             response = requests.post(url, headers=get_headers(), params=params, json=payload)
 
             if response.status_code == 200:
-                os.makedirs(os.path.dirname(output_path), exist_ok=True)
-                with open(output_path, 'wb') as audio_f:
-                    audio_f.write(response.content)
-                print(f"Successfully saved audio to {output_path}")
-                return # Success, exit function
-            elif response.status_code == 429: # Rate limit
+                print(f"Successfully generated TTS audio bytes for voice {voice_id}.")
+                return response.content # Return bytes on success
+            elif response.status_code == 429:
                 print(f"Rate limit hit. Retrying in {delay} seconds...")
                 time.sleep(delay)
             else:
-                # Raise error for other client/server errors
                 response.raise_for_status()
 
         except requests.exceptions.RequestException as e:
-            print(f"Error generating TTS (attempt {attempt + 1}): {e}")
+            print(f"Error generating TTS bytes (attempt {attempt + 1}): {e}")
             if attempt == retries - 1:
-                 raise ElevenLabsError(f"Failed to generate TTS after {retries} attempts: {e}") from e
+                # Don't raise here, just log and return None after retries
+                print(f"Failed to generate TTS bytes after {retries} attempts: {e}")
+                return None
         except Exception as e:
-             raise ElevenLabsError(f"An unexpected error occurred during TTS generation: {e}") from e
+            print(f"An unexpected error occurred during TTS bytes generation: {e}")
+            # Don't raise, just return None for unexpected errors too?
+            # Or maybe raise an exception here?
+            # For now, let's match retry logic and return None
+            if attempt == retries - 1:
+                print(f"Failed to generate TTS bytes after {retries} attempts due to unexpected error: {e}")
+                return None
 
         attempt += 1
-        # Optional: Increase delay for subsequent retries?
-        # delay *= 2
 
     # If loop finishes without returning, all retries failed
-    raise ElevenLabsError(f"Failed to generate TTS for voice {voice_id} after {retries} attempts.")
+    print(f"Failed to generate TTS bytes for voice {voice_id} after {retries} attempts.")
+    return None
 
 # --- NEW: Voice Design Functions (V1 API) --- #
 

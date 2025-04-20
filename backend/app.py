@@ -1,10 +1,9 @@
 # backend/app.py
-from flask import Flask, jsonify, request, current_app, Response, send_from_directory, send_file
+from flask import Flask, jsonify, request, current_app, Response, redirect, send_file
 from dotenv import load_dotenv
 import os
 from celery.result import AsyncResult
 import json
-from pathlib import Path
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session, joinedload
 import zipfile
@@ -16,6 +15,8 @@ from flask_migrate import Migrate
 import time # For timing
 import logging # For better logging
 from werkzeug.middleware.proxy_fix import ProxyFix
+import urllib.parse # Added for URL encoding/decoding
+from typing import Dict
 
 # Import celery app instance from root
 from backend.celery_app import celery
@@ -23,7 +24,7 @@ from backend.celery_app import celery
 from backend import tasks
 # Import utils from backend package
 from . import utils_elevenlabs
-from . import utils_fs
+from . import utils_r2 # Added utils_r2
 from . import models # Import the models module
 
 # Load environment variables from .env file for local development
@@ -60,12 +61,6 @@ except Exception as e:
 
 # Example: Access an env var
 print(f"Flask App: ELEVENLABS_API_KEY loaded? {'Yes' if os.getenv('ELEVENLABS_API_KEY') else 'No'}")
-
-# Get the configured audio root directory
-# Ensure this is set correctly in docker-compose.yml environment for the backend service
-AUDIO_ROOT = Path(os.getenv('AUDIO_ROOT', './output'))
-
-print(f"Flask App: Using AUDIO_ROOT={AUDIO_ROOT.resolve()}")
 
 # --- Helper Function --- #
 def make_api_response(data: dict = None, error: str = None, status_code: int = 200) -> Response:
@@ -694,354 +689,276 @@ def toggle_script_archive_status(script_id):
     finally:
         db.close()
 
-# --- Ranking API Endpoints --- #
+# --- Batch & Ranking API Endpoints (Refactored for R2) --- #
 
 @app.route('/api/batches', methods=['GET'])
 def list_batches():
-    """Lists available batches by scanning the filesystem."""
+    """Lists available batches by querying successful jobs from the database."""
+    logging.info("--- Entered /api/batches endpoint --- ")
     try:
-        batches = utils_fs.find_batches(AUDIO_ROOT)
+        db: Session = next(models.get_db())
+        batches = []
+        try:
+            logging.info("Querying successful generation jobs...")
+            successful_jobs = (
+                db.query(models.GenerationJob)
+                .filter(
+                    models.GenerationJob.status.in_(["SUCCESS", "COMPLETED_WITH_ERRORS"]),
+                    models.GenerationJob.result_batch_ids_json.isnot(None)
+                )
+                .order_by(models.GenerationJob.completed_at.desc())
+                .all()
+            )
+            logging.info(f"Found {len(successful_jobs)} potential jobs.")
+
+            processed_prefixes = set()
+            for job in successful_jobs:
+                try:
+                    # Prefixes are stored as a JSON list string
+                    prefixes_or_ids = json.loads(job.result_batch_ids_json)
+                    if isinstance(prefixes_or_ids, list):
+                        for item in prefixes_or_ids:
+                            # Check if it looks like a prefix (contains slashes)
+                            if isinstance(item, str) and '/' in item:
+                                prefix = item
+                                if prefix not in processed_prefixes:
+                                    parts = prefix.split('/')
+                                    if len(parts) >= 3:
+                                         batch_info = {
+                                             'batch_prefix': prefix, # This is the ID now
+                                             'skin_name': parts[0],
+                                             'voice_name': parts[1],
+                                             'id': parts[2], # The original timestamp-id part
+                                             'generated_at_utc': None # TODO: Consider fetching this if needed
+                                         }
+                                         batches.append(batch_info)
+                                         processed_prefixes.add(prefix)
+                                    else:
+                                         logging.warning(f"Unexpected batch prefix format in job {job.id}: {prefix}")
+                            elif isinstance(item, str): # Looks like an old batch_id
+                                 logging.warning(f"Found old-style batch ID in job {job.id}: {item}. Skipping.")
+                            else:
+                                 logging.warning(f"Found non-string item in result_batch_ids_json for job {job.id}: {item}")
+
+                except json.JSONDecodeError:
+                    logging.warning(f"Failed to parse result_batch_ids_json for job {job.id}: {job.result_batch_ids_json}")
+
+        finally:
+             db.close()
+
+        logging.info(f"--- Exiting /api/batches successfully. Returning {len(batches)} batches. ---")
         return make_api_response(data=batches)
     except Exception as e:
-        print(f"Error listing batches: {e}")
+        logging.exception(f"--- Error in /api/batches: {e} ---")
         return make_api_response(error="Failed to list batches", status_code=500)
 
-@app.route('/api/batch/<batch_id>', methods=['GET'])
-def get_batch_metadata(batch_id):
-    """Gets the metadata for a specific batch."""
+# Route now uses <path:batch_prefix> to capture the full prefix including slashes
+@app.route('/api/batch/<path:batch_prefix>', methods=['GET'])
+def get_batch_metadata(batch_prefix):
+    """Gets the metadata for a specific batch prefix from R2."""
+    # batch_prefix comes URL-decoded automatically by Flask
+    if not batch_prefix or '..' in batch_prefix: # Basic security check
+        return make_api_response(error="Invalid batch prefix", status_code=400)
+
+    metadata_blob_key = f"{batch_prefix}/metadata.json"
+    logging.info(f"Attempting to fetch metadata from R2: {metadata_blob_key}") # Use logging
+
     try:
-        batch_dir = utils_fs.get_batch_dir(AUDIO_ROOT, batch_id)
-        if not batch_dir or not batch_dir.is_dir():
-            return make_api_response(error=f"Batch '{batch_id}' not found", status_code=404)
-        metadata = utils_fs.load_metadata(batch_dir)
-        return make_api_response(data=metadata)
-    except utils_fs.FilesystemError as e:
-        print(f"Filesystem error getting metadata for {batch_id}: {e}")
-        # Could be 404 if metadata file specifically not found
-        return make_api_response(error=str(e), status_code=404 if "not found" in str(e).lower() else 500)
+        metadata_bytes = utils_r2.download_blob_to_memory(metadata_blob_key)
+        if not metadata_bytes:
+            logging.warning(f"Metadata blob not found for prefix '{batch_prefix}'") # Use logging
+            return make_api_response(error=f"Metadata not found for batch prefix '{batch_prefix}'", status_code=404)
+
+        # Decode and parse JSON
+        try:
+            metadata = json.loads(metadata_bytes.decode('utf-8'))
+            return make_api_response(data=metadata)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            logging.error(f"Failed to parse metadata JSON for {metadata_blob_key}: {e}")
+            return make_api_response(error="Failed to parse batch metadata", status_code=500)
+
     except Exception as e:
-        print(f"Unexpected error getting metadata for {batch_id}: {e}")
+        logging.exception(f"Unexpected error getting metadata for {batch_prefix}: {e}")
         return make_api_response(error="Failed to get batch metadata", status_code=500)
 
-@app.route('/api/batch/<batch_id>/take/<path:filename>', methods=['PATCH'])
-def update_take_rank(batch_id, filename):
-    """Updates the rank of a specific take within a batch."""
+# Note: Batch ID is now the full R2 Prefix
+@app.route('/api/batch/<path:batch_prefix>/take/<path:filename>', methods=['PATCH'])
+def update_take_rank(batch_prefix, filename):
+    """Updates the rank of a specific take within a batch by modifying metadata in R2."""
+    # Basic security check
+    if not batch_prefix or '..' in batch_prefix:
+        return make_api_response(error="Invalid batch prefix", status_code=400)
+    if not filename or '..' in filename or not filename.endswith('.mp3'):
+        return make_api_response(error="Invalid filename", status_code=400)
+
     if not request.is_json:
         return make_api_response(error="Request must be JSON", status_code=400)
     data = request.get_json()
     new_rank = data.get('rank')
 
-    # Validate rank
     if new_rank is not None:
         try:
             new_rank = int(new_rank)
-            # Allow 1-5 for ranked, 6 for trashed, null for unranked/restored
-            if not (1 <= new_rank <= 6):
-                raise ValueError()
+            if not (1 <= new_rank <= 6): raise ValueError()
         except (ValueError, TypeError):
-            # Update error message to include 6
             return make_api_response(error="Invalid rank value. Must be integer 1-6 or null.", status_code=400)
-    # Allow rank to be null to un-rank/restore
+
+    metadata_blob_key = f"{batch_prefix}/metadata.json"
+    logging.info(f"Updating rank for take '{filename}' in prefix '{batch_prefix}'. New rank: {new_rank}") # Use logging
 
     try:
-        batch_dir = utils_fs.get_batch_dir(AUDIO_ROOT, batch_id)
-        if not batch_dir or not batch_dir.is_dir():
-            return make_api_response(error=f"Batch '{batch_id}' not found", status_code=404)
+        # 1. Download current metadata
+        logging.info(f"Downloading metadata: {metadata_blob_key}") # Use logging
+        metadata_bytes = utils_r2.download_blob_to_memory(metadata_blob_key)
+        if not metadata_bytes:
+            return make_api_response(error=f"Metadata not found for batch '{batch_prefix}'", status_code=404)
+        try:
+            metadata = json.loads(metadata_bytes.decode('utf-8'))
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+             logging.error(f"Failed to parse metadata JSON for {metadata_blob_key}: {e}")
+             return make_api_response(error="Failed to parse batch metadata for update", status_code=500)
 
-        # Check if locked
-        if utils_fs.is_locked(batch_dir):
-            return make_api_response(error="Batch is locked and cannot be modified", status_code=423) # 423 Locked
-
-        metadata = utils_fs.load_metadata(batch_dir)
+        # 2. Find and update the take
         take_updated = False
+        updated_take_info = None
         for take in metadata.get('takes', []):
-            # Use Path comparison for robustness, though simple string match works if only basename used
-            if Path(take.get('file', '')).name == Path(filename).name:
-                take['rank'] = new_rank
-                take['ranked_at'] = datetime.now(timezone.utc).isoformat() if new_rank is not None else None
-                take_updated = True
-                break
+             if take.get('file') == filename:
+                 take['rank'] = new_rank
+                 take['ranked_at'] = datetime.now(timezone.utc).isoformat() if new_rank is not None else None
+                 take_updated = True
+                 updated_take_info = take
+                 logging.info(f"Found and updated take metadata for {filename}") # Use logging
+                 break
 
         if not take_updated:
-            return make_api_response(error=f"Take '{filename}' not found in batch '{batch_id}'", status_code=404)
+            return make_api_response(error=f"Take '{filename}' not found in batch '{batch_prefix}'", status_code=404)
 
-        # Save updated metadata *before* rebuilding symlinks
-        utils_fs.save_metadata(batch_dir, metadata)
-        # Rebuild symlinks based on the *entire* updated metadata
-        utils_fs.rebuild_symlinks(batch_dir, metadata)
-
-        return make_api_response(data={"status": "Rank updated successfully"})
-
-    except utils_fs.FilesystemError as e:
-        print(f"Filesystem error updating rank for {filename} in {batch_id}: {e}")
-        return make_api_response(error=str(e), status_code=500)
-    except Exception as e:
-        print(f"Unexpected error updating rank for {filename} in {batch_id}: {e}")
-        return make_api_response(error="Failed to update take rank", status_code=500)
-
-@app.route('/api/batch/<batch_id>/lock', methods=['POST'])
-def lock_batch_endpoint(batch_id):
-    """Locks a batch, preventing further rank updates."""
-    try:
-        batch_dir = utils_fs.get_batch_dir(AUDIO_ROOT, batch_id)
-        if not batch_dir or not batch_dir.is_dir():
-            return make_api_response(error=f"Batch '{batch_id}' not found", status_code=404)
-
-        if utils_fs.is_locked(batch_dir):
-            return make_api_response(data={"locked": True, "message": "Batch already locked"})
-
-        # Create LOCK file first
-        utils_fs.lock_batch(batch_dir)
-
-        # Then update metadata
-        try:
-            metadata = utils_fs.load_metadata(batch_dir)
-            metadata['ranked_at_utc'] = datetime.now(timezone.utc).isoformat()
-            utils_fs.save_metadata(batch_dir, metadata)
-        except Exception as meta_e:
-            # Attempt to rollback lock file? Or just log error?
-            print(f"Warning: Batch {batch_id} LOCK file created, but failed to update metadata timestamp: {meta_e}")
-            # Still return success as the lock *file* is the primary mechanism
-            pass
-
-        return make_api_response(data={"locked": True})
-
-    except utils_fs.FilesystemError as e:
-        print(f"Filesystem error locking batch {batch_id}: {e}")
-        return make_api_response(error=str(e), status_code=500)
-    except Exception as e:
-        print(f"Unexpected error locking batch {batch_id}: {e}")
-        return make_api_response(error="Failed to lock batch", status_code=500)
-
-@app.route('/api/batch/<batch_id>/download', methods=['GET'])
-def download_batch_zip(batch_id):
-    """Creates and returns a ZIP archive of the batch directory contents."""
-    try:
-        batch_dir = utils_fs.get_batch_dir(AUDIO_ROOT, batch_id)
-        if not batch_dir or not batch_dir.is_dir():
-            return make_api_response(error=f"Batch '{batch_id}' not found", status_code=404)
-
-        # Get the parent directory name (VoiceName-VoiceID) for the zip filename
-        zip_filename_base = batch_dir.parent.name
-        zip_download_name = f"{zip_filename_base}.zip"
-
-        memory_file = io.BytesIO()
-        with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
-            # Add metadata.json and LOCKED if they exist
-            meta_file = batch_dir / 'metadata.json'
-            lock_file = batch_dir / 'LOCKED'
-            if meta_file.is_file():
-                 zf.write(meta_file, arcname=meta_file.name)
-            if lock_file.is_file():
-                 zf.write(lock_file, arcname=lock_file.name)
-
-            # Add contents of takes/
-            takes_dir = batch_dir / 'takes'
-            if takes_dir.is_dir():
-                for root, _, files in os.walk(takes_dir):
-                    for file in files:
-                        file_path = Path(root) / file
-                        # Archive name relative to batch_dir (e.g., takes/file.mp3)
-                        arcname = file_path.relative_to(batch_dir).as_posix()
-                        zf.write(file_path, arcname=arcname)
-            
-            # Add contents of ranked/
-            ranked_dir = batch_dir / 'ranked'
-            if ranked_dir.is_dir():
-                 for root, _, files in os.walk(ranked_dir):
-                    for file in files:
-                        file_path = Path(root) / file
-                        # Archive name relative to batch_dir (e.g., ranked/01/file.mp3)
-                        arcname = file_path.relative_to(batch_dir).as_posix()
-                        # Check if it's a symlink and add the *target* file content if possible,
-                        # or just add the link itself if adding target fails?
-                        # For simplicity and to avoid issues with broken links, let's just add the link itself.
-                        # If the target file needs to be included regardless of link, 
-                        # we'd need to resolve it and add with its content, being careful about duplicates.
-                        # Add the file/link with its relative path
-                        zf.write(file_path, arcname=arcname)
-                        
-        memory_file.seek(0)
-
-        # Consider checking if *anything* was added beyond metadata/lock?
-
-        return send_file(
-            memory_file,
-            mimetype='application/zip',
-            as_attachment=True,
-            download_name=zip_download_name # Use the voice folder name
+        # 3. Upload the modified metadata (overwrite)
+        logging.info(f"Uploading updated metadata: {metadata_blob_key}") # Use logging
+        updated_metadata_bytes = json.dumps(metadata, indent=2).encode('utf-8')
+        upload_success = utils_r2.upload_blob(
+            blob_name=metadata_blob_key,
+            data=updated_metadata_bytes,
+            content_type='application/json'
         )
 
-    except utils_fs.FilesystemError as e:
-        print(f"Filesystem error creating zip for {batch_id}: {e}")
-        return make_api_response(error=str(e), status_code=500)
-    except Exception as e:
-        print(f"Unexpected error creating zip for {batch_id}: {e}")
-        return make_api_response(error="Failed to create batch zip file", status_code=500)
+        if not upload_success:
+             logging.error(f"Failed to upload updated metadata for {metadata_blob_key}")
+             return make_api_response(error="Failed to save updated rank to storage", status_code=500)
 
-@app.route('/api/batch/<batch_id>/regenerate_line', methods=['POST'])
-def regenerate_line(batch_id):
-    """Endpoint to start a line regeneration task."""
-    if not request.is_json:
-        return make_api_response(error="Request must be JSON", status_code=400)
-    
+        logging.info(f"Successfully updated rank for {filename} in {batch_prefix}") # Use logging
+        return make_api_response(data={
+            "status": "Rank updated successfully",
+            "updated_take": updated_take_info
+        })
+
+    except Exception as e:
+        logging.exception(f"Unexpected error updating rank for {filename} in {batch_prefix}: {e}")
+        return make_api_response(error="Failed to update take rank", status_code=500)
+
+# --- Regeneration Endpoints (Refactored for R2) --- #
+
+# Route uses <path:batch_prefix>
+@app.route('/api/batch/<path:batch_prefix>/regenerate_line', methods=['POST'])
+def regenerate_line(batch_prefix):
+    """Endpoint to start a line regeneration task, using batch prefix."""
+    if not request.is_json: return make_api_response(error="Request must be JSON", status_code=400)
     data = request.get_json()
     required_keys = ['line_key', 'line_text', 'num_new_takes', 'settings', 'replace_existing']
     if not all(key in data for key in required_keys):
-        missing = [key for key in required_keys if key not in data]
-        return make_api_response(error=f'Missing required keys for regeneration: {missing}', status_code=400)
+        missing = [key for key in required_keys if key not in data]; return make_api_response(error=f'Missing keys: {missing}', status_code=400)
 
-    line_key = data['line_key']
-    line_text = data['line_text']
-    num_new_takes = data['num_new_takes']
-    settings = data['settings'] # This should be the GenerationConfig subset
-    replace_existing = data['replace_existing']
-    update_script = data.get('update_script', False)  # Get optional update_script flag, default to False
+    line_key = data['line_key']; line_text = data['line_text']; num_new_takes = data['num_new_takes']
+    settings = data['settings']; replace_existing = data['replace_existing']; update_script = data.get('update_script', False)
     settings_json = json.dumps(settings)
 
     db: Session = next(models.get_db())
     db_job = None
     try:
-        # Check if target batch exists before creating job
-        target_batch_dir = utils_fs.get_batch_dir(AUDIO_ROOT, batch_id)
-        if not target_batch_dir or not target_batch_dir.is_dir():
-             return make_api_response(error=f"Target batch '{batch_id}' not found for regeneration", status_code=404)
-        
+        # Check if target batch metadata exists in R2
+        metadata_blob_key = f"{batch_prefix}/metadata.json"
+        if not utils_r2.blob_exists(metadata_blob_key):
+             return make_api_response(error=f"Target batch prefix '{batch_prefix}' not found for regeneration", status_code=404)
+
         # Create Job DB record
         db_job = models.GenerationJob(
-            status="PENDING",
-            job_type="line_regen", # Mark job type
-            target_batch_id=batch_id,
+            status="PENDING", job_type="line_regen",
+            target_batch_id=batch_prefix, # Store the prefix
             target_line_key=line_key,
-            parameters_json=json.dumps(data) # Store all input params
+            parameters_json=json.dumps(data)
         )
-        db.add(db_job)
-        db.commit()
-        db.refresh(db_job)
+        db.add(db_job); db.commit(); db.refresh(db_job)
         db_job_id = db_job.id
-        print(f"Created Line Regeneration Job record with DB ID: {db_job_id}")
+        logging.info(f"Created Line Regen Job DB ID: {db_job_id} for prefix {batch_prefix}") # Use logging
 
-        # Enqueue Celery task
+        # Enqueue Celery task, passing the BATCH PREFIX
         task = tasks.regenerate_line_takes.delay(
-            db_job_id, batch_id, line_key, line_text, 
-            num_new_takes, settings_json, replace_existing, update_script  # Pass update_script flag to the task
+            db_job_id, batch_prefix, line_key, line_text, # Pass prefix as batch_id
+            num_new_takes, settings_json, replace_existing, update_script
         )
-        print(f"Enqueued line regen task: Celery ID {task.id}, DB Job ID {db_job_id}")
-
-        # Update Job record with Celery task ID
-        db_job.celery_task_id = task.id
-        db.commit()
-
+        logging.info(f"Enqueued line regen task: Celery ID {task.id}, DB Job ID {db_job_id}") # Use logging
+        db_job.celery_task_id = task.id; db.commit()
         return make_api_response(data={'task_id': task.id, 'job_id': db_job_id}, status_code=202)
-
     except Exception as e:
-        print(f"Error submitting line regeneration job: {e}")
-        if db_job and db_job.id:
-            try:
-                 db_job.status = "SUBMIT_FAILED"
-                 db_job.result_message = f"Failed to enqueue Celery task: {e}"
-                 db.commit()
-            except Exception as db_err:
-                 print(f"Failed to update job status after enqueue error: {db_err}")
-                 db.rollback()
+        logging.exception(f"Error submitting line regeneration job for prefix {batch_prefix}: {e}")
+        if db_job and db_job.id: # Mark job as failed
+            try: db_job.status = "SUBMIT_FAILED"; db_job.result_message = f"Enqueue failed: {e}"; db.commit()
+            except: db.rollback()
         return make_api_response(error="Failed to start line regeneration task", status_code=500)
-    finally:
-        db.close()
+    finally: db.close()
 
-@app.route('/api/batch/<batch_id>/speech_to_speech', methods=['POST'])
-def start_speech_to_speech_line(batch_id):
-    """Endpoint to start a line speech-to-speech task."""
-    if not request.is_json:
-        return make_api_response(error="Request must be JSON", status_code=400)
-
+# Route uses <path:batch_prefix>
+@app.route('/api/batch/<path:batch_prefix>/speech_to_speech', methods=['POST'])
+def start_speech_to_speech_line(batch_prefix):
+    """Endpoint to start a line speech-to-speech task, using batch prefix."""
+    if not request.is_json: return make_api_response(error="Request must be JSON", status_code=400)
     data = request.get_json()
-    required_keys = [
-        'line_key', 'source_audio_b64', 'num_new_takes', 
-        'target_voice_id', 'model_id', 'settings', 'replace_existing'
-    ]
-    if not all(key in data for key in required_keys):
-        missing = [key for key in required_keys if key not in data]
-        return make_api_response(error=f'Missing required keys for STS: {missing}', status_code=400)
+    required_keys = ['line_key', 'source_audio_b64', 'num_new_takes', 'target_voice_id', 'model_id', 'settings', 'replace_existing']
+    if not all(key in data for key in required_keys): missing = [k for k in required_keys if k not in data]; return make_api_response(error=f'Missing keys: {missing}', status_code=400)
 
-    line_key = data['line_key']
-    source_audio_b64 = data['source_audio_b64']
-    num_new_takes = data['num_new_takes']
-    target_voice_id = data['target_voice_id']
-    model_id = data['model_id']
-    settings = data['settings'] # Should contain stability, similarity_boost
-    replace_existing = data['replace_existing']
+    line_key = data['line_key']; source_audio_b64 = data['source_audio_b64']
+    num_new_takes = data['num_new_takes']; target_voice_id = data['target_voice_id']
+    model_id = data['model_id']; settings = data['settings']; replace_existing = data['replace_existing']
     settings_json = json.dumps(settings)
-
-    # Basic validation
-    if not source_audio_b64 or not source_audio_b64.startswith('data:audio'):
-        return make_api_response(error='Invalid or missing source audio data (expecting base64 data URI)', status_code=400)
-    if not isinstance(num_new_takes, int) or num_new_takes <= 0:
-        return make_api_response(error='Invalid number of new takes', status_code=400)
-
-    # Extract raw base64 data
-    try:
-        header, encoded = source_audio_b64.split(';base64,', 1)
-        # audio_data_bytes = base64.b64decode(encoded)
-        # PASS base64 string directly to Celery task to avoid large memory usage here?
-        # Task can decode it.
-    except Exception as e:
-        print(f"Error decoding base64 audio: {e}")
-        return make_api_response(error='Failed to decode source audio data', status_code=400)
+    if not source_audio_b64 or not source_audio_b64.startswith('data:audio'): return make_api_response(error='Invalid audio data URI', status_code=400)
+    if not isinstance(num_new_takes, int) or num_new_takes <= 0: return make_api_response(error='Invalid num_new_takes', status_code=400)
+    try: header, encoded = source_audio_b64.split(';base64,', 1)
+    except: return make_api_response(error='Failed to decode source audio data', status_code=400)
 
     db: Session = next(models.get_db())
     db_job = None
     try:
-        # Check target batch exists
-        target_batch_dir = utils_fs.get_batch_dir(AUDIO_ROOT, batch_id)
-        if not target_batch_dir or not target_batch_dir.is_dir():
-             return make_api_response(error=f"Target batch '{batch_id}' not found for STS", status_code=404)
-        
+        # Check if target batch metadata exists in R2
+        metadata_blob_key = f"{batch_prefix}/metadata.json"
+        if not utils_r2.blob_exists(metadata_blob_key):
+             return make_api_response(error=f"Target batch prefix '{batch_prefix}' not found for STS", status_code=404)
+
         # Create Job DB record
         db_job = models.GenerationJob(
-            status="PENDING",
-            job_type="sts_line_regen", # Mark job type
-            target_batch_id=batch_id,
+            status="PENDING", job_type="sts_line_regen",
+            target_batch_id=batch_prefix, # Store the prefix
             target_line_key=line_key,
-            parameters_json=json.dumps({ # Store specific STS params
-                 'target_voice_id': target_voice_id,
-                 'model_id': model_id,
-                 'num_new_takes': num_new_takes,
-                 'settings': settings,
-                 'replace_existing': replace_existing,
-                 'source_audio_info': header # Store mime type etc.
-            })
+            parameters_json=json.dumps({ 'target_voice_id': target_voice_id, 'model_id': model_id, 'num_new_takes': num_new_takes, 'settings': settings, 'replace_existing': replace_existing, 'source_audio_info': header })
         )
-        db.add(db_job)
-        db.commit()
-        db.refresh(db_job)
+        db.add(db_job); db.commit(); db.refresh(db_job)
         db_job_id = db_job.id
-        print(f"Created STS Line Job record with DB ID: {db_job_id}")
+        logging.info(f"Created STS Line Job DB ID: {db_job_id} for prefix {batch_prefix}") # Use logging
 
-        # Enqueue Celery task, pass base64 string
+        # Enqueue Celery task, passing BATCH PREFIX and base64 string
         task = tasks.run_speech_to_speech_line.delay(
-            db_job_id, batch_id, line_key, source_audio_b64, 
+            db_job_id, batch_prefix, line_key, source_audio_b64, # Pass prefix
             num_new_takes, target_voice_id, model_id, settings_json, replace_existing
         )
-        print(f"Enqueued STS line task: Celery ID {task.id}, DB Job ID {db_job_id}")
-
-        db_job.celery_task_id = task.id
-        db.commit()
-
+        logging.info(f"Enqueued STS line task: Celery ID {task.id}, DB Job ID {db_job_id}") # Use logging
+        db_job.celery_task_id = task.id; db.commit()
         return make_api_response(data={'task_id': task.id, 'job_id': db_job_id}, status_code=202)
-
     except Exception as e:
-        print(f"Error submitting STS line job: {e}")
-        if db_job and db_job.id: # Attempt to mark DB job as failed
-            try:
-                 db_job.status = "SUBMIT_FAILED"
-                 db_job.result_message = f"Failed to enqueue Celery task: {e}"
-                 db.commit()
-            except Exception as db_err:
-                 print(f"Failed to update job status after enqueue error: {db_err}")
-                 db.rollback()
+        logging.exception(f"Error submitting STS line job for prefix {batch_prefix}: {e}")
+        if db_job and db_job.id: # Mark job as failed
+            try: db_job.status = "SUBMIT_FAILED"; db_job.result_message = f"Enqueue failed: {e}"; db.commit()
+            except: db.rollback()
         return make_api_response(error="Failed to start speech-to-speech task", status_code=500)
-    finally:
-        db.close()
+    finally: db.close()
 
 # --- NEW: Voice Design API Endpoints --- #
 
@@ -1128,37 +1045,131 @@ def save_voice_design_preview():
         print(f"Unexpected error saving voice: {e}")
         return make_api_response(error="Failed to save voice", status_code=500)
 
-# --- Audio Streaming Endpoint --- #
+# --- Audio Serving Endpoint --- #
 
-@app.route('/audio/<path:relpath>')
-def serve_audio(relpath):
-    """Serves audio files from the AUDIO_ROOT directory."""
-    # Security: Ensure relpath doesn't escape AUDIO_ROOT. Pathlib should help.
-    # Construct the full path relative to AUDIO_ROOT
-    try:
-        # Ensure AUDIO_ROOT is absolute for safe joining
-        abs_audio_root = AUDIO_ROOT.resolve()
-        full_path = abs_audio_root.joinpath(relpath).resolve()
-
-        # Double-check the requested path is still within AUDIO_ROOT
-        if abs_audio_root not in full_path.parents:
-             raise ValueError("Attempted path traversal")
-
-        directory = full_path.parent
-        filename = full_path.name
-
-        print(f"Serving audio: directory='{directory}', filename='{filename}'")
-
-        # Use send_from_directory for safety and handling Range requests
-        return send_from_directory(directory, filename, conditional=True)
-
-    except ValueError as e:
-        print(f"Security warning or invalid path: {e} for relpath: {relpath}")
+@app.route('/audio/<path:blob_key>')
+def serve_audio(blob_key):
+    """Serves audio files by redirecting to a presigned R2 URL."""
+    if not blob_key or '..' in blob_key or not blob_key.endswith('.mp3'):
         return make_api_response(error="Invalid audio path", status_code=400)
-    except FileNotFoundError:
-        return make_api_response(error="Audio file not found", status_code=404)
+
+    logging.info(f"Request to serve audio for blob key: {blob_key}") # Use logging
+    try:
+        presigned_url = utils_r2.generate_presigned_url(blob_key, expiration=3600)
+        
+        if presigned_url:
+            logging.info(f"Redirecting to presigned URL for: {blob_key}") # Use logging
+            return redirect(presigned_url, code=302)
+        else:
+            if utils_r2.blob_exists(blob_key):
+                 logging.error(f"Failed to generate presigned URL for existing blob: {blob_key}")
+                 return make_api_response(error="Failed to generate temporary audio URL", status_code=500)
+            else:
+                 logging.warning(f"Audio blob not found in R2: {blob_key}")
+                 return make_api_response(error="Audio file not found", status_code=404)
+
     except Exception as e:
-        print(f"Error serving audio file {relpath}: {e}")
+        logging.exception(f"Error serving audio file {blob_key}: {e}")
         return make_api_response(error="Failed to serve audio file", status_code=500)
+
+# --- Batch Download Endpoint --- #
+
+@app.route('/api/batch/<path:batch_prefix>/download', methods=['GET'])
+def download_batch_zip(batch_prefix):
+    """Creates and returns a ZIP archive with takes organized by rank based on metadata."""
+    if not batch_prefix or '..' in batch_prefix: # Basic security check
+        return make_api_response(error="Invalid batch prefix", status_code=400)
+
+    metadata_blob_key = f"{batch_prefix}/metadata.json"
+    zip_filename_base = batch_prefix.replace('/', '_')
+    zip_download_name = f"{zip_filename_base}.zip"
+    logging.info(f"Request to download zip for batch prefix: {batch_prefix}")
+
+    memory_file = io.BytesIO()
+    try:
+        # 1. Download and parse metadata
+        logging.info(f"Downloading metadata: {metadata_blob_key}")
+        metadata_bytes = utils_r2.download_blob_to_memory(metadata_blob_key)
+        if not metadata_bytes:
+            logging.warning(f"Metadata blob not found: {metadata_blob_key}")
+            return make_api_response(error=f"Batch prefix '{batch_prefix}' metadata not found.", status_code=404)
+        try:
+            metadata = json.loads(metadata_bytes.decode('utf-8'))
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            logging.error(f"Failed to parse metadata JSON for zip: {metadata_blob_key}: {e}")
+            return make_api_response(error="Failed to parse batch metadata for zip.", status_code=500)
+
+        with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+            # 2. Add metadata.json to zip
+            zf.writestr("metadata.json", metadata_bytes)
+            logging.info("Added metadata.json to zip.")
+
+            # 3. Iterate through takes listed in metadata
+            takes_list = metadata.get('takes', [])
+            added_files_count = 0
+            failed_files_count = 0
+            added_ranked_count = 0
+            
+            logging.info(f"Found {len(takes_list)} takes listed in metadata.")
+
+            # Cache downloaded audio bytes to avoid re-downloading for ranked folder
+            audio_data_cache: Dict[str, bytes] = {}
+
+            for take in takes_list:
+                r2_key = take.get('r2_key')
+                filename = take.get('file') # This should be just the base filename
+                rank = take.get('rank')
+                
+                if not r2_key or not filename:
+                    logging.warning(f"Skipping take due to missing r2_key or file in metadata: {take}")
+                    continue
+                
+                # Ensure the file is in the cache (download if needed)
+                if r2_key not in audio_data_cache:
+                    logging.info(f"Downloading {r2_key} for zip...") 
+                    audio_bytes = utils_r2.download_blob_to_memory(r2_key)
+                    if audio_bytes is None:
+                        failed_files_count += 1
+                        logging.warning(f"Failed to download {r2_key} for zip file. Skipping.")
+                        continue # Skip this take entirely if download fails
+                    audio_data_cache[r2_key] = audio_bytes
+                else:
+                    # Should not happen with current loop structure, but good practice
+                    audio_bytes = audio_data_cache[r2_key]
+
+                # Add to takes/ folder
+                takes_arcname = f"takes/{filename}" 
+                zf.writestr(takes_arcname, audio_bytes)
+                added_files_count += 1
+                logging.debug(f"Added {takes_arcname} to zip.")
+
+                # If ranked (1-5), also add to ranked/0X/ folder
+                if isinstance(rank, int) and 1 <= rank <= 5:
+                    ranked_arcname = f"ranked/{rank:02d}/{filename}"
+                    try:
+                        zf.writestr(ranked_arcname, audio_bytes)
+                        added_ranked_count += 1
+                        logging.debug(f"Added {ranked_arcname} to zip.")
+                    except Exception as zip_err:
+                        # Log error adding ranked file but continue
+                        logging.error(f"Failed to add ranked file {ranked_arcname} to zip: {zip_err}")
+                # Rank 6 (Trash) is ignored for zip download
+            
+            if failed_files_count > 0:
+                 logging.warning(f"Failed to download {failed_files_count} audio files listed in metadata for zip.")
+                 
+            logging.info(f"Added metadata, {added_files_count} takes files, and {added_ranked_count} ranked file copies to zip for {batch_prefix}")
+
+        memory_file.seek(0)
+        return send_file(
+            memory_file,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=zip_download_name
+        )
+
+    except Exception as e:
+        logging.exception(f"Unexpected error creating zip for {batch_prefix}: {e}")
+        return make_api_response(error="Failed to create batch zip file", status_code=500)
 
 # We don't need the app.run() block here when using 'flask run' or gunicorn/waitress 

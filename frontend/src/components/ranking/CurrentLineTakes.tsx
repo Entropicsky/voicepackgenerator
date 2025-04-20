@@ -15,8 +15,10 @@ const CurrentLineTakes: React.FC = () => {
       batchMetadata, 
       lineRegenerationStatus,
       startLineRegeneration,
-      setTakeRankWithinLine
+      setTakeRankWithinLine,
+      batchId
   } = useRanking();
+  console.log(`[CurrentLineTakes] Received batchId from context: ${batchId}`);
   const [showRegenModal, setShowRegenModal] = useState<boolean>(false);
   const [showStsModal, setShowStsModal] = useState<boolean>(false);
 
@@ -109,18 +111,18 @@ const CurrentLineTakes: React.FC = () => {
       )}
 
       {/* Render Modal Conditionally */}  
-      {showRegenModal && selectedLineKey && batchMetadata && (
+      {showRegenModal && selectedLineKey && batchId && (
           <RegenerationModal 
-              batchId={batchMetadata.batch_id}
+              batchId={batchId}
               lineKey={selectedLineKey}
               currentTakes={takesByLine[selectedLineKey!] || []}
               onClose={handleCloseRegenModal}
               onRegenJobStarted={handleRegenJobStarted}
           />
       )}
-      {showStsModal && selectedLineKey && batchMetadata && (
+      {showStsModal && selectedLineKey && batchId && (
           <SpeechToSpeechModal 
-              batchId={batchMetadata.batch_id}
+              batchId={batchId}
               lineKey={selectedLineKey}
               onClose={handleCloseStsModal}
               onRegenJobStarted={handleRegenJobStarted}

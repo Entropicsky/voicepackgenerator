@@ -13,6 +13,7 @@ interface LineRegenerationJobStatus {
 }
 
 interface RankingContextType {
+  batchId: string;
   batchMetadata: BatchMetadata | null;
   loading: boolean;
   error: string | null;
@@ -40,6 +41,7 @@ const DEBOUNCE_DELAY = 500; // ms to wait before sending PATCH request
 const LINE_REGEN_POLL_INTERVAL = 4000; // ms to poll for line regen status
 
 export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, children }) => {
+  console.log(`[RankingProvider] Initializing with batchId prop: ${batchId}`); 
   const [batchMetadata, setBatchMetadata] = useState<BatchMetadata | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -388,6 +390,7 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
 
   // --- Context Value ---
   const value: RankingContextType = {
+    batchId,
     batchMetadata,
     loading,
     error,

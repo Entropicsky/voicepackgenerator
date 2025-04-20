@@ -26,13 +26,17 @@ const queryClient = new QueryClient();
 
 // NEW: Wrapper component to correctly call useParams
 const RankingPageRouteWrapper: React.FC = () => {
-  const { batchId } = useParams<{ batchId: string }>();
-  if (!batchId) {
-    // Handle case where batchId is missing, maybe redirect or show error
-    return <p>Error: Missing Batch ID in URL.</p>;
+  // Use '*' to access the wildcard parameter value
+  const params = useParams<{ '*' : string }>();
+  const batchPrefix = params['*']; // Get the captured prefix
+
+  if (!batchPrefix) { // Check if the prefix exists
+    // Handle case where batchPrefix is missing, maybe redirect or show error
+    return <p>Error: Missing Batch Prefix in URL.</p>;
   }
+  // Pass the full prefix to the provider/page
   return (
-    <RankingProvider batchId={batchId}>
+    <RankingProvider batchId={batchPrefix}> 
       <RankingPage />
     </RankingProvider>
   );
@@ -78,7 +82,7 @@ const App: React.FC = () => {
                 <Route path="/scripts/new" element={<ScriptEditorPage />} />
                 <Route path="/scripts/:scriptId" element={<ScriptEditorPage />} />
                 <Route path="/voice-design" element={<VoiceDesignPage />} />
-                <Route path="/batch/:batchId" element={<RankingPageRouteWrapper />} />
+                <Route path="/batch/*" element={<RankingPageRouteWrapper />} />
                 <Route path="/batches" element={<BatchesPage />} />
                 <Route path="/jobs" element={<JobsPage />} />
                 <Route path="/" element={<GenerationPage />} />

@@ -1,16 +1,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
-import { BatchDetailInfo } from '../types';
+import { BatchListInfo } from '../types';
+import { Table, Button } from '@mantine/core';
 
-type SortableBatchColumn = 'batch_id' | 'skin' | 'voice' | 'num_lines' | 'takes_per_line' | 'created_at_sortkey' | 'status';
+type SortableBatchColumn = 'id' | 'skin_name' | 'voice_name' | 'generated_at_utc';
 type SortDirection = 'asc' | 'desc';
 
 const BatchesPage: React.FC = () => {
-  const [batches, setBatches] = useState<BatchDetailInfo[]>([]);
+  const [batches, setBatches] = useState<BatchListInfo[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [sortColumn, setSortColumn] = useState<SortableBatchColumn>('created_at_sortkey');
+  const [sortColumn, setSortColumn] = useState<SortableBatchColumn>('id');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
   useEffect(() => {
@@ -19,7 +20,11 @@ const BatchesPage: React.FC = () => {
       setError(null);
       try {
         const fetchedBatches = await api.listBatches();
-        setBatches(fetchedBatches);
+        const batchesWithSortKey = fetchedBatches.map(b => ({
+           ...b,
+           created_at_sortkey: new Date(b.id.split('-')[0]).getTime() || 0
+        }));
+        setBatches(batchesWithSortKey);
       } catch (err: any) {
         setError(`Failed to load batches: ${err.message}`);
         console.error(err);
@@ -32,8 +37,22 @@ const BatchesPage: React.FC = () => {
 
   const sortedBatches = useMemo(() => {
     return [...batches].sort((a, b) => {
-      const valA = a[sortColumn];
-      const valB = b[sortColumn];
+      let valA = a[sortColumn];
+      let valB = b[sortColumn];
+      
+      if (sortColumn === 'generated_at_utc' && a.created_at_sortkey && b.created_at_sortkey) {
+          valA = a.created_at_sortkey;
+          valB = b.created_at_sortkey;
+      } else if (sortColumn === 'id') {
+          try {
+             valA = new Date(a.id.split('-')[0]).getTime();
+             valB = new Date(b.id.split('-')[0]).getTime();
+          } catch { 
+             valA = a.id;
+             valB = b.id; 
+          }
+      }
+      
       const direction = sortDirection === 'asc' ? 1 : -1;
 
       if (typeof valA === 'string' && typeof valB === 'string') {
@@ -42,7 +61,6 @@ const BatchesPage: React.FC = () => {
       if (typeof valA === 'number' && typeof valB === 'number') {
         return (valA - valB) * direction;
       }
-      // Fallback for null/undefined or different types
       if (valA === null || valA === undefined) return 1 * direction;
       if (valB === null || valB === undefined) return -1 * direction;
       return 0;
@@ -54,7 +72,7 @@ const BatchesPage: React.FC = () => {
       setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
     } else {
       setSortColumn(column);
-      setSortDirection('asc'); // Default to ascending on new column
+      setSortDirection('asc');
     }
   };
 
@@ -63,31 +81,7 @@ const BatchesPage: React.FC = () => {
       return sortDirection === 'asc' ? ' ▲' : ' ▼';
   };
 
-  const thStyle: React.CSSProperties = {
-      border: '1px solid #ddd', 
-      padding: '8px', 
-      textAlign: 'left', 
-      cursor: 'pointer', 
-      whiteSpace: 'nowrap'
-  };
-  const tdStyle: React.CSSProperties = {
-      border: '1px solid #ddd', 
-      padding: '8px', 
-      verticalAlign: 'top'
-  };
-  const actionCellStyle: React.CSSProperties = {
-      ...tdStyle, // Inherit base style
-      textAlign: 'center'
-  };
-  const downloadLinkStyle: React.CSSProperties = {
-      display: 'inline-block',
-      padding: '4px 8px',
-      border: '1px solid #0d6efd',
-      borderRadius: '4px',
-      textDecoration: 'none',
-      color: '#0d6efd',
-      fontSize: '0.9em'
-  }
+  const thStyle: React.CSSProperties = { cursor: 'pointer', whiteSpace: 'nowrap' };
 
   if (loading) {
     return <p>Loading batches...</p>;
@@ -101,45 +95,41 @@ const BatchesPage: React.FC = () => {
     <div style={{ width: '100%', maxWidth: '100%' }}>
       <h2>Voiceover Sessions</h2>
       {batches.length === 0 ? (
-        <p>No batches found in the output directory.</p>
+        <p>No batches found.</p>
       ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-                <tr>
-                    <th style={thStyle} onClick={() => handleSort('batch_id')}>Session ID{renderSortArrow('batch_id')}</th>
-                    <th style={thStyle} onClick={() => handleSort('skin')}>Skin{renderSortArrow('skin')}</th>
-                    <th style={thStyle} onClick={() => handleSort('voice')}>Voice{renderSortArrow('voice')}</th>
-                    <th style={thStyle} onClick={() => handleSort('num_lines')}>Lines{renderSortArrow('num_lines')}</th>
-                    <th style={thStyle} onClick={() => handleSort('takes_per_line')}>Takes/Line{renderSortArrow('takes_per_line')}</th>
-                    <th style={thStyle} onClick={() => handleSort('created_at_sortkey')}>Created{renderSortArrow('created_at_sortkey')}</th>
-                    <th style={thStyle} onClick={() => handleSort('status')}>Status{renderSortArrow('status')}</th>
-                    <th style={{...thStyle, cursor: 'default', width: '150px'}}>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                {sortedBatches.map(batch => (
-                    <tr key={batch.batch_id}>
-                         <td style={tdStyle}><Link to={`/batch/${batch.batch_id}`}>{batch.batch_id}</Link></td>
-                         <td style={tdStyle}>{batch.skin}</td>
-                         <td style={tdStyle}>{batch.voice}</td>
-                         <td style={tdStyle}>{batch.num_lines}</td>
-                         <td style={tdStyle}>{batch.takes_per_line}</td>
-                         <td style={tdStyle}>{batch.created_at ? new Date(batch.created_at).toLocaleString() : 'N/A'}</td>
-                         <td style={tdStyle}>{batch.status}</td>
-                         <td style={actionCellStyle}>
-                            <a 
-                                href={`/api/batch/${batch.batch_id}/download`} 
-                                download={`${batch.voice}.zip`}
-                                style={downloadLinkStyle}
-                                title={`Download ZIP for ${batch.batch_id} (${batch.voice})`}
-                            >
-                                Download ZIP
-                            </a>
-                         </td>
-                    </tr>
-                ))}
-            </tbody>
-        </table>
+        <Table striped highlightOnHover withTableBorder withColumnBorders>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th style={thStyle} onClick={() => handleSort('id')}>Session ID{renderSortArrow('id')}</Table.Th>
+              <Table.Th style={thStyle} onClick={() => handleSort('skin_name')}>Skin{renderSortArrow('skin_name')}</Table.Th>
+              <Table.Th style={thStyle} onClick={() => handleSort('voice_name')}>Voice{renderSortArrow('voice_name')}</Table.Th>
+              <Table.Th style={thStyle} onClick={() => handleSort('generated_at_utc')}>Created{renderSortArrow('generated_at_utc')}</Table.Th>
+              <Table.Th>Actions</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {sortedBatches.map(batch => (
+              <Table.Tr key={batch.batch_prefix}>
+                <Table.Td><Link to={`/batch/${encodeURIComponent(batch.batch_prefix)}`}>{batch.id}</Link></Table.Td>
+                <Table.Td>{batch.skin_name}</Table.Td>
+                <Table.Td>{batch.voice_name}</Table.Td>
+                <Table.Td>{batch.generated_at_utc ? new Date(batch.generated_at_utc).toLocaleString() : 'N/A'}</Table.Td>
+                <Table.Td ta="center">
+                  <Button 
+                    component="a"
+                    href={`/api/batch/${encodeURIComponent(batch.batch_prefix)}/download`}
+                    download={`${batch.voice_name}.zip`}
+                    variant="outline"
+                    size="xs"
+                    title={`Download ZIP for ${batch.batch_prefix}`}
+                  >
+                    Download ZIP
+                  </Button>
+                </Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
       )}
     </div>
   );
