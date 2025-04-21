@@ -116,6 +116,15 @@ export interface BatchListInfo {
 // ... Take, BatchMetadata ...
 
 // Add back missing definitions
+// Define GenerationSettings type first
+export interface GenerationSettings {
+  stability?: number | null;
+  similarity_boost?: number | null;
+  style?: number | null;
+  speed?: number | null;
+  use_speaker_boost?: boolean | null;
+}
+
 export interface Take {
   file: string;
   line: string;
@@ -123,7 +132,9 @@ export interface Take {
   script_text: string | null;
   rank: number | null;
   ranked_at: string | null; // ISO string timestamp
-  // Add other fields if needed based on metadata.json structure
+  // Add generation_settings
+  generation_settings?: GenerationSettings | null;
+  r2_key?: string; // Add r2_key if it exists in metadata
 }
 
 export interface BatchMetadata {

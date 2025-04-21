@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Take } from '../../types';
 import { useRanking } from '../../contexts/RankingContext';
 import { api } from '../../api'; // For getting audio URL
-import { ActionIcon, Tooltip, Text, Loader, Alert, Group } from '@mantine/core';
+import { ActionIcon, Tooltip, Text, Loader, Alert, Group, Box } from '@mantine/core';
 import { IconCrop, IconAlertCircle } from '@tabler/icons-react';
 
 interface TakeRowProps {
@@ -12,6 +12,18 @@ interface TakeRowProps {
   onTrash?: () => void;      // Handler for trash action
   onEdit: (take: Take) => void; // Add onEdit prop
 }
+
+// Helper to format settings
+const formatSettings = (settings: Take['generation_settings']): string => {
+  if (!settings) return 'No settings recorded';
+  const parts = [];
+  if (settings.stability !== undefined) parts.push(`Stab: ${settings.stability.toFixed(2)}`);
+  if (settings.similarity_boost !== undefined) parts.push(`Sim: ${settings.similarity_boost.toFixed(2)}`);
+  if (settings.style !== undefined) parts.push(`Style: ${settings.style.toFixed(2)}`);
+  if (settings.speed !== undefined) parts.push(`Speed: ${settings.speed.toFixed(2)}`);
+  if (settings.use_speaker_boost !== undefined) parts.push(`Boost: ${settings.use_speaker_boost ? 'On' : 'Off'}`);
+  return parts.join(' | ');
+};
 
 const TakeRow: React.FC<TakeRowProps> = ({ take, showRankButtons = true, onTrash, onEdit }) => {
   const { 
@@ -162,9 +174,17 @@ const TakeRow: React.FC<TakeRowProps> = ({ take, showRankButtons = true, onTrash
         </Tooltip>
 
         {/* Take Info */}
-        <div style={{ flexGrow: 1, position: 'relative' }}>
+        <Box style={{ flexGrow: 1, position: 'relative' }}>
           <span><strong>Take {take.take_number}:</strong> {take.file}</span>
-          <small style={{ display: 'block', color: '#555' }}>{take.script_text}</small>
+          <Text size="xs" c="dimmed" truncate="end" lineClamp={1} title={take.script_text || ''}>
+            {take.script_text || ''}
+          </Text>
+          {/* NEW: Display Formatted Generation Settings */}
+          {take.generation_settings && (
+            <Text size="xs" c="gray" mt={3}> 
+              {formatSettings(take.generation_settings)}
+            </Text>
+          )}
           {/* Display Crop Status */}
           {isCropping && (
               <Group gap="xs" style={{ position: 'absolute', top: '0', right: '0', backgroundColor: 'rgba(255,255,255,0.8)', padding: '2px 5px', borderRadius: '3px' }}>
@@ -180,7 +200,7 @@ const TakeRow: React.FC<TakeRowProps> = ({ take, showRankButtons = true, onTrash
                   </Group>
               </Tooltip>
           )}
-        </div>
+        </Box>
 
         {/* Rank Buttons (Conditional) */}
         {showRankButtons && (
