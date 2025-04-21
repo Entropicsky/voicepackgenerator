@@ -27,6 +27,9 @@ from . import utils_elevenlabs
 from . import utils_r2 # Added utils_r2
 from . import models # Import the models module
 
+# Standard preview text
+VOICE_PREVIEW_TEXT = "Four score and seven years ago our fathers brought forth on this continent, a new nation, conceived in Liberty, and dedicated to the proposition that all men are created equal."
+
 # Load environment variables from .env file for local development
 # Within Docker, env vars are passed by docker-compose
 load_dotenv()
@@ -1233,5 +1236,54 @@ def download_batch_zip(batch_prefix):
     except Exception as e:
         logging.exception(f"Unexpected error creating zip for {batch_prefix}: {e}")
         return make_api_response(error="Failed to create batch zip file", status_code=500)
+
+# --- NEW: Voice Preview Endpoint --- #
+@app.route('/api/voices/<string:voice_id>/preview', methods=['GET'])
+def get_voice_preview(voice_id):
+    """Generates and streams a short audio preview for a given voice ID."""
+    logging.info(f"Received preview request for voice_id: {voice_id}")
+    try:
+        # Use the new stream function from utils
+        # Note: Ensure the generate_preview_audio_stream function exists and works
+        preview_response = utils_elevenlabs.generate_preview_audio_stream(
+            voice_id=voice_id,
+            text=VOICE_PREVIEW_TEXT
+        )
+        
+        # Check if the response has content before creating the Flask response
+        if preview_response.content is None and preview_response.status_code != 200:
+             # Handle case where the stream function failed gracefully but indicated an issue
+             # Use the status code and potentially the content from the failed response
+             logging.error(f"Preview generation failed upstream for {voice_id}. Status: {preview_response.status_code}")
+             error_detail = "Preview generation failed."
+             try: 
+                 error_detail = preview_response.json().get('detail', error_detail)
+             except: pass # Ignore if response isn't JSON
+             return make_api_response(error=error_detail, status_code=preview_response.status_code)
+        
+        # Stream the audio content back
+        # The iter_content chunk size can be adjusted
+        def generate_chunks():
+            try:
+                for chunk in preview_response.iter_content(chunk_size=1024):
+                    yield chunk
+                logging.info(f"Finished streaming preview for {voice_id}")
+            except Exception as stream_err:
+                logging.error(f"Error during preview streaming for {voice_id}: {stream_err}")
+                # Don't yield further, let the client handle the broken stream
+            finally:
+                 # Ensure the underlying connection is closed if the response object supports it
+                if hasattr(preview_response, 'close'):
+                     preview_response.close()
+
+        logging.info(f"Streaming preview audio for {voice_id}...")
+        return Response(generate_chunks(), mimetype='audio/mpeg')
+
+    except utils_elevenlabs.ElevenLabsError as e:
+        logging.error(f"ElevenLabsError generating preview for {voice_id}: {e}")
+        return make_api_response(error=str(e), status_code=500)
+    except Exception as e:
+        logging.exception(f"Unexpected error generating preview for {voice_id}: {e}") # Log traceback
+        return make_api_response(error="An unexpected server error occurred", status_code=500)
 
 # We don't need the app.run() block here when using 'flask run' or gunicorn/waitress 

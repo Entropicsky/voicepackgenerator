@@ -354,4 +354,27 @@ export const api = {
     // Return the full response including task_id
     return handleApiResponse<CropTakeResponse>(response);
   },
+
+  // --- NEW: Voice Preview --- 
+  async getVoicePreview(voiceId: string): Promise<Blob> {
+    console.log(`[API] Fetching voice preview for: ${voiceId}`);
+    const response = await fetch(`/api/voices/${voiceId}/preview`);
+    if (!response.ok) {
+        // Try to get error message from backend if possible
+        let errorMsg = `Failed to fetch preview (status: ${response.status})`;
+        try {
+            const errorData = await response.json(); // Assuming backend sends JSON error on failure
+            errorMsg = errorData.error || errorMsg; 
+        } catch (e) {
+            // Response was not JSON, use the default message
+        }
+        console.error(`[API] Error fetching preview for ${voiceId}: ${errorMsg}`);
+        throw new Error(errorMsg);
+    }
+    // Return the audio data as a Blob
+    const audioBlob = await response.blob();
+    console.log(`[API] Received preview blob for ${voiceId}, size: ${audioBlob.size}`);
+    return audioBlob;
+  },
+
 }; 

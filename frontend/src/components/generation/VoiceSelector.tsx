@@ -1,6 +1,9 @@
-import React, { useState, useMemo } from 'react';
-import { Checkbox, Table, Input, Select } from '@mantine/core';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { Checkbox, Table, Input, Select, ActionIcon, Tooltip, Loader } from '@mantine/core';
+import { IconPlayerPlay, IconPlayerPause, IconAlertCircle } from '@tabler/icons-react';
 import { useVoiceContext } from '../../contexts/VoiceContext';
+import { api } from '../../api';
+import { notifications } from '@mantine/notifications';
 
 interface VoiceSelectorProps {
   selectedVoices: string[];
@@ -13,6 +16,24 @@ const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoices, onChange 
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [sortOrder, setSortOrder] = useState<string>('name_asc');
+
+  const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState<boolean>(false);
+  const currentAudio = useRef<HTMLAudioElement | null>(null);
+  const currentBlobUrl = useRef<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (currentAudio.current) {
+        currentAudio.current.pause();
+        currentAudio.current = null;
+      }
+      if (currentBlobUrl.current) {
+        URL.revokeObjectURL(currentBlobUrl.current);
+        currentBlobUrl.current = null;
+      }
+    };
+  }, []);
 
   const handleSelectChange = (voiceId: string, checked: boolean) => {
     if (checked) {
@@ -67,6 +88,72 @@ const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoices, onChange 
   const isIndeterminate = !allFilteredSelected && 
                          filteredAndSortedVoices.some(v => selectedVoices.includes(v.voice_id));
 
+  const stopCurrentAudio = () => {
+    if (currentAudio.current) {
+      currentAudio.current.onended = null;
+      currentAudio.current.onerror = null;
+      currentAudio.current.pause();
+      currentAudio.current.src = '';
+      currentAudio.current = null;
+    }
+    if (currentBlobUrl.current) {
+      URL.revokeObjectURL(currentBlobUrl.current);
+      currentBlobUrl.current = null;
+    }
+    setPreviewingVoiceId(null);
+    setIsPreviewLoading(false);
+  };
+
+  const handlePreviewClick = async (voiceId: string) => {
+    if (isPreviewLoading) return;
+
+    if (previewingVoiceId === voiceId) {
+      stopCurrentAudio();
+    } else {
+      stopCurrentAudio();
+      setPreviewingVoiceId(voiceId);
+      setIsPreviewLoading(true);
+
+      try {
+        const audioBlob = await api.getVoicePreview(voiceId);
+        const blobUrl = URL.createObjectURL(audioBlob);
+        currentBlobUrl.current = blobUrl;
+
+        const audio = new Audio(blobUrl);
+        currentAudio.current = audio;
+
+        audio.onended = () => {
+          console.log(`Preview finished for ${voiceId}`);
+          stopCurrentAudio();
+        };
+        audio.onerror = (e) => {
+          console.error(`Error playing preview for ${voiceId}:`, e);
+          notifications.show({
+            title: 'Playback Error',
+            message: `Could not play preview for voice ${voiceId}.`,
+            color: 'red',
+            icon: <IconAlertCircle />
+          });
+          stopCurrentAudio();
+        };
+
+        await audio.play();
+        setIsPreviewLoading(false);
+        console.log(`Playing preview for ${voiceId}`);
+
+      } catch (error: any) {
+        console.error(`Failed to fetch/play preview for ${voiceId}:`, error);
+        notifications.show({
+          title: 'Preview Failed',
+          message: error.message || 'Could not generate preview for this voice.',
+          color: 'red',
+          icon: <IconAlertCircle />
+        });
+        stopCurrentAudio();
+      }
+    }
+  };
+
   const categories = useMemo(() => {
       const uniqueCategories = new Set<string>();
       voices.forEach(v => {
@@ -118,6 +205,7 @@ const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoices, onChange 
           <Table stickyHeader striped highlightOnHover withTableBorder withColumnBorders>
             <Table.Thead>
               <Table.Tr>
+                <Table.Th style={{ width: '50px' }}></Table.Th>
                 <Table.Th style={{ width: '50px' }}>
                   <Checkbox 
                     checked={allFilteredSelected}
@@ -133,6 +221,18 @@ const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoices, onChange 
             <Table.Tbody>
               {filteredAndSortedVoices.map(voice => (
                 <Table.Tr key={voice.voice_id}>
+                  <Table.Td ta="center">
+                    <Tooltip label={previewingVoiceId === voice.voice_id ? "Stop Preview" : "Preview Voice"} position="right" withArrow>
+                       <ActionIcon 
+                          variant="subtle" 
+                          onClick={() => handlePreviewClick(voice.voice_id)}
+                          loading={isPreviewLoading && previewingVoiceId === voice.voice_id}
+                          disabled={isPreviewLoading && previewingVoiceId !== voice.voice_id}
+                       >
+                          {previewingVoiceId === voice.voice_id ? <IconPlayerPause size={16} /> : <IconPlayerPlay size={16} />}
+                       </ActionIcon>
+                     </Tooltip>
+                  </Table.Td>
                   <Table.Td>
                     <Checkbox 
                       checked={selectedVoices.includes(voice.voice_id)}
@@ -144,7 +244,7 @@ const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoices, onChange 
                 </Table.Tr>
               ))}
                {filteredAndSortedVoices.length === 0 && (
-                   <Table.Tr><Table.Td colSpan={3} align="center">No voices match filters.</Table.Td></Table.Tr>
+                   <Table.Tr><Table.Td colSpan={4} align="center">No voices match filters.</Table.Td></Table.Tr>
                )}
             </Table.Tbody>
           </Table>

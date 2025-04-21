@@ -431,4 +431,54 @@ def save_generated_voice(
         raise ElevenLabsError(f"An unexpected error occurred while saving the voice: {e}") from e
         
     # Should not be reached if raise_for_status works correctly, but needed for type checking
-    raise ElevenLabsError("Failed to save generated voice for an unknown reason.") 
+    raise ElevenLabsError("Failed to save generated voice for an unknown reason.")
+
+# --- NEW: Voice Preview Function --- #
+
+def generate_preview_audio_stream(
+    voice_id: str,
+    text: str,
+    model_id: str = "eleven_multilingual_v2",
+    output_format: str = 'mp3_44100_64', # Lower quality for faster preview
+) -> requests.Response:
+    """Generates TTS audio stream for preview using V1 API.
+
+    Uses simplified settings for quick playback.
+    Returns the raw Response object for streaming.
+    """
+    url = f"{ELEVENLABS_API_V1_URL}/text-to-speech/{voice_id}/stream"
+    params = {'output_format': output_format}
+    headers = {
+        'xi-api-key': get_api_key(),
+        'Content-Type': 'application/json',
+        'Accept': 'audio/mpeg' # Request audio stream
+    }
+    payload = {
+        'text': text,
+        'model_id': model_id,
+        # Use default voice settings for preview (stability=0.5, similarity=0.75)
+        # 'voice_settings': {
+        #     'stability': 0.5,
+        #     'similarity_boost': 0.75
+        # }
+    }
+
+    try:
+        print(f"Requesting preview audio stream for voice {voice_id}...")
+        response = requests.post(url, headers=headers, params=params, json=payload, stream=True)
+        response.raise_for_status() # Raise for non-2xx status codes
+        print(f"Successfully initiated preview stream for voice {voice_id}.")
+        return response # Return the raw response object
+    except requests.exceptions.RequestException as e:
+        # Log the error details if possible
+        error_content = ""
+        if e.response is not None:
+            try:
+                error_content = e.response.json() # Try to get JSON error detail
+            except json.JSONDecodeError:
+                error_content = e.response.text # Fallback to text
+        print(f"Error requesting preview stream for voice {voice_id}: {e}. Content: {error_content}")
+        raise ElevenLabsError(f"Failed to initiate preview stream: {e}. Details: {error_content}") from e
+    except Exception as e:
+        print(f"Unexpected error during preview stream request for voice {voice_id}: {e}")
+        raise ElevenLabsError(f"An unexpected error occurred during preview stream request: {e}") from e 
