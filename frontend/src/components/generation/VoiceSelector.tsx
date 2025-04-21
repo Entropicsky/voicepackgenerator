@@ -239,8 +239,30 @@ const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoices, onChange 
                       onChange={(e) => handleSelectChange(voice.voice_id, e.currentTarget.checked)}
                     />
                   </Table.Td>
-                  <Table.Td>{voice.name}</Table.Td>
-                  <Table.Td>{voice.category || 'N/A'}</Table.Td>
+                  <Table.Td>
+                    <Tooltip 
+                       label={voice.description || 'No description available'} 
+                       position="top-start" 
+                       withArrow 
+                       multiline 
+                       w={350}
+                       zIndex={1000}
+                    >
+                      <span>{voice.name}</span>
+                    </Tooltip>
+                  </Table.Td>
+                  <Table.Td>
+                     <Tooltip 
+                        label={voice.description || 'No description available'} 
+                        position="top-start" 
+                        withArrow 
+                        multiline 
+                        w={350}
+                        zIndex={1000}
+                     >
+                       <span>{voice.category || 'N/A'}</span>
+                     </Tooltip>
+                  </Table.Td>
                 </Table.Tr>
               ))}
                {filteredAndSortedVoices.length === 0 && (
