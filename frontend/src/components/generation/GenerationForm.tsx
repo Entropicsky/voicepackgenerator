@@ -14,9 +14,9 @@ interface GenerationFormProps {
 
 // Default Ranges
 const DEFAULT_STABILITY_RANGE: [number, number] = [0.5, 0.75];
-const DEFAULT_SIMILARITY_RANGE: [number, number] = [0.75, 0.9];
-const DEFAULT_STYLE_RANGE: [number, number] = [0.0, 0.45]; // Style Exaggeration
-const DEFAULT_SPEED_RANGE: [number, number] = [0.95, 1.05];
+const DEFAULT_SIMILARITY_RANGE: [number, number] = [0.70, 0.9];
+const DEFAULT_STYLE_RANGE: [number, number] = [0.25, 0.55]; // Style Exaggeration
+const DEFAULT_SPEED_RANGE: [number, number] = [0.85, 1.05];
 const DEFAULT_SPEAKER_BOOST = true;
 const DEFAULT_MODEL_ID = "eleven_multilingual_v2";
 
