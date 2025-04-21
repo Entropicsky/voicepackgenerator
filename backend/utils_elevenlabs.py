@@ -398,20 +398,33 @@ def save_generated_voice(
         ElevenLabsError: If the API call fails.
     """
     url = f"{ELEVENLABS_API_V1_URL}/text-to-voice/create-voice-from-preview"
+    
+    # --- Clean and Validate Description FIRST ---
+    # Clean up description: replace newlines with spaces and strip whitespace
+    cleaned_description = voice_description.replace('\n', ' ').strip()
+    
+    # Validate length of the CLEANED description
+    if not (20 <= len(cleaned_description) <= 1000):
+         # Truncate if too long, raise error only if too short after cleaning
+         if len(cleaned_description) > 1000:
+             print(f"Warning: Voice description for {voice_name} exceeds 1000 chars after cleaning. Truncating.")
+             cleaned_description = cleaned_description[:1000]
+         elif len(cleaned_description) < 20:
+             raise ValueError("Voice description must be at least 20 characters long after cleaning.")
+
     payload: Dict[str, Any] = {
         'generated_voice_id': generated_voice_id,
         'voice_name': voice_name,
-        'voice_description': voice_description
+        'voice_description': cleaned_description # Use the cleaned (and potentially truncated) description
     }
     if labels:
         payload['labels'] = labels
         
-    # Basic validation
-    if not (20 <= len(voice_description) <= 1000):
-         raise ValueError("Voice description must be between 20 and 1000 characters.")
-
     try:
         print(f"Saving generated voice preview ID: {generated_voice_id} as '{voice_name}'...")
+        # --- Add Logging --- 
+        print(f"[DEBUG] Sending payload to ElevenLabs /create-voice-from-preview: {json.dumps(payload)}")
+        # --- End Logging --- 
         response = requests.post(url, headers=get_headers(), json=payload)
 
         if response.status_code == 200:

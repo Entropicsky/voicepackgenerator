@@ -12,6 +12,8 @@ import 'rc-slider/assets/index.css';
 import { useVoiceContext } from '../contexts/VoiceContext'; 
 // Import the new modal
 import SaveVoiceNameModal from '../components/modals/SaveVoiceNameModal'; 
+// Import Text component from Mantine for the counter
+import { Text } from '@mantine/core';
 
 const VoiceDesignPage: React.FC = () => {
   // --- State Variables ---
@@ -45,11 +47,16 @@ const VoiceDesignPage: React.FC = () => {
 
   const handleGeneratePreviews = async () => {
     setError(null);
-    setCurrentPreviews([]); 
-    setGeneratedText('');
+    // --- NEW: Check description length FIRST ---
+    if (voiceDescription.length > 800) {
+      setError("Voice description cannot exceed 800 characters.");
+      return;
+    }
+    // --- End New Check ---
     
-    if (voiceDescription.length < 20 || voiceDescription.length > 1000) {
-      setError("Voice description must be between 20 and 1000 characters.");
+    // Existing checks
+    if (voiceDescription.length < 20) { // Keep lower bound check
+      setError("Voice description must be at least 20 characters.");
       return;
     }
     if (!autoGenerateText && (textToPreview.length < 100 || textToPreview.length > 1000)) {
@@ -203,7 +210,7 @@ const VoiceDesignPage: React.FC = () => {
           <h4>1. Configure Voice</h4>
 
           <div style={{ marginBottom: '15px' }}>
-            <label htmlFor="voiceDesc">Voice Description (20-1000 chars):</label><br/>
+            <label htmlFor="voiceDesc">Voice Description (20-800 chars):</label><br/>
             <textarea 
               id="voiceDesc" 
               rows={4} 
@@ -211,7 +218,11 @@ const VoiceDesignPage: React.FC = () => {
               value={voiceDescription}
               onChange={e => setVoiceDescription(e.target.value)}
               placeholder="e.g., An old British male with a raspy, deep voice. Professional, relaxed and assertive."
+              maxLength={1000} // Keep a slightly higher textarea limit to allow typing, but validate at 800
             />
+            <Text size="xs" ta="right" c={voiceDescription.length > 800 ? 'red' : 'dimmed'}>
+              {voiceDescription.length} / 800
+            </Text>
           </div>
 
           <div style={{ marginBottom: '15px' }}>
