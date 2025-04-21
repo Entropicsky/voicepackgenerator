@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { BatchListInfo } from '../types';
-import { Table, Button } from '@mantine/core';
+import { Table, Button, Anchor } from '@mantine/core';
 
 type SortableBatchColumn = 'id' | 'skin_name' | 'voice_name' | 'generated_at_utc';
 type SortDirection = 'asc' | 'desc';
@@ -110,7 +110,16 @@ const BatchesPage: React.FC = () => {
           <Table.Tbody>
             {sortedBatches.map(batch => (
               <Table.Tr key={batch.batch_prefix}>
-                <Table.Td><Link to={`/batch/${encodeURIComponent(batch.batch_prefix)}`}>{batch.id}</Link></Table.Td>
+                <Table.Td>
+                  <Anchor 
+                    component={Link} 
+                    to={`/batch/${encodeURIComponent(batch.batch_prefix)}`} 
+                    underline="hover"
+                    c="blue.6"
+                  >
+                    {batch.id}
+                  </Anchor>
+                </Table.Td>
                 <Table.Td>{batch.skin_name}</Table.Td>
                 <Table.Td>{batch.voice_name}</Table.Td>
                 <Table.Td>{batch.generated_at_utc ? new Date(batch.generated_at_utc).toLocaleString() : 'N/A'}</Table.Td>

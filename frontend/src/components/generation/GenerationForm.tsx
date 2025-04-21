@@ -20,6 +20,29 @@ const DEFAULT_SPEED_RANGE: [number, number] = [0.95, 1.05];
 const DEFAULT_SPEAKER_BOOST = true;
 const DEFAULT_MODEL_ID = "eleven_multilingual_v2";
 
+// --- Session Storage Keys ---
+const SESSION_STORAGE_KEYS = {
+  STABILITY: 'genFormStabilityRange',
+  SIMILARITY: 'genFormSimilarityRange',
+  STYLE: 'genFormStyleRange',
+  SPEED: 'genFormSpeedRange',
+  SPEAKER_BOOST: 'genFormSpeakerBoost',
+};
+
+// Helper to get cached value or default
+const getCachedOrDefault = <T,>(key: string, defaultValue: T): T => {
+  try {
+    const cached = sessionStorage.getItem(key);
+    if (cached !== null) {
+      return JSON.parse(cached) as T;
+    }
+  } catch (e) {
+    console.error(`Error reading session storage key "${key}":`, e);
+    sessionStorage.removeItem(key); // Clear corrupted item
+  }
+  return defaultValue;
+};
+
 const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSubmit, isSubmitting }) => {
   // Use Mantine Form for validation
   const form = useForm({
@@ -28,17 +51,18 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
       variants: 3,
       selectedScriptId: null as string | null,
       selectedModelId: DEFAULT_MODEL_ID,
-      stabilityRange: DEFAULT_STABILITY_RANGE,
-      similarityRange: DEFAULT_SIMILARITY_RANGE,
-      styleRange: DEFAULT_STYLE_RANGE,
-      speedRange: DEFAULT_SPEED_RANGE,
-      speakerBoost: DEFAULT_SPEAKER_BOOST,
+      // Load initial values from session storage or use defaults
+      stabilityRange: getCachedOrDefault<[number, number]>(SESSION_STORAGE_KEYS.STABILITY, DEFAULT_STABILITY_RANGE),
+      similarityRange: getCachedOrDefault<[number, number]>(SESSION_STORAGE_KEYS.SIMILARITY, DEFAULT_SIMILARITY_RANGE),
+      styleRange: getCachedOrDefault<[number, number]>(SESSION_STORAGE_KEYS.STYLE, DEFAULT_STYLE_RANGE),
+      speedRange: getCachedOrDefault<[number, number]>(SESSION_STORAGE_KEYS.SPEED, DEFAULT_SPEED_RANGE),
+      speakerBoost: getCachedOrDefault<boolean>(SESSION_STORAGE_KEYS.SPEAKER_BOOST, DEFAULT_SPEAKER_BOOST),
     },
     validate: {
       skinName: isNotEmpty('Skin Name is required'),
       variants: (value) => (value <= 0 ? 'Takes must be at least 1' : null),
       selectedScriptId: isNotEmpty('Please select a script'),
-      selectedVoiceIds: (value, values) => (selectedVoiceIds.length === 0 ? 'Please select at least one voice' : null),
+      // selectedVoiceIds: (value, values) => (selectedVoiceIds.length === 0 ? 'Please select at least one voice' : null), // REMOVED - Validation handled in submit handler
       // Add range validation if needed
     },
     // Add a reference to selectedVoiceIds for validation purposes
@@ -95,6 +119,28 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
       })
       .finally(() => setScriptsLoading(false));
   }, []);
+
+  // --- Session Storage Effect ---
+  // Save range values to session storage whenever they change
+  useEffect(() => {
+    sessionStorage.setItem(SESSION_STORAGE_KEYS.STABILITY, JSON.stringify(form.values.stabilityRange));
+  }, [form.values.stabilityRange]);
+
+  useEffect(() => {
+    sessionStorage.setItem(SESSION_STORAGE_KEYS.SIMILARITY, JSON.stringify(form.values.similarityRange));
+  }, [form.values.similarityRange]);
+
+  useEffect(() => {
+    sessionStorage.setItem(SESSION_STORAGE_KEYS.STYLE, JSON.stringify(form.values.styleRange));
+  }, [form.values.styleRange]);
+
+  useEffect(() => {
+    sessionStorage.setItem(SESSION_STORAGE_KEYS.SPEED, JSON.stringify(form.values.speedRange));
+  }, [form.values.speedRange]);
+
+  useEffect(() => {
+    sessionStorage.setItem(SESSION_STORAGE_KEYS.SPEAKER_BOOST, JSON.stringify(form.values.speakerBoost));
+  }, [form.values.speakerBoost]);
 
   // Handle form submission
   const handleFormSubmit = (values: typeof form.values) => {
