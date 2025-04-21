@@ -1,9 +1,23 @@
 import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import VoiceSelector from '../components/generation/VoiceSelector';
-import GenerationForm from '../components/generation/GenerationForm';
+import GenerationForm, { VoiceSettingRanges } from '../components/generation/GenerationForm';
 import { GenerationConfig } from '../types';
 import { api } from '../api';
+
+// Helper to calculate midpoint
+const calculateMidpoint = (range: [number, number]): number => {
+  return (range[0] + range[1]) / 2;
+}
+
+// Type for the specific preview settings
+interface PreviewSettings {
+  stability: number;
+  similarity: number;
+  style: number;
+  speed: number;
+  // Note: speakerBoost is not directly used in preview settings, but kept if needed later
+}
 
 const GenerationPage: React.FC = () => {
   const [selectedVoiceIds, setSelectedVoiceIds] = useState<string[]>([]);
@@ -11,9 +25,22 @@ const GenerationPage: React.FC = () => {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const navigate = useNavigate();
 
+  // --- NEW: State for current range midpoints for preview --- 
+  const [currentPreviewSettings, setCurrentPreviewSettings] = useState<PreviewSettings | null>(null);
+
   const handleVoiceSelectionChange = (newSelectedIds: string[]) => {
     setSelectedVoiceIds(newSelectedIds);
   };
+
+  // --- NEW: Callback to update preview settings when form ranges change --- 
+  const handleFormRangesChange = useCallback((ranges: VoiceSettingRanges) => {
+    setCurrentPreviewSettings({
+      stability: calculateMidpoint(ranges.stabilityRange),
+      similarity: calculateMidpoint(ranges.similarityRange),
+      style: calculateMidpoint(ranges.styleRange),
+      speed: calculateMidpoint(ranges.speedRange),
+    });
+  }, []); // Empty dependency array, function itself doesn't depend on state
 
   const handleGenerationSubmit = useCallback(async (config: GenerationConfig) => {
     setIsSubmitting(true);
@@ -41,6 +68,7 @@ const GenerationPage: React.FC = () => {
            <VoiceSelector
             selectedVoices={selectedVoiceIds}
             onChange={handleVoiceSelectionChange}
+            previewSettings={currentPreviewSettings}
           />
         </div>
         <div style={{ flex: 2 }}>
@@ -48,6 +76,7 @@ const GenerationPage: React.FC = () => {
             selectedVoiceIds={selectedVoiceIds}
             onSubmit={handleGenerationSubmit}
             isSubmitting={isSubmitting}
+            onRangesChange={handleFormRangesChange}
           />
            {submitError && <p style={{ color: 'red', marginTop: '10px' }}>{submitError}</p>}
         </div>

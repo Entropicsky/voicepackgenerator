@@ -1242,12 +1242,34 @@ def download_batch_zip(batch_prefix):
 def get_voice_preview(voice_id):
     """Generates and streams a short audio preview for a given voice ID."""
     logging.info(f"Received preview request for voice_id: {voice_id}")
+    
+    # --- Get settings from query params --- 
+    preview_settings = {}
     try:
-        # Use the new stream function from utils
-        # Note: Ensure the generate_preview_audio_stream function exists and works
+        stability = request.args.get('stability', type=float)
+        similarity = request.args.get('similarity', type=float)
+        style = request.args.get('style', type=float)
+        speed = request.args.get('speed', type=float)
+        
+        if stability is not None: preview_settings['stability'] = stability
+        if similarity is not None: preview_settings['similarity_boost'] = similarity # Note key name difference
+        if style is not None: preview_settings['style'] = style
+        if speed is not None: preview_settings['speed'] = speed
+        
+        logging.info(f"Preview settings from query params: {preview_settings}")
+    except Exception as parse_err:
+        logging.warning(f"Could not parse preview settings from query params: {parse_err}")
+        # Proceed without settings if parsing fails
+        preview_settings = {}
+    # --- End Get settings --- 
+    
+    try:
+        # Use the new stream function from utils, passing settings
         preview_response = utils_elevenlabs.generate_preview_audio_stream(
             voice_id=voice_id,
-            text=VOICE_PREVIEW_TEXT
+            text=VOICE_PREVIEW_TEXT,
+            # Pass parsed settings using dictionary unpacking
+            **preview_settings 
         )
         
         # Check if the response has content before creating the Flask response

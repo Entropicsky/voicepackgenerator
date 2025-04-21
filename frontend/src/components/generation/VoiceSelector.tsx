@@ -5,12 +5,21 @@ import { useVoiceContext } from '../../contexts/VoiceContext';
 import { api } from '../../api';
 import { notifications } from '@mantine/notifications';
 
+// Define the type for the settings prop
+interface PreviewSettings {
+  stability: number;
+  similarity: number;
+  style: number;
+  speed: number;
+}
+
 interface VoiceSelectorProps {
   selectedVoices: string[];
   onChange: (selectedIds: string[]) => void;
+  previewSettings: PreviewSettings | null;
 }
 
-const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoices, onChange }) => {
+const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoices, onChange, previewSettings }) => {
   const { voices, loading, error: fetchError } = useVoiceContext();
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -115,7 +124,7 @@ const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoices, onChange 
       setIsPreviewLoading(true);
 
       try {
-        const audioBlob = await api.getVoicePreview(voiceId);
+        const audioBlob = await api.getVoicePreview(voiceId, previewSettings || undefined);
         const blobUrl = URL.createObjectURL(audioBlob);
         currentBlobUrl.current = blobUrl;
 

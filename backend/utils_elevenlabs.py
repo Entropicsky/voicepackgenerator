@@ -451,6 +451,10 @@ def save_generated_voice(
 def generate_preview_audio_stream(
     voice_id: str,
     text: str,
+    stability: Optional[float] = None,
+    similarity_boost: Optional[float] = None,
+    style: Optional[float] = None,
+    speed: Optional[float] = None,
     model_id: str = "eleven_multilingual_v2",
     output_format: str = 'mp3_44100_64', # Lower quality for faster preview
 ) -> requests.Response:
@@ -469,12 +473,27 @@ def generate_preview_audio_stream(
     payload = {
         'text': text,
         'model_id': model_id,
-        # Use default voice settings for preview (stability=0.5, similarity=0.75)
-        # 'voice_settings': {
-        #     'stability': 0.5,
-        #     'similarity_boost': 0.75
-        # }
+        'voice_settings': {}
     }
+    
+    # Build voice_settings dict conditionally
+    settings_added = False
+    if stability is not None: 
+        payload['voice_settings']['stability'] = stability
+        settings_added = True
+    if similarity_boost is not None: 
+        payload['voice_settings']['similarity_boost'] = similarity_boost
+        settings_added = True
+    if style is not None: 
+        payload['voice_settings']['style'] = style
+        settings_added = True
+    if speed is not None: 
+        payload['voice_settings']['speed'] = speed
+        settings_added = True
+        
+    # Remove voice_settings key if empty
+    if not settings_added:
+        del payload['voice_settings']
 
     try:
         print(f"Requesting preview audio stream for voice {voice_id}...")

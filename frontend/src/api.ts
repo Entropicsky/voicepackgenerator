@@ -356,9 +356,23 @@ export const api = {
   },
 
   // --- NEW: Voice Preview --- 
-  async getVoicePreview(voiceId: string): Promise<Blob> {
-    console.log(`[API] Fetching voice preview for: ${voiceId}`);
-    const response = await fetch(`/api/voices/${voiceId}/preview`);
+  // Modified to accept optional settings
+  async getVoicePreview(voiceId: string, settings?: { stability?: number, similarity?: number, style?: number, speed?: number }): Promise<Blob> {
+    console.log(`[API] Fetching voice preview for: ${voiceId} with settings:`, settings);
+    
+    // Build query string if settings are provided
+    const queryParams = new URLSearchParams();
+    if (settings) {
+      if (settings.stability !== undefined) queryParams.append('stability', settings.stability.toFixed(2));
+      if (settings.similarity !== undefined) queryParams.append('similarity', settings.similarity.toFixed(2)); // Use 'similarity' for query param
+      if (settings.style !== undefined) queryParams.append('style', settings.style.toFixed(2));
+      if (settings.speed !== undefined) queryParams.append('speed', settings.speed.toFixed(2));
+    }
+    const queryString = queryParams.toString();
+    const url = `${API_BASE}/api/voices/${voiceId}/preview${queryString ? '?' + queryString : ''}`;
+    
+    console.log(`[API] Requesting preview URL: ${url}`);
+    const response = await fetch(url);
     if (!response.ok) {
         // Try to get error message from backend if possible
         let errorMsg = `Failed to fetch preview (status: ${response.status})`;

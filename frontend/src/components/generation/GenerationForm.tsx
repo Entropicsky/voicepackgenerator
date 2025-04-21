@@ -3,13 +3,24 @@ import { GenerationConfig, ModelOption, ScriptMetadata } from '../../types';
 import Slider from 'rc-slider';
 import 'rc-slider/assets/index.css';
 import { api } from '../../api';
-import { Select, Button, TextInput, NumberInput, Checkbox, Text } from '@mantine/core';
+import { Select, Button, TextInput, NumberInput, Checkbox, Text, Box } from '@mantine/core';
 import { useForm, isNotEmpty } from '@mantine/form';
+
+// Type for the settings ranges
+export interface VoiceSettingRanges {
+  stabilityRange: [number, number];
+  similarityRange: [number, number];
+  styleRange: [number, number];
+  speedRange: [number, number];
+  speakerBoost: boolean;
+}
 
 interface GenerationFormProps {
   selectedVoiceIds: string[];
   onSubmit: (config: GenerationConfig) => void;
   isSubmitting: boolean;
+  // Callback for when ranges change
+  onRangesChange?: (ranges: VoiceSettingRanges) => void;
 }
 
 // Default Ranges
@@ -43,7 +54,15 @@ const getCachedOrDefault = <T,>(key: string, defaultValue: T): T => {
   return defaultValue;
 };
 
-const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSubmit, isSubmitting }) => {
+// Helper to calculate midpoint position as percentage
+const calculateMidpointPercent = (range: [number, number], sliderMin: number, sliderMax: number): number => {
+  const midpoint = (range[0] + range[1]) / 2;
+  const totalRange = sliderMax - sliderMin;
+  if (totalRange === 0) return 50; // Avoid division by zero, center if range is 0
+  return ((midpoint - sliderMin) / totalRange) * 100;
+}
+
+const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSubmit, isSubmitting, onRangesChange }) => {
   // Use Mantine Form for validation
   const form = useForm({
     initialValues: {
@@ -120,27 +139,33 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
       .finally(() => setScriptsLoading(false));
   }, []);
 
-  // --- Session Storage Effect ---
-  // Save range values to session storage whenever they change
+  // --- Session Storage & Callback Effect ---
+  // Combine saving to session storage and calling the callback
   useEffect(() => {
-    sessionStorage.setItem(SESSION_STORAGE_KEYS.STABILITY, JSON.stringify(form.values.stabilityRange));
-  }, [form.values.stabilityRange]);
+    const currentRanges = {
+      stabilityRange: form.values.stabilityRange,
+      similarityRange: form.values.similarityRange,
+      styleRange: form.values.styleRange,
+      speedRange: form.values.speedRange,
+      speakerBoost: form.values.speakerBoost,
+    };
+    sessionStorage.setItem(SESSION_STORAGE_KEYS.STABILITY, JSON.stringify(currentRanges.stabilityRange));
+    sessionStorage.setItem(SESSION_STORAGE_KEYS.SIMILARITY, JSON.stringify(currentRanges.similarityRange));
+    sessionStorage.setItem(SESSION_STORAGE_KEYS.STYLE, JSON.stringify(currentRanges.styleRange));
+    sessionStorage.setItem(SESSION_STORAGE_KEYS.SPEED, JSON.stringify(currentRanges.speedRange));
+    sessionStorage.setItem(SESSION_STORAGE_KEYS.SPEAKER_BOOST, JSON.stringify(currentRanges.speakerBoost));
+    
+    // Call the callback function if provided
+    onRangesChange?.(currentRanges);
 
-  useEffect(() => {
-    sessionStorage.setItem(SESSION_STORAGE_KEYS.SIMILARITY, JSON.stringify(form.values.similarityRange));
-  }, [form.values.similarityRange]);
-
-  useEffect(() => {
-    sessionStorage.setItem(SESSION_STORAGE_KEYS.STYLE, JSON.stringify(form.values.styleRange));
-  }, [form.values.styleRange]);
-
-  useEffect(() => {
-    sessionStorage.setItem(SESSION_STORAGE_KEYS.SPEED, JSON.stringify(form.values.speedRange));
-  }, [form.values.speedRange]);
-
-  useEffect(() => {
-    sessionStorage.setItem(SESSION_STORAGE_KEYS.SPEAKER_BOOST, JSON.stringify(form.values.speakerBoost));
-  }, [form.values.speakerBoost]);
+  }, [
+    form.values.stabilityRange, 
+    form.values.similarityRange, 
+    form.values.styleRange, 
+    form.values.speedRange, 
+    form.values.speakerBoost, 
+    onRangesChange // Include callback in dependency array
+  ]);
 
   // Handle form submission
   const handleFormSubmit = (values: typeof form.values) => {
@@ -233,45 +258,97 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
       <div style={{ marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #eee' }}>
           <h5>Voice Setting Ranges (Randomized per Take):</h5>
           
-          {/* Use Text for labels */}
-          {/* ... Slider components remain the same, but update state via form.setFieldValue ... */}
-          <div style={{ marginBottom: '15px', padding: '0 10px' }}>
+          {/* --- Stability Slider --- */}
+          <Box style={{ position: 'relative', marginBottom: '15px', padding: '0 10px', paddingBottom: '10px' }}>
               <Text size="sm">Stability Range: [{formatSliderValue(form.values.stabilityRange[0])} - {formatSliderValue(form.values.stabilityRange[1])}]</Text>
               <Slider 
                   range min={0} max={1} step={0.01} allowCross={false}
                   value={form.values.stabilityRange} 
                   onChange={(value: number | number[]) => form.setFieldValue('stabilityRange', value as [number, number])} 
               />
+              {/* Midpoint Marker */}
+              <Box style={{
+                  position: 'absolute',
+                  left: `${calculateMidpointPercent(form.values.stabilityRange, 0, 1)}%`,
+                  top: 'calc(50% + 4px)', // Might need slight adjustment after removing slider padding
+                  width: '2px',
+                  height: '10px',
+                  backgroundColor: 'grey',
+                  transform: 'translateX(-50%)',
+                  zIndex: 1, 
+                  pointerEvents: 'none', 
+              }} />
               <div style={{display: 'flex', justifyContent: 'space-between'}}><Text size="xs">More Variable</Text><Text size="xs">More Stable</Text></div>
-          </div>
-          {/* ... Repeat slider pattern for Similarity, Style, Speed using form.values and form.setFieldValue ... */}
-          <div style={{ marginBottom: '15px', padding: '0 10px' }}>
+          </Box>
+          
+          {/* --- Similarity Slider --- */}
+          <Box style={{ position: 'relative', marginBottom: '15px', padding: '0 10px', paddingBottom: '10px' }}>
               <Text size="sm">Similarity Boost Range: [{formatSliderValue(form.values.similarityRange[0])} - {formatSliderValue(form.values.similarityRange[1])}]</Text>
               <Slider 
                   range min={0} max={1} step={0.01} allowCross={false}
                   value={form.values.similarityRange} 
                   onChange={(value: number | number[]) => form.setFieldValue('similarityRange', value as [number, number])} 
               />
+               {/* Midpoint Marker */}
+              <Box style={{
+                  position: 'absolute',
+                  left: `${calculateMidpointPercent(form.values.similarityRange, 0, 1)}%`,
+                  top: 'calc(50% + 4px)', 
+                  width: '2px',
+                  height: '10px',
+                  backgroundColor: 'grey',
+                  transform: 'translateX(-50%)',
+                  zIndex: 1,
+                  pointerEvents: 'none',
+              }} />
                <div style={{display: 'flex', justifyContent: 'space-between'}}><Text size="xs">Low</Text><Text size="xs">High</Text></div>
-          </div>
-          <div style={{ marginBottom: '15px', padding: '0 10px' }}>
+          </Box>
+
+          {/* --- Style Exaggeration Slider --- */}
+          <Box style={{ position: 'relative', marginBottom: '15px', padding: '0 10px', paddingBottom: '10px' }}>
               <Text size="sm">Style Exaggeration Range: [{formatSliderValue(form.values.styleRange[0])} - {formatSliderValue(form.values.styleRange[1])}]</Text>
               <Slider 
                   range min={0} max={1} step={0.01} allowCross={false}
                   value={form.values.styleRange} 
                   onChange={(value: number | number[]) => form.setFieldValue('styleRange', value as [number, number])} 
               />
+               {/* Midpoint Marker */}
+              <Box style={{
+                  position: 'absolute',
+                  left: `${calculateMidpointPercent(form.values.styleRange, 0, 1)}%`,
+                  top: 'calc(50% + 4px)',
+                  width: '2px',
+                  height: '10px',
+                  backgroundColor: 'grey',
+                  transform: 'translateX(-50%)',
+                  zIndex: 1,
+                  pointerEvents: 'none',
+              }} />
                <div style={{display: 'flex', justifyContent: 'space-between'}}><Text size="xs">None</Text><Text size="xs">Exaggerated</Text></div>
-          </div>
-          <div style={{ marginBottom: '15px', padding: '0 10px' }}>
+          </Box>
+
+          {/* --- Speed Slider --- */}
+          <Box style={{ position: 'relative', marginBottom: '15px', padding: '0 10px', paddingBottom: '10px' }}>
               <Text size="sm">Speed Range: [{formatSliderValue(form.values.speedRange[0])} - {formatSliderValue(form.values.speedRange[1])}]</Text>
               <Slider 
                   range min={0.5} max={2.0} step={0.05} allowCross={false}
                   value={form.values.speedRange} 
                   onChange={(value: number | number[]) => form.setFieldValue('speedRange', value as [number, number])} 
               />
+               {/* Midpoint Marker */}
+              <Box style={{
+                  position: 'absolute',
+                  left: `${calculateMidpointPercent(form.values.speedRange, 0.5, 2.0)}%`,
+                  top: 'calc(50% + 4px)',
+                  width: '2px',
+                  height: '10px',
+                  backgroundColor: 'grey',
+                  transform: 'translateX(-50%)',
+                  zIndex: 1,
+                  pointerEvents: 'none',
+              }} />
                <div style={{display: 'flex', justifyContent: 'space-between'}}><Text size="xs">Slower</Text><Text size="xs">Faster</Text></div>
-          </div>
+          </Box>
 
           {/* Use Mantine Checkbox */}
            <Checkbox
