@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Route, Routes, Link, useParams } from 'react-router-dom';
-import { MantineProvider, AppShell, Burger, Group, NavLink } from '@mantine/core';
+import { MantineProvider, AppShell, Burger, Group, NavLink, Image, Text, Box } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import GenerationPage from './pages/GenerationPage';
 import RankingPage from './pages/RankingPage';
@@ -62,18 +62,22 @@ const App: React.FC = () => {
             }}
           >
             <AppShell.Header>
-              <Group h="100%" px="md">
-                <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
-                Voice Generation & Ranking
+              <Group h="100%" px="md" justify="space-between">
+                <Box style={{ display: 'flex', alignItems: 'center' }}>
+                  <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" mr="md" />
+                  <Image src="/images/color_normal.svg" alt="Logo" h={30} w="auto" mr="sm" />
+                  <Text size="lg" fw={500}>Voiceover Assistant</Text>
+                </Box>
+                {/* Add any other header elements here if needed */}
               </Group>
             </AppShell.Header>
 
             <AppShell.Navbar p="md">
-              <NavLink label="Voice Design" component={Link} to="/voice-design" onClick={toggle} />
-              <NavLink label="Scripts" component={Link} to="/scripts" onClick={toggle} />
-              <NavLink label="Generate" component={Link} to="/" onClick={toggle} />
-              <NavLink label="Jobs" component={Link} to="/jobs" onClick={toggle} />
-              <NavLink label="VO Editing" component={Link} to="/batches" onClick={toggle} />
+              <NavLink label="Create Voices" component={Link} to="/voice-design" onClick={toggle} />
+              <NavLink label="Manage Scripts" component={Link} to="/scripts" onClick={toggle} />
+              <NavLink label="Generate Recordings" component={Link} to="/" onClick={toggle} />
+              <NavLink label="Monitor Generations" component={Link} to="/jobs" onClick={toggle} />
+              <NavLink label="Edit Recordings" component={Link} to="/batches" onClick={toggle} />
             </AppShell.Navbar>
 
             <AppShell.Main>

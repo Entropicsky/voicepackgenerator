@@ -183,7 +183,7 @@ const VoiceDesignPage: React.FC = () => {
   // --- Render --- 
   return (
     <div style={{ width: '100%', maxWidth: '100%', padding: '0 20px' }}>
-      <h2>Voice Design</h2>
+      <h2>Create Voices</h2>
       <div style={{ 
         display: 'flex', 
         gap: '20px', 

@@ -37,8 +37,8 @@ const BatchesPage: React.FC = () => {
 
   const sortedBatches = useMemo(() => {
     return [...batches].sort((a, b) => {
-      let valA = a[sortColumn];
-      let valB = b[sortColumn];
+      let valA: any = a[sortColumn];
+      let valB: any = b[sortColumn];
       
       if (sortColumn === 'generated_at_utc' && a.created_at_sortkey && b.created_at_sortkey) {
           valA = a.created_at_sortkey;
@@ -93,7 +93,7 @@ const BatchesPage: React.FC = () => {
 
   return (
     <div style={{ width: '100%', maxWidth: '100%' }}>
-      <h2>Voiceover Sessions</h2>
+      <h2>Edit Recordings</h2>
       {batches.length === 0 ? (
         <p>No batches found.</p>
       ) : (

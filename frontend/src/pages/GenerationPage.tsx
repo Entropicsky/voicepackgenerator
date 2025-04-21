@@ -33,7 +33,7 @@ const GenerationPage: React.FC = () => {
 
   return (
     <div>
-      <h2>Generate New Voice Pack</h2>
+      <h2>Generate Recordings</h2>
 
       {/* Use columns or better layout later */}
       <div style={{ display: 'flex', gap: '20px' }}>

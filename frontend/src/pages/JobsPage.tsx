@@ -266,7 +266,7 @@ const JobsPage: React.FC = () => {
 
   return (
     <div>
-      <h2>Generation Jobs</h2>
+      <h2>Monitor Generations</h2>
       <Button onClick={fetchJobs} loading={loading} variant="outline" size="xs" style={{ marginBottom: '10px' }}>
           Refresh List
       </Button>

@@ -53,18 +53,49 @@ Built with Flask (backend API), Celery (background tasks), Redis (task queue), R
 
 ```
 .
-├── backend/            # Flask API, utilities, tests, Dockerfile
-├── frontend/           # React frontend source, Dockerfile
-├── output/             # Default location for generated audio batches (mounted into containers)
-├── .cursor/            # Agent notes, docs, etc.
-├── celery_app.py       # Celery app instance definition
-├── tasks.py            # Celery task definitions (e.g., run_generation)
-├── docker-compose.yml  # Docker Compose service definitions
-├── Makefile            # Helper commands (install, test, clean - mainly for local use)
-├── requirements.txt    # Root requirements (empty/optional, main ones in backend/)
-├── package.json        # Root package (empty/optional, main ones in frontend/)
+├── backend/
+│   ├── app.py            # Main Flask application
+│   ├── models.py         # SQLAlchemy database models
+│   ├── celery_app.py     # Celery application setup
+│   ├── tasks.py          # Celery task definitions (generation, cropping, etc.)
+│   ├── utils_elevenlabs.py # ElevenLabs API interactions
+│   ├── utils_r2.py       # Cloudflare R2 interactions
+│   ├── tests/            # Backend unit/integration tests
+│   ├── Dockerfile        # Dockerfile for backend (used locally)
+│   ├── requirements.txt  # Python dependencies
+│   └── ...
+├── frontend/
+│   ├── src/
+│   │   ├── App.tsx         # Main React application layout (Header, Navbar, Routes)
+│   │   ├── main.tsx        # React entry point
+│   │   ├── api.ts          # Frontend API client functions
+│   │   ├── types.ts        # TypeScript type definitions
+│   │   ├── pages/          # Page components (Generation, Ranking, Scripts, etc.)
+│   │   ├── components/     # Reusable UI components (Selectors, Forms, Modals, etc.)
+│   │   ├── contexts/       # React Context providers (Voice, Ranking)
+│   │   ├── hooks/          # Custom React hooks
+│   │   └── assets/         # Static assets like images (if imported)
+│   ├── public/
+│   │   └── images/       # Static assets served directly (e.g., logo)
+│   ├── Dockerfile        # Dockerfile for frontend (used locally for Nginx serving)
+│   ├── package.json      # Frontend dependencies and scripts
+│   ├── tsconfig.json     # TypeScript configuration
+│   ├── vite.config.ts    # Vite build configuration
+│   └── ...
+├── migrations/         # Alembic database migration scripts
+├── output/             # Default local location for generated audio batches (mounted into containers)
+├── .cursor/            # Agent notes, docs, rules, tools
+├── .github/            # GitHub specific files (e.g., workflows - if added)
+├── .vscode/            # VSCode settings (if added)
+├── Dockerfile          # Root Dockerfile (used by Heroku web dyno, runs Nginx/Gunicorn)
+├── Dockerfile.worker   # Dockerfile for the Celery worker (used by Heroku worker dyno)
+├── docker-compose.yml  # Docker Compose service definitions for local dev
+├── heroku.yml          # Heroku build and deployment configuration
+├── start.sh            # Script run by root Dockerfile for Heroku (starts Nginx/Gunicorn)
+├── Makefile            # Helper commands (install, test, clean, etc.)
 ├── .env.example        # Example environment variables
 ├── .env                # Local environment variables (API keys, secrets - DO NOT COMMIT)
+├── .gitignore          # Git ignore patterns
 └── README.md           # This file
 ```
 
