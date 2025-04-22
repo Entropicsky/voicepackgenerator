@@ -17,6 +17,8 @@ import logging # For better logging
 from werkzeug.middleware.proxy_fix import ProxyFix
 import urllib.parse # Added for URL encoding/decoding
 from typing import Dict
+import openai # Added for OpenAI API calls
+from werkzeug.exceptions import HTTPException # Added for specific error handling
 
 # Import celery app instance from root
 from backend.celery_app import celery
@@ -80,6 +82,126 @@ def make_api_response(data: dict = None, error: str = None, status_code: int = 2
 def ping():
     print("Received request for /api/ping")
     return make_api_response(data={"message": "pong from Flask!"})
+
+@app.route('/api/optimize-line-text', methods=['POST'])
+def optimize_line_text():
+    """Optimizes the provided line text for ElevenLabs using OpenAI."""
+    logging.info("--- Entered /api/optimize-line-text endpoint ---")
+    if not request.is_json:
+        return make_api_response(error="Request must be JSON", status_code=400)
+
+    data = request.get_json()
+    line_text = data.get('line_text')
+
+    if not line_text:
+        return make_api_response(error="Missing required field: line_text", status_code=400)
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        logging.error("OPENAI_API_KEY environment variable not set.")
+        return make_api_response(error="OpenAI API key not configured on server.", status_code=500)
+
+    # Construct the absolute path to the scripthelp file relative to this script's location
+    # __file__ gives the path to the current script (app.py)
+    # os.path.dirname gets the directory containing the script (backend/)
+    # os.path.join combines it with the relative path to the prompts file
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    prompt_guidelines_path = os.path.join(current_dir, 'prompts', 'scripthelp.md') # Updated Path
+
+    try:
+        logging.info(f"Reading prompt guidelines from: {prompt_guidelines_path}")
+        with open(prompt_guidelines_path, 'r', encoding='utf-8') as f:
+            prompt_guidelines = f.read()
+        # Extract the core rules/instructions part, assuming the initial text is boilerplate
+        # This might need adjustment based on the exact file structure
+        guidelines_start_marker = "### ElevenLabs Prompt-Writing Rules:"
+        guidelines_end_marker = "### Example Agent Prompt:" # Or end of file if marker not present
+        
+        start_index = prompt_guidelines.find(guidelines_start_marker)
+        end_index = prompt_guidelines.find(guidelines_end_marker)
+        
+        if start_index != -1:
+            if end_index != -1:
+                 rules_section = prompt_guidelines[start_index:end_index].strip()
+            else:
+                 rules_section = prompt_guidelines[start_index:].strip()
+            # Add the instruction to only return the prompt text
+            # --- MODIFIED INSTRUCTION --- 
+            instruction_line = "You are an expert prompt writer for ElevenLabs TTS. Rewrite the following voice line based *strictly* on the rules provided below to optimize it for ElevenLabs, focusing on natural pace and emotion.\\n\\nRules:"
+            base_prompt = f"{instruction_line}\\n{rules_section}\\n\\nVoice Line to rewrite:"
+        else:
+             logging.warning("Could not find start marker in scripthelp.md, using full file content as guidelines.")
+             # --- MODIFIED INSTRUCTION (Fallback) --- 
+             instruction_line = "You are an expert prompt writer for ElevenLabs TTS. Rewrite the following voice line based *strictly* on the rules provided below to optimize it for ElevenLabs, focusing on natural pace and emotion.\\n\\nRules:"
+             base_prompt = f"{instruction_line}\\n{prompt_guidelines}\\n\\nVoice Line to rewrite:"
+
+        # --- MODIFIED FINAL PROMPT with explicit sections and stricter output instruction --- 
+        input_line_label = "--- VOICE LINE TO OPTIMIZE ---"
+        output_label = "--- OPTIMIZED LINE (Respond with ONLY the single, best optimized text line below this line. DO NOT include multiple variations, explanations, or the original line.) ---"
+        full_prompt = f"{base_prompt.replace('Voice Line to rewrite:', '').strip()}\n\n{input_line_label}\n{line_text}\n\n{output_label}" # Construct with labeled sections
+        
+        logging.debug(f"Constructed OpenAI Prompt:\n{full_prompt}")
+
+    except FileNotFoundError:
+        logging.error(f"Prompt guidelines file not found at: {prompt_guidelines_path}")
+        return make_api_response(error="Server configuration error: Prompt guidelines file missing.", status_code=500)
+    except Exception as e:
+        logging.exception(f"Error reading or processing prompt guidelines file: {e}")
+        return make_api_response(error="Server configuration error reading guidelines.", status_code=500)
+
+    try:
+        logging.info("Initializing OpenAI client...")
+        client = openai.OpenAI(api_key=api_key) # Explicitly pass key
+
+        # Use the model specified in the environment variable, default to gpt-4o
+        openai_model = os.getenv("OPENAI_MODEL", "gpt-4o")
+        logging.info(f"Using OpenAI model: {openai_model}")
+
+        logging.info(f"Calling OpenAI Responses API (model {openai_model}) for text optimization...")
+        response = client.responses.create(
+            model=openai_model, # Use the variable here
+            input=full_prompt,
+            temperature=1.0, # Set temperature back to 1.0 for variability
+            # Add other parameters as needed based on responseapi.md if defaults aren't sufficient
+            text={ "format": { "type": "text" } } # Request plain text if API supports this structure directly
+        )
+        logging.info("Received response from OpenAI.")
+
+        # --- Extracting the text ---
+        # According to responseapi.md structure and common SDK patterns:
+        # The response.output is an array. The first item is usually the message.
+        # The message's content is an array. The first item is usually the output_text.
+        optimized_text = None
+        if response.output and len(response.output) > 0:
+            first_output_item = response.output[0]
+            if first_output_item.type == "message" and first_output_item.content and len(first_output_item.content) > 0:
+                 first_content_item = first_output_item.content[0]
+                 if first_content_item.type == "output_text":
+                      optimized_text = first_content_item.text.strip()
+
+        # Fallback or alternative check using potential SDK helper (might not exist in all versions)
+        # if not optimized_text and hasattr(response, 'output_text') and response.output_text:
+        #      optimized_text = response.output_text.strip()
+
+        if optimized_text:
+            logging.info(f"Successfully optimized text. Result: '{optimized_text}'")
+            return make_api_response(data={"optimized_text": optimized_text})
+        else:
+            logging.error(f"Could not extract optimized text from OpenAI response. Response structure: {response}")
+            return make_api_response(error="Failed to parse optimized text from AI response.", status_code=500)
+
+    except openai.APIConnectionError as e:
+        logging.error(f"OpenAI API request failed to connect: {e}")
+        return make_api_response(error="Failed to connect to OpenAI service.", status_code=503) # 503 Service Unavailable
+    except openai.RateLimitError as e:
+        logging.error(f"OpenAI API request hit rate limit: {e}")
+        return make_api_response(error="Rate limit exceeded for OpenAI service.", status_code=429) # 429 Too Many Requests
+    except openai.APIStatusError as e:
+        logging.error(f"OpenAI API returned an error status: {e.status_code} - {e.response}")
+        return make_api_response(error=f"OpenAI service error: {e.message}", status_code=e.status_code if e.status_code else 500)
+    except Exception as e:
+        logging.exception(f"Unexpected error calling OpenAI API: {e}") # Log full traceback
+        return make_api_response(error="An unexpected error occurred during AI text optimization.", status_code=500)
 
 @app.route('/api/voices', methods=['GET'])
 def get_voices():

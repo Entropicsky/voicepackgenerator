@@ -46,6 +46,8 @@ const RegenerationModal: React.FC<RegenerationModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null); // Add Ref
+  const [isOptimizing, setIsOptimizing] = useState<boolean>(false); // State for AI optimization loading
+  const [optimizeError, setOptimizeError] = useState<string | null>(null); // State for AI optimization error
 
   // Effect to handle Escape key press for closing the modal
   useEffect(() => {
@@ -112,6 +114,36 @@ const RegenerationModal: React.FC<RegenerationModalProps> = ({
       }, 0);
     }
   };
+
+  // --- NEW: Handler for the AI Wizard button --- //
+  const handleOptimizeText = async () => {
+    setError(null); // Clear general error
+    setOptimizeError(null); // Clear specific optimization error
+    if (!lineText.trim()) {
+        setOptimizeError("Cannot optimize empty text.");
+        return;
+    }
+    setIsOptimizing(true);
+    console.log("Calling AI text optimization...");
+    try {
+        const response = await api.optimizeLineText(lineText);
+        if (response && response.optimized_text) {
+            console.log("Received optimized text: ", response.optimized_text);
+            setLineText(response.optimized_text); // Update the text area state
+            // Optionally clear the error if successful
+            setOptimizeError(null); 
+        } else {
+             console.error("Optimization response missing optimized_text field.", response);
+             setOptimizeError("Received invalid response from optimization service.");
+        }
+    } catch (err: any) {
+        console.error("Failed to optimize text:", err);
+        setOptimizeError(`Optimization failed: ${err.message}`);
+    } finally {
+        setIsOptimizing(false);
+    }
+  };
+  // --- END NEW HANDLER --- //
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -185,9 +217,27 @@ const RegenerationModal: React.FC<RegenerationModalProps> = ({
                 {/* Use HStack for Label + Button */}
                 <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}> 
                   <label htmlFor="lineText">Line Text:</label>
-                  <button type="button" onClick={handleInsertPause} style={{padding: '2px 5px', fontSize: '0.8em'}}>
-                    Insert 0.5s Pause
-                  </button>
+                  {/* Group the buttons together */}
+                  <div style={{ display: 'flex', gap: '5px' }}> 
+                    <button 
+                       type="button" 
+                       onClick={handleInsertPause} 
+                       style={{padding: '2px 5px', fontSize: '0.8em'}} 
+                       disabled={isOptimizing || isSubmitting} // Disable if optimizing or submitting
+                       title="Insert a 0.5 second pause tag at cursor position"
+                    >
+                      + 0.5s Pause
+                    </button>
+                    <button 
+                       type="button" 
+                       onClick={handleOptimizeText} 
+                       style={{padding: '2px 5px', fontSize: '0.8em'}}
+                       disabled={isOptimizing || isSubmitting} // Disable if optimizing or submitting
+                       title="Use AI to optimize this line for ElevenLabs based on scripthelp.md guidelines"
+                    >
+                      {isOptimizing ? '✨ Optimizing...' : '✨ AI Wizard'}
+                    </button>
+                  </div>
                 </div>
                 <textarea 
                     id="lineText" 
@@ -281,10 +331,13 @@ const RegenerationModal: React.FC<RegenerationModalProps> = ({
                 {modelsError && <span style={{ color: 'red', marginLeft: '10px' }}>{modelsError}</span>}
             </div>
             
-            {/* Error Display */} 
-            {error && <p style={{ color: 'red' }}>Error: {error}</p>}
+            {/* Error Display */}
+            {/* Display general submission error */}
+            {error && <p style={{ color: 'red', marginTop: '10px' }}>Error: {error}</p>}
+            {/* Display specific optimization error */}
+            {optimizeError && <p style={{ color: 'orange', marginTop: '5px' }}>Optimization Note: {optimizeError}</p>}
             
-            {/* Actions */} 
+            {/* Actions */}
             <div style={{ marginTop: '20px', textAlign: 'right' }}>
                 <button type="button" onClick={onClose} style={{ marginRight: '10px' }} disabled={isSubmitting}>
                     Cancel

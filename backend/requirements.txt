@@ -44,3 +44,4 @@ python-dotenv>=1.0.1,<2.0.0
 gunicorn>=21.2.0,<22.0.0
 itsdangerous>=2.1.2,<3.0.0
 pydub>=0.25.1,<0.26.0 # Added for audio cropping 
+openai>=1.0.0 # Added for AI text optimization wizard 

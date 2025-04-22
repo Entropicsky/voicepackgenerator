@@ -391,4 +391,19 @@ export const api = {
     return audioBlob;
   },
 
+  // --- NEW: Endpoint for AI Text Optimization --- //
+  optimizeLineText: async (lineText: string): Promise<{ optimized_text: string }> => {
+      const url = `${API_BASE}/api/optimize-line-text`;
+      console.log(`[API] Optimizing line text: "${lineText.substring(0, 50)}..."`);
+      const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ line_text: lineText }),
+      });
+      // Expects { data: { optimized_text: "..." } }
+      return handleApiResponse<{ optimized_text: string }>(response);
+  },
+
 }; 
