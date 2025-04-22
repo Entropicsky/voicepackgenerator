@@ -160,6 +160,7 @@ def run_generation(self,
                 "batch_id": batch_id,
                 "skin_name": skin_name,
                 "voice_name": voice_folder_name,
+                "source_script_id": script_id, # Store the source script ID if available
                 "generated_at_utc": None, # Will be set at the end
                 "generation_params": config, # Store original config
                 "ranked_at_utc": None,
@@ -386,6 +387,7 @@ def regenerate_line_takes(self,
             raise ValueError(f"Failed to parse metadata JSON from {metadata_blob_key}: {e}")
 
         # Extract needed info from metadata
+        source_script_id = metadata.get('source_script_id') # Get the source script ID
         skin_name = metadata.get('skin_name')
         voice_folder_name = metadata.get('voice_name') # This now holds the folder name
         original_voice_id = voice_folder_name.split('-')[-1] if '-' in voice_folder_name else voice_folder_name # Extract original voice ID
@@ -523,23 +525,32 @@ def regenerate_line_takes(self,
         # Update script in DB if requested (Keep existing logic)
         script_update_message = ""
         if update_script and len(newly_generated_takes_meta) > 0:
-            try:
-                script_lines = db.query(models.ScriptLine).filter(models.ScriptLine.line_key == line_key).all()
-                if script_lines:
-                    updated_scripts = []
-                    for script_line in script_lines:
-                        script = db.query(models.Script).get(script_line.script_id)
-                        if script: script_line.text = line_text; updated_scripts.append(script.name)
-                    if updated_scripts:
+            if source_script_id is not None: # Check if source script ID exists
+                try:
+                    # Target ONLY the specific line in the source script
+                    script_line = db.query(models.ScriptLine).filter(
+                        models.ScriptLine.script_id == source_script_id,
+                        models.ScriptLine.line_key == line_key
+                    ).first()
+
+                    if script_line:
+                        script_line.text = line_text
                         db.commit()
-                        script_names = ", ".join(f"'{name}'" for name in updated_scripts)
-                        script_update_message = f" Script(s) {script_names} updated."
-                        print(f"[Task ID: {task_id}] Updated script line '{line_key}' in scripts: {script_names}")
-                    else: script_update_message = f" Found matching lines, but no associated scripts."
-                else: script_update_message = f" No scripts found with line key '{line_key}'."
-            except Exception as e:
-                script_update_message = f" Error updating script: {str(e)}"
-                print(f"[Task ID: {task_id}] Error updating script for batch {batch_id}: {e}")
+                        script = db.query(models.Script).get(source_script_id) # Get script name for message
+                        script_name = script.name if script else f"ID {source_script_id}"
+                        script_update_message = f" Script '{script_name}' updated."
+                        print(f"[Task ID: {task_id}] Updated script line '{line_key}' in source script: {script_name}")
+                    else:
+                        # Line key not found within the expected source script - this might indicate an issue?
+                        script_update_message = f" Warning: Line key '{line_key}' not found in source script ID {source_script_id}. No script updated."
+                        print(f"[Task ID: {task_id}] {script_update_message}")
+                except Exception as e:
+                    script_update_message = f" Error updating script: {str(e)}"
+                    print(f"[Task ID: {task_id}] Error updating script for batch {batch_id}: {e}")
+            else:
+                # Source script ID not found in metadata (e.g., original was CSV)
+                script_update_message = " Script not updated (original source was not a tracked script)."
+                print(f"[Task ID: {task_id}] Skipped script update for '{line_key}' because source_script_id was not found in metadata.")
 
         # --- Update DB Job --- 
         final_status = "SUCCESS" if failures == 0 else "COMPLETED_WITH_ERRORS" if failures < num_new_takes else "FAILURE"
@@ -616,6 +627,7 @@ def run_speech_to_speech_line(self,
         except json.JSONDecodeError as e: raise ValueError(f"Failed to parse metadata JSON: {e}")
 
         # Extract needed info
+        source_script_id = metadata.get('source_script_id') # Get the source script ID
         skin_name = metadata.get('skin_name')
         voice_folder_name = metadata.get('voice_name')
         if not skin_name or not voice_folder_name: raise ValueError("Metadata missing skin/voice name.")
