@@ -17,12 +17,18 @@ interface TakeRowProps {
 const formatSettings = (settings: Take['generation_settings']): string => {
   if (!settings) return 'No settings recorded';
   const parts = [];
-  if (settings.stability !== undefined) parts.push(`Stab: ${settings.stability.toFixed(2)}`);
-  if (settings.similarity_boost !== undefined) parts.push(`Sim: ${settings.similarity_boost.toFixed(2)}`);
-  if (settings.style !== undefined) parts.push(`Style: ${settings.style.toFixed(2)}`);
-  if (settings.speed !== undefined) parts.push(`Speed: ${settings.speed.toFixed(2)}`);
-  if (settings.use_speaker_boost !== undefined) parts.push(`Boost: ${settings.use_speaker_boost ? 'On' : 'Off'}`);
-  return parts.join(' | ');
+  if (settings.stability !== undefined && settings.stability !== null) 
+    parts.push(`Stab: ${settings.stability.toFixed(2)}`);
+  if (settings.similarity_boost !== undefined && settings.similarity_boost !== null)
+    parts.push(`Sim: ${settings.similarity_boost.toFixed(2)}`);
+  if (settings.style !== undefined && settings.style !== null)
+    parts.push(`Style: ${settings.style.toFixed(2)}`);
+  if (settings.speed !== undefined && settings.speed !== null)
+    parts.push(`Speed: ${settings.speed.toFixed(2)}`);
+  if (typeof settings.use_speaker_boost === 'boolean') 
+    parts.push(`Boost: ${settings.use_speaker_boost ? 'On' : 'Off'}`);
+  
+  return parts.length > 0 ? parts.join(' | ') : 'Settings not available';
 };
 
 const TakeRow: React.FC<TakeRowProps> = ({ take, showRankButtons = true, onTrash, onEdit }) => {
@@ -176,7 +182,7 @@ const TakeRow: React.FC<TakeRowProps> = ({ take, showRankButtons = true, onTrash
         {/* Take Info */}
         <Box style={{ flexGrow: 1, position: 'relative' }}>
           <span><strong>Take {take.take_number}:</strong> {take.file}</span>
-          <Text size="xs" c="dimmed" truncate="end" lineClamp={1} title={take.script_text || ''}>
+          <Text size="xs" c="dimmed" title={take.script_text || ''}>
             {take.script_text || ''}
           </Text>
           {/* NEW: Display Formatted Generation Settings */}
