@@ -264,6 +264,9 @@ export interface ScriptLineCreateOrUpdate {
     line_key: string;
     text: string;
     order_index: number;
+    // NEW: Add state for AI Wizard per line
+    isOptimizing?: boolean;
+    optimizeError?: string | null;
 }
 
 // --- END Script Management Types ---

@@ -398,6 +398,56 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ scriptId }) => {
     }, 0);
   };
 
+  // --- NEW: Handler for AI Wizard Click ---
+  const handleOptimizeTextClick = async (index: number) => {
+    const lineToOptimize = lines[index];
+    if (!lineToOptimize || lineToOptimize.isOptimizing) {
+      return; // Already optimizing or line not found
+    }
+    if (!lineToOptimize.text.trim()) {
+      // Set error directly on the line object
+      setLines(currentLines => 
+        currentLines.map((line, i) => 
+          i === index ? { ...line, optimizeError: "Cannot optimize empty text.", isOptimizing: false } : line
+        )
+      );
+      return;
+    }
+
+    // Set loading state for this specific line
+    setLines(currentLines => 
+      currentLines.map((line, i) => 
+        i === index ? { ...line, isOptimizing: true, optimizeError: null } : line
+      )
+    );
+
+    console.log(`Optimizing text for line index ${index}: "${lineToOptimize.text.substring(0, 50)}..."`);
+    try {
+      const response = await api.optimizeLineText(lineToOptimize.text);
+      if (response && response.optimized_text) {
+        // Update text and clear loading/error for this specific line
+        setLines(currentLines => 
+          currentLines.map((line, i) => 
+            i === index ? { ...line, text: response.optimized_text, isOptimizing: false, optimizeError: null } : line
+          )
+        );
+        console.log(`Successfully optimized text for line index ${index}.`);
+      } else {
+        throw new Error("Received invalid response from optimization service.");
+      }
+    } catch (err: any) {
+      console.error(`Failed to optimize text for line index ${index}:`, err);
+      // Set error message for this specific line
+      setLines(currentLines => 
+        currentLines.map((line, i) => 
+          i === index ? { ...line, optimizeError: `Optimization failed: ${err.message}`, isOptimizing: false } : line
+        )
+      );
+    } 
+    // Note: `finally` block not needed as isOptimizing is set within try/catch states
+  };
+  // --- END NEW HANDLER --- 
+
   // --- Render --- 
   if (loading) {
     return <Loader />; 
@@ -440,6 +490,7 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ scriptId }) => {
                   <Table.Th style={{ width: '50px' }}>Order</Table.Th>
                   <Table.Th style={{ width: '200px' }}>Line Key</Table.Th>
                   <Table.Th>Line Text</Table.Th>
+                  <Table.Th style={{ width: '50px' }}>Wizard</Table.Th>
                   <Table.Th style={{ width: '50px' }}>Save</Table.Th>
                   <Table.Th style={{ width: '50px' }}>Del</Table.Th>
               </Table.Tr>
@@ -501,7 +552,24 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ scriptId }) => {
                                       <IconPlayerPause size={14} />
                                   </ActionIcon>
                               </Tooltip>
+                               {/* Display line-specific optimization error */}
+                               {line.optimizeError && (
+                                  <Text c="orange" size="xs" mt={2}>{line.optimizeError}</Text>
+                               )}
                           </Stack>
+                      </Table.Td>
+                      <Table.Td>
+                          <ActionIcon
+                              variant="outline"
+                              color="grape" // Use a different color for wizard
+                              onClick={() => handleOptimizeTextClick(index)}
+                              disabled={saving || importing || line.isOptimizing}
+                              loading={line.isOptimizing} // Mantine ActionIcon supports loading prop
+                              title="Optimize with AI Wizard"
+                          >
+                             {/* Render Loader if loading, otherwise icon */}
+                             {line.isOptimizing ? <Loader size={14} /> : '✨'} 
+                          </ActionIcon>
                       </Table.Td>
                       <Table.Td>
                           <ActionIcon
