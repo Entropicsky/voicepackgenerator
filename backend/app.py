@@ -16,9 +16,10 @@ import time # For timing
 import logging # For better logging
 from werkzeug.middleware.proxy_fix import ProxyFix
 import urllib.parse # Added for URL encoding/decoding
-from typing import Dict
+from typing import Dict, List
 import openai # Added for OpenAI API calls
 from werkzeug.exceptions import HTTPException # Added for specific error handling
+from sqlalchemy.exc import IntegrityError # Added for handling unique constraint errors
 
 # Import celery app instance from root
 from backend.celery_app import celery
@@ -68,13 +69,28 @@ except Exception as e:
 print(f"Flask App: ELEVENLABS_API_KEY loaded? {'Yes' if os.getenv('ELEVENLABS_API_KEY') else 'No'}")
 
 # --- Helper Function --- #
-def make_api_response(data: dict = None, error: str = None, status_code: int = 200) -> Response:
+def make_api_response(data: dict | List[dict] = None, error: str = None, status_code: int = 200) -> Response:
     if error:
         response_data = {"error": error}
         status_code = status_code if status_code >= 400 else 500
     else:
         response_data = {"data": data if data is not None else {}}
     return jsonify(response_data), status_code
+
+# --- Helper to convert model instance to dict --- #
+def model_to_dict(instance, keys=None):
+    """Converts a SQLAlchemy model instance into a dictionary."""
+    if instance is None:
+        return None
+    data = {}
+    columns = instance.__table__.columns.keys() if keys is None else keys
+    for column in columns:
+        value = getattr(instance, column)
+        # Convert datetime objects to ISO format string
+        if isinstance(value, datetime):
+            value = value.isoformat()
+        data[column] = value
+    return data
 
 # --- API Endpoints --- #
 
@@ -1429,5 +1445,26 @@ def get_voice_preview(voice_id):
     except Exception as e:
         logging.exception(f"Unexpected error generating preview for {voice_id}: {e}") # Log traceback
         return make_api_response(error="An unexpected server error occurred", status_code=500)
+
+# --- NEW: VO Script Template API Endpoints --- #
+
+# (Routes moved to backend/routes/vo_template_routes.py)
+
+
+# --- Register Blueprints --- #
+from backend.routes.vo_template_routes import vo_template_bp
+from backend.routes.vo_script_routes import vo_script_bp
+# Import other blueprints when created...
+# from backend.routes.script_routes import script_bp
+# from backend.routes.generation_routes import generation_bp
+# from backend.routes.voice_design_routes import voice_design_bp
+
+app.register_blueprint(vo_template_bp)
+app.register_blueprint(vo_script_bp)
+# app.register_blueprint(script_bp)
+# app.register_blueprint(generation_bp)
+# app.register_blueprint(voice_design_bp)
+
+# --- Add other CRUD endpoints for templates, categories, lines, and vo_scripts later --- # # This comment seems misplaced now
 
 # We don't need the app.run() block here when using 'flask run' or gunicorn/waitress 

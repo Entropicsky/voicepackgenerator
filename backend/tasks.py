@@ -14,6 +14,8 @@ import base64
 import io # Added for in-memory file handling
 from pydub import AudioSegment # Added for cropping
 import tempfile # Added for temporary file handling
+from celery import Task # Import base Task class
+from backend.script_agents.script_writer import ScriptWriterAgent # Import the agent # UNCOMMENTED
 
 print("Celery Worker: Loading tasks.py...")
 
@@ -855,7 +857,87 @@ def crop_audio_take(self, r2_object_key: str, start_seconds: float, end_seconds:
         # Re-raise exception so Celery marks task as failed
         raise e
 
-# --- Placeholder Task (Keep or Remove) ---
+# --- New Task for VO Script Agent --- #
+
+@celery.task(bind=True, base=Task, name='tasks.run_script_creation_agent')
+def run_script_creation_agent(self, 
+                              generation_job_db_id: int, 
+                              vo_script_id: int, 
+                              task_type: str, 
+                              feedback_data: dict | None):
+    """Celery task to run the ScriptWriterAgent."""
+    task_id = self.request.id
+    print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] Received script agent task.")
+    print(f"  VO Script ID: {vo_script_id}")
+    print(f"  Task Type: {task_type}")
+    print(f"  Feedback Data: {feedback_data}")
+    
+    db: Session = next(models.get_db())
+    db_job = None
+    try:
+        # --- 1. Update Job Status to STARTED --- 
+        db_job = db.query(models.GenerationJob).filter(models.GenerationJob.id == generation_job_db_id).first()
+        if not db_job:
+            raise Ignore("GenerationJob record not found.")
+        
+        db_job.status = "STARTED"
+        db_job.started_at = datetime.utcnow()
+        db_job.celery_task_id = task_id
+        db.commit()
+        self.update_state(state='STARTED', meta={'status': f'Agent task started ({task_type})', 'db_id': generation_job_db_id})
+        
+        # --- 2. Instantiate Agent --- 
+        # Agent initialization reads env vars and sets up tools internally
+        agent_instance = ScriptWriterAgent()
+        
+        # --- 3. Prepare Agent Input --- 
+        # TODO: Refine prompt construction based on task_type and feedback
+        if task_type == 'generate_draft':
+             initial_prompt = f"Generate the initial draft for all 'pending' lines in VO Script ID {vo_script_id}. Use the available tools to fetch script details and update lines."
+        elif task_type == 'refine_feedback':
+             feedback_str = json.dumps(feedback_data) if feedback_data else "No specific feedback provided."
+             initial_prompt = f"Refine VO Script ID {vo_script_id} based on the latest user feedback. Process lines marked for review or those with new feedback: {feedback_str}. Use available tools."
+        else:
+             # Should not happen due to API validation, but handle defensively
+             raise ValueError(f"Unsupported task_type for agent: {task_type}")
+
+        # --- 4. Run the Agent --- 
+        agent_result = agent_instance.run(initial_prompt=initial_prompt)
+
+        # --- 5. Process Agent Result --- 
+        # Corrected: Check for final_output existence instead of status attribute
+        if hasattr(agent_result, 'final_output') and agent_result.final_output:
+             final_status = "SUCCESS"
+             result_msg = f"Agent successfully completed task '{task_type}' for script {vo_script_id}. Output: {agent_result.final_output}"
+        else:
+             final_status = "FAILURE"
+             # Try to get some output for the error message if possible
+             output_for_error = getattr(agent_result, 'final_output', '[No Output]') 
+             result_msg = f"Agent task '{task_type}' failed or produced no output for script {vo_script_id}. Last Output: {output_for_error}"
+
+        # --- 6. Update Job Status --- 
+        db_job.status = final_status
+        db_job.completed_at = datetime.utcnow()
+        db_job.result_message = result_msg
+        db.commit()
+        print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] Agent task finished. Updated job status to {final_status}.")
+        
+        return {'status': final_status, 'message': result_msg}
+        
+    except Exception as e:
+        error_msg = f"Script agent task failed unexpectedly: {type(e).__name__}: {e}"
+        print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] {error_msg}")
+        if db_job:
+            db_job.status = "FAILURE"; db_job.completed_at = datetime.utcnow(); db_job.result_message = error_msg
+            try: db.commit()
+            except: db.rollback()
+        # Update Celery task state as well
+        self.update_state(state='FAILURE', meta={'status': error_msg, 'db_id': generation_job_db_id})
+        raise e # Re-raise to ensure Celery knows the task failed
+    finally:
+        if db: db.close()
+
+# --- Placeholder Task (Keep or Remove) --- #
 # @celery.task(bind=True)
 # def placeholder_task(self):
 #     task_id = self.request.id

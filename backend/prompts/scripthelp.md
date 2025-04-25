@@ -44,7 +44,8 @@ Here are the concise, actionable **key rules** for prompting ElevenLabs Text-to-
 - Feel free to change the voice line slightly if you think the change could make it easier for the text-to-speech engine to work well, as long as it mostly preserves the purpose/meaning of the line.  
 
 **8. Phonetic sounds for bracketed items**
-- If a term is bracketed inside a quote that obviously implies a certain type of phoentic sound, thentry to replace it with a phonetic sound. Example [dog sound] = "OOOF OFFF"
+- If a term is bracketed inside a quote that obviously implies a certain type of phoentic sound, thentry to replace it with a phonetic sound. If helpful, use SSML phoneme tags (IPA or ARPAbet) for accurate pronunciation 
+- Example [dog sound] = "OOOF OFFF"
 
 
 ### Example Agent Prompt:

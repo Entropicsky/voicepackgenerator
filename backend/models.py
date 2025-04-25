@@ -1,5 +1,5 @@
 # backend/models.py
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, JSON, ForeignKey, func, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, JSON, ForeignKey, func, Boolean, Index
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 from sqlalchemy.dialects import postgresql # Import postgresql dialect
 from datetime import datetime
@@ -41,7 +41,7 @@ class GenerationJob(Base):
     result_batch_ids_json = Column(JSON().with_variant(postgresql.JSONB, "postgresql"), nullable=True)
     
     # New fields for tracking job type and target
-    job_type = Column(String, default="full_batch") # E.g., 'full_batch', 'line_regen'
+    job_type = Column(String, default="full_batch") # E.g., 'full_batch', 'line_regen', 'sts_line_regen', 'script_creation'
     target_batch_id = Column(String, nullable=True) # For line_regen jobs
     target_line_key = Column(String, nullable=True) # For line_regen jobs
 
@@ -76,6 +76,84 @@ class ScriptLine(Base):
     script = relationship("Script", back_populates="lines")
 
 # --- End Script Management Models --- #
+
+# --- NEW: VO Script Creator Models --- #
+
+class VoScriptTemplate(Base):
+    __tablename__ = "vo_script_templates"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=False, unique=True, index=True)
+    description = Column(Text, nullable=True)
+    prompt_hint = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+
+    categories = relationship("VoScriptTemplateCategory", back_populates="template", cascade="all, delete-orphan")
+    template_lines = relationship("VoScriptTemplateLine", back_populates="template", cascade="all, delete-orphan")
+    vo_scripts = relationship("VoScript", back_populates="template") # Don't cascade delete scripts if template is deleted
+
+class VoScriptTemplateCategory(Base):
+    __tablename__ = "vo_script_template_categories"
+    id = Column(Integer, primary_key=True)
+    template_id = Column(Integer, ForeignKey("vo_script_templates.id"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    prompt_instructions = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+
+    template = relationship("VoScriptTemplate", back_populates="categories")
+    template_lines = relationship("VoScriptTemplateLine", back_populates="category", cascade="all, delete-orphan")
+
+    # Ensure category names are unique within a template
+    __table_args__ = (Index('uq_category_template_name', 'template_id', 'name', unique=True),)
+
+class VoScriptTemplateLine(Base):
+    __tablename__ = "vo_script_template_lines"
+    id = Column(Integer, primary_key=True)
+    template_id = Column(Integer, ForeignKey("vo_script_templates.id"), nullable=False, index=True)
+    category_id = Column(Integer, ForeignKey("vo_script_template_categories.id"), nullable=False, index=True)
+    line_key = Column(String(255), nullable=False)
+    prompt_hint = Column(Text, nullable=True)
+    order_index = Column(Integer, nullable=False)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+
+    template = relationship("VoScriptTemplate", back_populates="template_lines")
+    category = relationship("VoScriptTemplateCategory", back_populates="template_lines")
+    vo_script_lines = relationship("VoScriptLine", back_populates="template_line") # Don't cascade delete generated lines
+
+    # Ensure line keys are unique within a template
+    __table_args__ = (Index('uq_template_line_key', 'template_id', 'line_key', unique=True),)
+
+class VoScript(Base):
+    __tablename__ = "vo_scripts"
+    id = Column(Integer, primary_key=True)
+    template_id = Column(Integer, ForeignKey("vo_script_templates.id"), nullable=False, index=True)
+    name = Column(String(255), nullable=False, index=True) # Allow duplicate names initially?
+    character_description = Column(JSON().with_variant(postgresql.JSONB, "postgresql"), nullable=True)
+    status = Column(String(50), nullable=False, default='drafting', index=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+
+    template = relationship("VoScriptTemplate", back_populates="vo_scripts")
+    lines = relationship("VoScriptLine", back_populates="vo_script", cascade="all, delete-orphan", order_by="VoScriptLine.id") # Order by ID or join template line order?
+
+class VoScriptLine(Base):
+    __tablename__ = "vo_script_lines"
+    id = Column(Integer, primary_key=True)
+    vo_script_id = Column(Integer, ForeignKey("vo_scripts.id"), nullable=False, index=True)
+    template_line_id = Column(Integer, ForeignKey("vo_script_template_lines.id"), nullable=False, index=True)
+    generated_text = Column(Text, nullable=True)
+    status = Column(String(50), nullable=False, default='pending', index=True)
+    generation_history = Column(JSON().with_variant(postgresql.JSONB, "postgresql"), nullable=True) # Optional history
+    latest_feedback = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+
+    vo_script = relationship("VoScript", back_populates="lines")
+    template_line = relationship("VoScriptTemplateLine", back_populates="vo_script_lines")
+
+# --- End VO Script Creator Models --- #
 
 def init_db():
     """Create database tables if they don't exist."""
