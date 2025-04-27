@@ -31,8 +31,8 @@ services:
       # Map container port 5000 to HOST port 5001
       - "5001:5000"
     volumes:
-      # Mount only the backend directory for code changes
-      - ./backend:/app/backend
+      # Revert: Mount entire project dir; Python path should find 'backend' package
+      - .:/app
     working_dir: /app # Ensure commands run from the project root inside container
     env_file:
       - .env # Pass environment variables from .env file
@@ -59,8 +59,8 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     volumes:
-      # Mount only the backend directory for code changes
-      - ./backend:/app/backend
+      # Revert: Mount entire project directory for live code reload
+      - .:/app
     working_dir: /app # Run from project root
     env_file:
       - .env
