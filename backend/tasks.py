@@ -912,7 +912,7 @@ def run_script_creation_agent(self,
         
         # --- 3. Prepare Agent Input --- 
         initial_prompt = ""
-        user_provided_prompt = None # Variable to hold fetched prompt
+        user_provided_prompt = None 
         
         # --- Fetch relevant refinement prompt from DB --- #
         script = db.query(models.VoScript).options(
@@ -946,21 +946,36 @@ def run_script_creation_agent(self,
 
         # --- Construct Agent Prompt --- #
         base_instruction = ""
+        target_statuses = [] # Determine which line statuses the agent should fetch
+
         if task_type == 'generate_draft':
              base_instruction = f"Generate the initial draft for all 'pending' lines in VO Script ID {vo_script_id}."
+             target_statuses = ['pending'] # Agent should only ask for pending lines
         elif task_type == 'refine_category' and category_name:
-             base_instruction = f"Refine all generated lines within the '{category_name}' category for VO Script ID {vo_script_id}. Improve clarity, flow, and ensure they match the character description."
+             # Always target generated/review lines when refining a category with a prompt
+             target_statuses = ['generated', 'review']
+             base_instruction = f"Refine all lines in the '{category_name}' category (statuses: {target_statuses}) for VO Script ID {vo_script_id}. Improve clarity, flow, and ensure they match the character description."
         elif task_type == 'refine_feedback':
              feedback_str = json.dumps(feedback_data) if feedback_data else "No specific feedback provided."
-             base_instruction = f"Refine VO Script ID {vo_script_id} based on the latest user feedback: {feedback_str}. Process lines marked for review or those with new feedback."
+             if user_provided_prompt: # If script prompt exists, refine generated/review lines
+                 target_statuses = ['generated', 'review']
+                 base_instruction = f"Refine all lines (statuses: {target_statuses}) in VO Script ID {vo_script_id}, paying close attention to any line-specific feedback ({feedback_str})."
+             else: # No script prompt, only refine lines with feedback or status 'review'
+                 target_statuses = ['review'] # Could also fetch lines with non-null feedback directly if tool supports it
+                 base_instruction = f"Refine lines in VO Script ID {vo_script_id} that have status 'review' or have specific feedback ({feedback_str})."
         else:
              raise ValueError(f"Unsupported task_type ('{task_type}') or missing category_name for agent.")
 
         # Prepend user prompt if available
         if user_provided_prompt:
-            initial_prompt = f"Follow these instructions carefully: \"{user_provided_prompt}\".\n\n{base_instruction} Use the available tools to fetch script details and update lines."
+            # Include target statuses in the prompt to guide the agent's tool call
+            initial_prompt = f"Follow these instructions carefully: \"{user_provided_prompt}\".\n\n{base_instruction} Target lines with statuses {target_statuses}. Use the available tools to fetch script details and update lines."
         else:
-            initial_prompt = f"{base_instruction} Use the available tools to fetch script details and update lines."
+            initial_prompt = f"{base_instruction} Target lines with statuses {target_statuses}. Use the available tools to fetch script details and update lines."
+        
+        # Log the statuses the agent is expected to ask for
+        logging.info(f"[Task ID: {task_id}] Agent instructed to target statuses: {target_statuses}")
+        
         # --- End Construct Agent Prompt --- #
 
         # --- 4. Run the Agent --- 
