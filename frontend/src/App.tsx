@@ -9,7 +9,7 @@ import JobsPage from './pages/JobsPage';
 import VoiceDesignPage from './pages/VoiceDesignPage';
 import ManageScriptsPage from './pages/ManageScriptsPage';
 import ScriptEditorPage from './pages/ScriptEditorPage';
-import TemplateManagerPage from './pages/TemplateManagerPage';
+import TemplateManagerPage from '@/pages/TemplateManagerPage';
 import { VoiceProvider } from './contexts/VoiceContext';
 import { RankingProvider } from './contexts/RankingContext';
 import { Notifications } from '@mantine/notifications';
@@ -21,9 +21,9 @@ import {
   QueryClient,
   QueryClientProvider,
 } from '@tanstack/react-query';
-import VoScriptListView from './pages/VoScriptListView'; // Assuming location
-import VoScriptCreateView from './pages/VoScriptCreateView'; // Assuming location
-import VoScriptDetailView from './pages/VoScriptDetailView'; // Assuming location
+import VoScriptListView from '@/pages/VoScriptListView';
+import VoScriptCreateView from '@/pages/VoScriptCreateView';
+import VoScriptDetailView from '@/pages/VoScriptDetailView';
 
 // Create a client
 const queryClient = new QueryClient();
