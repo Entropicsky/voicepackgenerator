@@ -22,7 +22,21 @@ import {
   BatchListInfo,
   // Crop Take Types (assuming simple response for now)
   CropTakePayload,
-  CropTakeResponse
+  CropTakeResponse,
+  VoScriptTemplateMetadata, // Import the type here
+  VoScriptTemplate, // Import the VoScriptTemplate type
+  VoScript, // Import the VoScript type
+  VoScriptListItem, // Import VO Script List Item type
+  DeleteResponse, // Import Delete Response type
+  CreateVoScriptPayload, // Import Create Payload type
+  VoScriptLineData, // Import line data type
+  SubmitFeedbackPayload, // Import feedback payload type
+  RunAgentPayload, // Import agent payload type
+  JobSubmissionResponse, // Import agent response type
+  // Add new types
+  UpdateVoScriptPayload, 
+  UpdateVoScriptTemplateCategoryPayload,
+  VoScriptCategoryData // Re-confirming import
 } from './types';
 
 // Define options for filtering/sorting voices
@@ -76,6 +90,17 @@ async function handleApiResponse<T>(response: Response): Promise<T> {
       console.warn("API response did not have expected 'data' wrapper:", jsonResponse);
       return jsonResponse as T; // Return the raw JSON if no data wrapper
   }
+}
+
+// --- NEW: VO Template/Script Types ---
+// Representing the response from GET /api/vo-script-templates
+export interface VoScriptTemplateCategory {
+  id: number;
+  template_id: number;
+  name: string;
+  prompt_instructions: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 const API_BASE = ''; // Using Vite proxy, so relative path works
@@ -406,4 +431,256 @@ export const api = {
       return handleApiResponse<{ optimized_text: string }>(response);
   },
 
-}; 
+  // --- NEW: VO Script Template API Functions --- //
+  listVoScriptTemplates: async (): Promise<VoScriptTemplateMetadata[]> => {
+      const url = `${API_BASE}/api/vo-script-templates`;
+      console.log("[API] Listing VO Script Templates...");
+      const response = await fetch(url);
+      return handleApiResponse<VoScriptTemplateMetadata[]>(response);
+  },
+
+  createVoScriptTemplate: async (payload: { name: string; description?: string | null; prompt_hint?: string | null; }): Promise<VoScriptTemplateMetadata> => {
+      const url = `${API_BASE}/api/vo-script-templates`;
+      console.log("[API] Creating VO Script Template:", payload);
+      const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+      });
+      // Backend returns the full created object, cast to Metadata for now
+      return handleApiResponse<VoScriptTemplateMetadata>(response); 
+  },
+  
+  getVoScriptTemplate: async (templateId: number): Promise<VoScriptTemplate> => {
+    const url = `${API_BASE}/api/vo-script-templates/${templateId}`;
+    console.log(`[API] Getting VO Script Template ${templateId}...`);
+    const response = await fetch(url);
+    // Assuming backend sends full template with nested categories/lines
+    return handleApiResponse<VoScriptTemplate>(response); 
+  },
+  
+  updateVoScriptTemplate: async (templateId: number, payload: { name?: string; description?: string | null; prompt_hint?: string | null; }): Promise<VoScriptTemplateMetadata> => {
+    const url = `${API_BASE}/api/vo-script-templates/${templateId}`;
+    console.log(`[API] Updating VO Script Template ${templateId}:`, payload);
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    return handleApiResponse<VoScriptTemplateMetadata>(response);
+  },
+
+  deleteVoScriptTemplate: async (templateId: number): Promise<{ message: string }> => {
+      const url = `${API_BASE}/api/vo-script-templates/${templateId}`;
+      console.log(`[API] Deleting VO Script Template ${templateId}...`);
+      const response = await fetch(url, {
+          method: 'DELETE',
+      });
+      return handleApiResponse<{ message: string }>(response);
+  },
+  
+  // --- NEW: VoScriptTemplateCategory API Functions --- //
+  listVoScriptTemplateCategories: async (templateId?: number): Promise<any[]> => {
+    const queryParams = new URLSearchParams();
+    if (templateId) {
+        queryParams.append('template_id', String(templateId));
+    }
+    const queryString = queryParams.toString();
+    const url = `${API_BASE}/api/vo-script-template-categories${queryString ? '?' + queryString : ''}`;
+    console.log(`[API] Listing VO Script Template Categories (templateId: ${templateId})...`);
+    const response = await fetch(url);
+    return handleApiResponse<any[]>(response); // Use specific type later
+  },
+
+  createVoScriptTemplateCategory: async (payload: { template_id: number; name: string; prompt_instructions?: string | null; }): Promise<any> => {
+      const url = `${API_BASE}/api/vo-script-template-categories`;
+      console.log("[API] Creating VO Script Template Category:", payload);
+      const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+      });
+      return handleApiResponse<any>(response);
+  },
+  
+  getVoScriptTemplateCategory: async (categoryId: number): Promise<VoScriptTemplateCategoryData> => {
+    const url = `${API_BASE}/api/vo-script-template-categories/${categoryId}`;
+    console.log(`[API] Getting VO Script Template Category ${categoryId}...`);
+    const response = await fetch(url);
+    // Returns full category object including refinement_prompt
+    return handleApiResponse<VoScriptTemplateCategoryData>(response); 
+  },
+
+  updateVoScriptTemplateCategory: async (categoryId: number, payload: UpdateVoScriptTemplateCategoryPayload): Promise<VoScriptTemplateCategoryData> => {
+    const url = `${API_BASE}/api/vo-script-template-categories/${categoryId}`;
+    console.log(`[API] Updating VO Script Template Category ${categoryId}:`, payload);
+    const response = await fetch(url, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+    });
+    // Returns the updated category object
+    return handleApiResponse<VoScriptTemplateCategoryData>(response);
+  },
+
+  deleteVoScriptTemplateCategory: async (categoryId: number): Promise<any> => {
+      const url = `${API_BASE}/api/vo-script-template-categories/${categoryId}`;
+      console.log(`[API] Deleting VO Script Template Category ${categoryId}...`);
+      const response = await fetch(url, {
+          method: 'DELETE',
+      });
+      return handleApiResponse<any>(response);
+  },
+  // --- END: VoScriptTemplateCategory API Functions --- //
+
+  // --- NEW: VoScriptTemplateLine API Functions --- //
+  listVoScriptTemplateLines: async (params?: { templateId?: number; categoryId?: number }): Promise<any[]> => {
+    const queryParams = new URLSearchParams();
+    if (params?.templateId) {
+        queryParams.append('template_id', String(params.templateId));
+    }
+    if (params?.categoryId) {
+        queryParams.append('category_id', String(params.categoryId));
+    }
+    const queryString = queryParams.toString();
+    const url = `${API_BASE}/api/vo-script-template-lines${queryString ? '?' + queryString : ''}`;
+    console.log(`[API] Listing VO Script Template Lines (params: ${JSON.stringify(params)})...`);
+    const response = await fetch(url);
+    return handleApiResponse<any[]>(response); // Use specific type later
+  },
+
+  createVoScriptTemplateLine: async (payload: { template_id: number; category_id: number; line_key: string; order_index: number; prompt_hint?: string | null; }): Promise<any> => {
+      const url = `${API_BASE}/api/vo-script-template-lines`;
+      console.log("[API] Creating VO Script Template Line:", payload);
+      const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+      });
+      return handleApiResponse<any>(response);
+  },
+
+  getVoScriptTemplateLine: async (lineId: number): Promise<any> => {
+    const url = `${API_BASE}/api/vo-script-template-lines/${lineId}`;
+    console.log(`[API] Getting VO Script Template Line ${lineId}...`);
+    const response = await fetch(url);
+    return handleApiResponse<any>(response);
+  },
+
+  updateVoScriptTemplateLine: async (lineId: number, payload: { category_id?: number; line_key?: string; order_index?: number; prompt_hint?: string | null; }): Promise<any> => {
+    const url = `${API_BASE}/api/vo-script-template-lines/${lineId}`;
+    console.log(`[API] Updating VO Script Template Line ${lineId}:`, payload);
+    const response = await fetch(url, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+    });
+    return handleApiResponse<any>(response);
+  },
+
+  deleteVoScriptTemplateLine: async (lineId: number): Promise<any> => {
+      const url = `${API_BASE}/api/vo-script-template-lines/${lineId}`;
+      console.log(`[API] Deleting VO Script Template Line ${lineId}...`);
+      const response = await fetch(url, {
+          method: 'DELETE',
+      });
+      return handleApiResponse<any>(response);
+  },
+  // --- END: VoScriptTemplateLine API Functions --- //
+  
+  // --- NEW: VO Script API Functions --- //
+  listVoScripts: async (): Promise<VoScriptListItem[]> => {
+    const url = `${API_BASE}/api/vo-scripts`;
+    console.log("[API] Listing VO Scripts...");
+    const response = await fetch(url);
+    // Uses the VoScriptListItem type defined in types.ts
+    return handleApiResponse<VoScriptListItem[]>(response);
+  },
+
+  createVoScript: async (payload: CreateVoScriptPayload): Promise<VoScript> => {
+    const url = `${API_BASE}/api/vo-scripts`;
+    console.log("[API] Creating VO Script:", payload);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    // Backend returns the created script object (id, name, template_id, status, etc.)
+    return handleApiResponse<VoScript>(response);
+  },
+
+  getVoScript: async (scriptId: number): Promise<VoScript> => {
+    const url = `${API_BASE}/api/vo-scripts/${scriptId}`;
+    console.log(`[API] Getting VO Script details ${scriptId}...`);
+    const response = await fetch(url);
+    // Returns the detailed VoScript structure from types.ts (now includes prompts)
+    return handleApiResponse<VoScript>(response);
+  },
+
+  updateVoScript: async (scriptId: number, payload: UpdateVoScriptPayload): Promise<VoScript> => {
+    const url = `${API_BASE}/api/vo-scripts/${scriptId}`;
+    console.log(`[API] Updating VO Script ${scriptId}:`, payload);
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    // Backend now returns the basic updated VoScript object
+    return handleApiResponse<VoScript>(response); 
+  },
+
+  deleteVoScript: async (scriptId: number): Promise<DeleteResponse> => {
+    const url = `${API_BASE}/api/vo-scripts/${scriptId}`;
+    console.log(`[API] Deleting VO Script ${scriptId}...`);
+    const response = await fetch(url, {
+      method: 'DELETE',
+    });
+    // Uses the DeleteResponse type
+    return handleApiResponse<DeleteResponse>(response);
+  },
+
+  submitVoScriptFeedback: async (scriptId: number, payload: SubmitFeedbackPayload): Promise<VoScriptLineData> => {
+    const url = `${API_BASE}/api/vo-scripts/${scriptId}/feedback`;
+    console.log(`[API] Submitting feedback for script ${scriptId}, line ${payload.line_id}:`, payload.feedback_text);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    // Returns the updated VoScriptLineData object
+    return handleApiResponse<VoScriptLineData>(response);
+  },
+
+  runVoScriptAgent: async (scriptId: number, payload: RunAgentPayload): Promise<JobSubmissionResponse> => {
+    const url = `${API_BASE}/api/vo-scripts/${scriptId}/run-agent`;
+    console.log(`[API] Running agent for script ${scriptId}:`, payload);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    // Returns { job_id, task_id }
+    return handleApiResponse<JobSubmissionResponse>(response);
+  },
+
+};

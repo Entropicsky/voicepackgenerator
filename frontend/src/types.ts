@@ -270,3 +270,147 @@ export interface ScriptLineCreateOrUpdate {
 }
 
 // --- END Script Management Types ---
+
+// --- NEW: VO Template/Script Types ---
+// Representing the response from GET /api/vo-script-templates
+export interface VoScriptTemplateMetadata {
+  id: number;
+  name: string;
+  description: string | null;
+  prompt_hint: string | null; 
+}
+
+// Add more specific types for Category, Line, VO Script as needed
+export interface VoScriptTemplateCategory {
+  id: number;
+  template_id: number;
+  name: string;
+  prompt_instructions: string | null;
+  refinement_prompt: string | null;
+  created_at: string;
+  updated_at: string;
+  // is_deleted: boolean; // Add if needed by frontend logic
+}
+
+export interface VoScriptTemplateLine {
+  id: number;
+  template_id: number;
+  category_id: number;
+  line_key: string;
+  prompt_hint: string | null;
+  order_index: number;
+  created_at: string;
+  updated_at: string;
+  // is_deleted: boolean; // Add if needed by frontend logic
+  // Optionally include category name if backend joins it
+  category_name?: string; 
+}
+
+// Represents a full VO Script Template including categories and lines
+// This is the expected return type for GET /api/vo-script-templates/:id
+export interface VoScriptTemplate extends VoScriptTemplateMetadata {
+   created_at: string;
+   updated_at: string;
+   categories: VoScriptTemplateCategory[]; // Array of associated categories
+   template_lines: VoScriptTemplateLine[]; // Array of associated lines
+}
+
+export interface VoScript {
+  id: number;
+  template_id: number;
+  name: string;
+  character_description: string;
+  refinement_prompt: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  template_name?: string;
+  template_description?: string;
+  template_prompt_hint?: string;
+  categories?: VoScriptCategoryData[];
+}
+
+// --- Payload Type for Creating VO Script --- //
+export interface CreateVoScriptPayload {
+    name: string;
+    template_id: number;
+    character_description: string;
+}
+
+// Represents a generated line linked to a template line
+export interface VoScriptLineData {
+  id: number;
+  template_line_id?: number;
+  category_id?: number; 
+  line_key?: string;
+  generated_text: string | null;
+  status: string;
+  latest_feedback: string | null;
+  generation_history?: any[]; 
+  order_index?: number;
+  template_prompt_hint?: string; 
+}
+
+// Represents a category containing lines for the detail view
+export interface VoScriptCategoryData {
+    id: number | null; // Added ID (nullable if uncategorized)
+    name: string;
+    instructions: string | null;
+    refinement_prompt: string | null; // Added
+    lines: VoScriptLineData[];
+}
+
+// Payload for submitting feedback
+export interface SubmitFeedbackPayload {
+    line_id: number;
+    feedback_text: string;
+}
+
+// Payload for running the agent
+export interface RunAgentPayload {
+    task_type: 'generate_draft' | 'refine_feedback' | 'refine_category';
+    feedback?: any; // Optional feedback data for refinement task
+    category_name?: string; // Optional category name for refine_category task
+}
+
+// Response from submitting an agent job (matches GenerationStartResponse)
+export interface JobSubmissionResponse {
+  task_id: string | null; // Celery Task ID (can be null if submit fails)
+  job_id: number;        // Database Job ID
+}
+
+// Added: Type for the items returned by GET /api/vo-scripts list endpoint
+export interface VoScriptListItem {
+  id: number;
+  name: string;
+  template_id: number;
+  template_name: string | null;
+  status: string;
+  character_description?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Added: Expected response type for DELETE operations
+export interface DeleteResponse {
+    message: string;
+}
+
+// --- END VO Template/Script Types ---
+
+// --- Payload Types --- //
+
+// Payload for updating a VO Script
+export interface UpdateVoScriptPayload {
+    name?: string;
+    character_description?: string;
+    status?: string;
+    refinement_prompt?: string | null;
+}
+
+// Payload for updating a VO Script Template Category
+export interface UpdateVoScriptTemplateCategoryPayload {
+    name?: string;
+    prompt_instructions?: string | null;
+    refinement_prompt?: string | null;
+}
