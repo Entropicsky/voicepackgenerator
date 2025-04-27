@@ -1,9 +1,10 @@
 # backend/routes/vo_template_routes.py
 
 from flask import Blueprint, request, jsonify
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.exc import IntegrityError
 import logging
+from datetime import datetime, timezone
 
 # Assuming models and helpers are accessible, adjust imports as necessary
 # Might need to adjust relative paths depending on final structure
@@ -16,13 +17,14 @@ vo_template_bp = Blueprint('vo_template_api', __name__, url_prefix='/api')
 # Routes will be moved here...
 @vo_template_bp.route('/vo-script-templates', methods=['GET'])
 def list_vo_script_templates():
-    """Lists all VO script templates."""
+    """Lists all non-deleted VO script templates."""
     db: Session = None
     try:
-        db = next(get_db()) # Use imported get_db
-        templates = db.query(models.VoScriptTemplate).order_by(models.VoScriptTemplate.name).all()
-        # Use helper to convert list of models to list of dicts, selecting specific keys
-        template_list = [model_to_dict(t, ['id', 'name', 'description']) for t in templates]
+        db = next(get_db())
+        templates = db.query(models.VoScriptTemplate).filter(
+            models.VoScriptTemplate.is_deleted == False
+        ).order_by(models.VoScriptTemplate.name).all()
+        template_list = [model_to_dict(t, ['id', 'name', 'description', 'prompt_hint']) for t in templates]
         logging.info(f"Returning {len(template_list)} VO script templates.")
         return make_api_response(data=template_list)
     except Exception as e:
@@ -83,15 +85,42 @@ def create_vo_script_template():
 
 @vo_template_bp.route('/vo-script-templates/<int:template_id>', methods=['GET'])
 def get_vo_script_template(template_id):
-    """Gets details for a specific VO script template."""
+    """Gets details for a specific non-deleted VO script template, including categories and lines."""
     db: Session = None
     try:
         db = next(get_db())
-        template = db.query(models.VoScriptTemplate).get(template_id)
+        # --- MODIFIED: Eager load relationships --- #
+        template = db.query(models.VoScriptTemplate).options(
+            selectinload(models.VoScriptTemplate.categories),
+            selectinload(models.VoScriptTemplate.template_lines)
+        ).filter(
+            models.VoScriptTemplate.id == template_id,
+            models.VoScriptTemplate.is_deleted == False
+        ).first()
+        # --- END MODIFIED --- #
+        
         if template is None:
-            return make_api_response(error=f"Template with ID {template_id} not found", status_code=404)
-        # Return all fields for the specific template
-        return make_api_response(data=model_to_dict(template))
+            return make_api_response(error=f"Template with ID {template_id} not found or has been deleted", status_code=404)
+        
+        # --- NEW: Sort relationships in Python after loading --- #
+        if template.categories:
+            template.categories.sort(key=lambda cat: cat.name)
+        if template.template_lines:
+            template.template_lines.sort(key=lambda line: line.order_index)
+        # --- END NEW SORTING --- #
+
+        # --- MODIFIED: Explicitly serialize nested data --- #    
+        template_data = model_to_dict(template) # Get base template fields
+        # Filter out deleted categories/lines during serialization
+        template_data['categories'] = [
+            model_to_dict(cat) for cat in template.categories if not cat.is_deleted
+        ]
+        template_data['template_lines'] = [
+            model_to_dict(line) for line in template.template_lines if not line.is_deleted
+        ]
+        # --- END MODIFIED --- #
+        
+        return make_api_response(data=template_data)
     except Exception as e:
         logging.exception(f"Error getting VO script template {template_id}: {e}")
         return make_api_response(error="Failed to get VO script template", status_code=500)
@@ -161,23 +190,27 @@ def update_vo_script_template(template_id):
 
 @vo_template_bp.route('/vo-script-templates/<int:template_id>', methods=['DELETE'])
 def delete_vo_script_template(template_id):
-    """Deletes a VO script template."""
+    """Soft-deletes a VO script template."""
     db: Session = None
     try:
         db = next(get_db())
-        template = db.query(models.VoScriptTemplate).get(template_id)
+        template = db.query(models.VoScriptTemplate).filter(
+             models.VoScriptTemplate.id == template_id,
+             models.VoScriptTemplate.is_deleted == False
+         ).first()
         if template is None:
-            return make_api_response(error=f"Template with ID {template_id} not found", status_code=404)
+            return make_api_response(error=f"Template with ID {template_id} not found or already deleted", status_code=404)
         
-        template_name = template.name # Get name for logging before deleting
-        db.delete(template)
+        template_name = template.name
+        template.is_deleted = True
+        template.updated_at = datetime.now(timezone.utc)
         db.commit()
-        logging.info(f"Deleted VO script template ID {template_id} (Name: '{template_name}')")
-        return make_api_response(data={"message": f"Template '{template_name}' deleted successfully"})
+        logging.info(f"Soft-deleted VO script template ID {template_id} (Name: '{template_name}')")
+        return make_api_response(data={"message": f"Template '{template_name}' soft-deleted successfully"})
     except Exception as e:
         db.rollback()
-        logging.exception(f"Error deleting VO script template {template_id}: {e}")
-        return make_api_response(error="Failed to delete VO script template", status_code=500)
+        logging.exception(f"Error soft-deleting VO script template {template_id}: {e}")
+        return make_api_response(error="Failed to soft-delete VO script template", status_code=500)
     finally:
         if db and db.is_active: db.close()
 
@@ -185,17 +218,19 @@ def delete_vo_script_template(template_id):
 
 @vo_template_bp.route('/vo-script-template-categories', methods=['GET'])
 def list_vo_script_template_categories():
-    """Lists all VO script template categories, optionally filtered by template_id."""
+    """Lists all non-deleted VO script template categories, optionally filtered."""
     template_id_filter = request.args.get('template_id', type=int)
     db: Session = None
     try:
         db = next(get_db())
-        query = db.query(models.VoScriptTemplateCategory)
+        query = db.query(models.VoScriptTemplateCategory).filter(models.VoScriptTemplateCategory.is_deleted == False)
         if template_id_filter:
-            # Verify template exists
-            template = db.query(models.VoScriptTemplate).get(template_id_filter)
+            template = db.query(models.VoScriptTemplate).filter(
+                 models.VoScriptTemplate.id == template_id_filter,
+                 models.VoScriptTemplate.is_deleted == False
+            ).first()
             if not template:
-                 return make_api_response(error=f"Template with ID {template_id_filter} not found", status_code=404)
+                 return make_api_response(error=f"Template with ID {template_id_filter} not found or deleted", status_code=404)
             query = query.filter(models.VoScriptTemplateCategory.template_id == template_id_filter)
             
         categories = query.order_by(models.VoScriptTemplateCategory.template_id, models.VoScriptTemplateCategory.name).all()
@@ -268,14 +303,17 @@ def create_vo_script_template_category():
 
 @vo_template_bp.route('/vo-script-template-categories/<int:category_id>', methods=['GET'])
 def get_vo_script_template_category(category_id):
-    """Gets details for a specific VO script template category."""
+    """Gets details for a specific non-deleted VO script template category."""
     db: Session = None
     try:
         db = next(get_db())
-        category = db.query(models.VoScriptTemplateCategory).get(category_id)
+        category = db.query(models.VoScriptTemplateCategory).filter(
+            models.VoScriptTemplateCategory.id == category_id,
+            models.VoScriptTemplateCategory.is_deleted == False
+        ).first()
         if category is None:
-            return make_api_response(error=f"Category with ID {category_id} not found", status_code=404)
-        # Return all fields for the specific category
+            return make_api_response(error=f"Category with ID {category_id} not found or has been deleted", status_code=404)
+        # Include refinement_prompt in the response
         return make_api_response(data=model_to_dict(category))
     except Exception as e:
         logging.exception(f"Error getting VO script template category {category_id}: {e}")
@@ -285,7 +323,7 @@ def get_vo_script_template_category(category_id):
 
 @vo_template_bp.route('/vo-script-template-categories/<int:category_id>', methods=['PUT'])
 def update_vo_script_template_category(category_id):
-    """Updates an existing VO script template category."""
+    """Updates an existing VO script template category (name, instructions, refinement_prompt)."""
     if not request.is_json:
         return make_api_response(error="Request must be JSON", status_code=400)
     data = request.get_json()
@@ -296,10 +334,15 @@ def update_vo_script_template_category(category_id):
         category = db.query(models.VoScriptTemplateCategory).get(category_id)
         if category is None:
             return make_api_response(error=f"Category with ID {category_id} not found", status_code=404)
+        # Ensure we don't update deleted categories? Or allow reactivation?
+        # For now, assume we only update active categories.
+        if category.is_deleted:
+             return make_api_response(error=f"Category with ID {category_id} has been deleted and cannot be updated", status_code=404)
 
         updated = False
-        original_name = category.name # Store original name for potential unique check
+        original_name = category.name 
         
+        # --- Update Name --- #
         if 'name' in data:
             new_name = data['name']
             if not new_name:
@@ -307,11 +350,21 @@ def update_vo_script_template_category(category_id):
             if new_name != category.name:
                  category.name = new_name
                  updated = True
-                 
+        
+        # --- Update Prompt Instructions --- #         
         if 'prompt_instructions' in data:
             if data['prompt_instructions'] != category.prompt_instructions:
                 category.prompt_instructions = data['prompt_instructions']
                 updated = True
+                
+        # --- Update Refinement Prompt --- #
+        if 'refinement_prompt' in data:
+            new_prompt = data['refinement_prompt']
+            if not isinstance(new_prompt, (str, type(None))):
+                 return make_api_response(error="refinement_prompt must be a string or null", status_code=400)
+            if new_prompt != category.refinement_prompt:
+                 category.refinement_prompt = new_prompt
+                 updated = True
 
         if not updated:
             return make_api_response(data=model_to_dict(category)) # Return current data if no changes
@@ -340,29 +393,28 @@ def update_vo_script_template_category(category_id):
 
 @vo_template_bp.route('/vo-script-template-categories/<int:category_id>', methods=['DELETE'])
 def delete_vo_script_template_category(category_id):
-    """Deletes a VO script template category."""
+    """Soft-deletes a VO script template category."""
     db: Session = None
     try:
         db = next(get_db())
-        category = db.query(models.VoScriptTemplateCategory).get(category_id)
+        category = db.query(models.VoScriptTemplateCategory).filter(
+            models.VoScriptTemplateCategory.id == category_id,
+            models.VoScriptTemplateCategory.is_deleted == False
+        ).first()
         if category is None:
-            return make_api_response(error=f"Category with ID {category_id} not found", status_code=404)
+            return make_api_response(error=f"Category with ID {category_id} not found or already deleted", status_code=404)
         
-        category_name = category.name # Get name for logging before deleting
+        category_name = category.name
         template_id = category.template_id
-        db.delete(category)
+        category.is_deleted = True
+        category.updated_at = datetime.now(timezone.utc)
         db.commit()
-        logging.info(f"Deleted VO script category ID {category_id} (Name: '{category_name}') from template ID {template_id}")
-        return make_api_response(data={"message": f"Category '{category_name}' deleted successfully"})
+        logging.info(f"Soft-deleted VO script category ID {category_id} (Name: '{category_name}') from template ID {template_id}")
+        return make_api_response(data={"message": f"Category '{category_name}' soft-deleted successfully"})
     except Exception as e:
         db.rollback()
-        # Add specific check for foreign key violation if lines depend on this category
-        if isinstance(e, IntegrityError) and "foreign key constraint" in str(e.orig).lower():
-             logging.warning(f"Attempted to delete category {category_id} which is still referenced by template lines.")
-             return make_api_response(error=f"Cannot delete category '{category.name}' because it still has lines associated with it.", status_code=409)
-        
-        logging.exception(f"Error deleting VO script template category {category_id}: {e}")
-        return make_api_response(error="Failed to delete VO script template category", status_code=500)
+        logging.exception(f"Error soft-deleting VO script template category {category_id}: {e}")
+        return make_api_response(error="Failed to soft-delete VO script template category", status_code=500)
     finally:
         if db and db.is_active: db.close()
 
@@ -370,27 +422,31 @@ def delete_vo_script_template_category(category_id):
 
 @vo_template_bp.route('/vo-script-template-lines', methods=['GET'])
 def list_vo_script_template_lines():
-    """Lists all VO script template lines, optionally filtered by template_id or category_id."""
+    """Lists all non-deleted VO script template lines, optionally filtered."""
     template_id_filter = request.args.get('template_id', type=int)
     category_id_filter = request.args.get('category_id', type=int)
     db: Session = None
     try:
         db = next(get_db())
-        query = db.query(models.VoScriptTemplateLine)
+        query = db.query(models.VoScriptTemplateLine).filter(models.VoScriptTemplateLine.is_deleted == False)
         
         # Validate filters exist before applying them
         if template_id_filter:
-            # Corrected: Query the full class to use .get()
-            template = db.query(models.VoScriptTemplate).get(template_id_filter)
+            template = db.query(models.VoScriptTemplate).filter(
+                models.VoScriptTemplate.id == template_id_filter,
+                models.VoScriptTemplate.is_deleted == False
+            ).first()
             if not template:
-                 return make_api_response(error=f"Template with ID {template_id_filter} not found", status_code=404)
+                 return make_api_response(error=f"Template with ID {template_id_filter} not found or deleted", status_code=404)
             query = query.filter(models.VoScriptTemplateLine.template_id == template_id_filter)
         
         if category_id_filter:
-            # Corrected: Query the full class to use .get()
-            category = db.query(models.VoScriptTemplateCategory).get(category_id_filter)
+            category = db.query(models.VoScriptTemplateCategory).filter(
+                models.VoScriptTemplateCategory.id == category_id_filter,
+                models.VoScriptTemplateCategory.is_deleted == False
+            ).first()
             if not category:
-                 return make_api_response(error=f"Category with ID {category_id_filter} not found", status_code=404)
+                 return make_api_response(error=f"Category with ID {category_id_filter} not found or deleted", status_code=404)
             # Ensure category belongs to the specified template if both filters are used
             if template_id_filter and category.template_id != template_id_filter:
                 return make_api_response(error=f"Category ID {category_id_filter} does not belong to Template ID {template_id_filter}", status_code=400)
@@ -434,43 +490,86 @@ def create_vo_script_template_line():
         # Verify parent template and category exist and are linked
         category = db.query(models.VoScriptTemplateCategory).filter(
             models.VoScriptTemplateCategory.id == category_id,
-            models.VoScriptTemplateCategory.template_id == template_id
+            models.VoScriptTemplateCategory.template_id == template_id,
+            models.VoScriptTemplateCategory.is_deleted == False # Ensure category is not deleted
         ).first()
         if not category:
             # Check if template exists at all to give a better error
-            template_exists = db.query(models.VoScriptTemplate.id).get(template_id)
-            if not template_exists:
-                return make_api_response(error=f"Template with ID {template_id} not found", status_code=404)
+            template = db.query(models.VoScriptTemplate).filter(
+                models.VoScriptTemplate.id == template_id,
+                models.VoScriptTemplate.is_deleted == False # Ensure template is not deleted
+            ).first()
+            if not template:
+                return make_api_response(error=f"Template with ID {template_id} not found or is deleted", status_code=404)
+            # Check if category exists but is deleted
+            deleted_category = db.query(models.VoScriptTemplateCategory.id).filter(models.VoScriptTemplateCategory.id == category_id, models.VoScriptTemplateCategory.is_deleted == True).first()
+            if deleted_category:
+                 return make_api_response(error=f"Category with ID {category_id} has been deleted.", status_code=404)
             else:
-                return make_api_response(error=f"Category with ID {category_id} not found or does not belong to template ID {template_id}", status_code=404)
+                 return make_api_response(error=f"Category with ID {category_id} not found or does not belong to template ID {template_id}", status_code=404)
+
+        # --- MODIFIED: Check for existing lines (active or deleted) --- #
+        existing_line = db.query(models.VoScriptTemplateLine).filter(
+            models.VoScriptTemplateLine.template_id == template_id,
+            models.VoScriptTemplateLine.line_key == line_key
+        ).first()
+
+        if existing_line:
+            if not existing_line.is_deleted:
+                # Active line exists - return conflict
+                logging.warning(f"Attempted to create line with duplicate active key '{line_key}' for template ID {template_id}")
+                return make_api_response(error=f"An active line key '{line_key}' already exists for this template.", status_code=409)
+            else:
+                # Deleted line exists - undelete and update it
+                logging.info(f"Found soft-deleted line ID {existing_line.id} with key '{line_key}'. Undeleting and updating.")
+                existing_line.is_deleted = False
+                existing_line.category_id = category_id # Update category
+                existing_line.prompt_hint = prompt_hint # Update hint
+                existing_line.order_index = order_index # Update order
+                existing_line.updated_at = datetime.now(timezone.utc)
+                db.commit()
+                db.refresh(existing_line)
+                logging.info(f"Undeleted and updated VO script line ID {existing_line.id} ('{line_key}') for template ID {template_id}")
+                return make_api_response(data=model_to_dict(existing_line), status_code=200) # Return 200 OK for update
+        else:
+            # No existing line found (active or deleted) - create a new one
+            new_line = models.VoScriptTemplateLine(
+                template_id=template_id,
+                category_id=category_id,
+                line_key=line_key,
+                prompt_hint=prompt_hint,
+                order_index=order_index
+            )
+            db.add(new_line)
+            db.commit()
+            db.refresh(new_line)
+            logging.info(f"Created VO script line ID {new_line.id} ('{line_key}') for template ID {template_id}")
+            return make_api_response(data=model_to_dict(new_line), status_code=201)
         
-        new_line = models.VoScriptTemplateLine(
-            template_id=template_id,
-            category_id=category_id,
-            line_key=line_key,
-            prompt_hint=prompt_hint,
-            order_index=order_index
-        )
-        db.add(new_line)
-        db.commit()
-        db.refresh(new_line)
-        logging.info(f"Created VO script line ID {new_line.id} ('{line_key}') for template ID {template_id}")
-        return make_api_response(data=model_to_dict(new_line), status_code=201)
     except IntegrityError as e:
         db.rollback()
+        # This except block might become less likely to hit for the unique key constraint
+        # but kept for handling FK constraints or potential race conditions.
         err_str = str(e.orig).lower()
-        if "unique constraint" in err_str and "uq_template_line_key" in err_str:
-             logging.warning(f"Attempted to create line with duplicate key '{line_key}' for template ID {template_id}")
-             return make_api_response(error=f"Line key '{line_key}' already exists for this template.", status_code=409)
+        if "unique constraint" in err_str and ("uq_template_line_key" in err_str or "vo_script_template_lines.template_id" in err_str): # Adjusted for different DB messages
+             logging.error(f"Database integrity error hit unexpectedly for key '{line_key}' for template ID {template_id} despite checks: {e}")
+             # Generic message as the specific cases should be handled above
+             return make_api_response(error=f"Database conflict creating line key '{line_key}'.", status_code=409)
         elif "foreign key constraint" in err_str:
-             logging.error(f"Foreign key violation creating line for template ID {template_id} / category ID {category_id}: {e}")
-             # Re-check existence for better error message
-             if not db.query(models.VoScriptTemplate).get(template_id):
-                  return make_api_response(error=f"Template with ID {template_id} not found.", status_code=404)
-             if not db.query(models.VoScriptTemplateCategory).get(category_id):
-                  return make_api_response(error=f"Category with ID {category_id} not found.", status_code=404)
-             # If both exist, the category likely doesn't belong to the template (checked before commit, but double-checking)
-             return make_api_response(error=f"Category ID {category_id} may not belong to Template ID {template_id}.", status_code=400)
+            # ... (existing foreign key handling remains the same) ...
+            logging.error(f"Foreign key violation creating line for template ID {template_id} / category ID {category_id}: {e}")
+            # Re-check existence for better error message
+            if not db.query(models.VoScriptTemplate.id).filter(models.VoScriptTemplate.id == template_id, models.VoScriptTemplate.is_deleted == False).first():
+                 return make_api_response(error=f"Template with ID {template_id} not found or deleted.", status_code=404)
+            if not db.query(models.VoScriptTemplateCategory.id).filter(models.VoScriptTemplateCategory.id == category_id, models.VoScriptTemplateCategory.is_deleted == False).first():
+                 # Check if it's deleted
+                 deleted_cat = db.query(models.VoScriptTemplateCategory.id).filter(models.VoScriptTemplateCategory.id == category_id, models.VoScriptTemplateCategory.is_deleted == True).first()
+                 if deleted_cat:
+                     return make_api_response(error=f"Category with ID {category_id} has been deleted.", status_code=404)
+                 else:
+                     return make_api_response(error=f"Category with ID {category_id} not found.", status_code=404)
+            # If both exist, the category likely doesn't belong to the template (checked before commit, but double-checking)
+            return make_api_response(error=f"Category ID {category_id} may not belong to Template ID {template_id}.", status_code=400)
         else:
              logging.exception(f"Database integrity error creating line: {e}")
              return make_api_response(error="Database error creating line.", status_code=500)
@@ -483,13 +582,16 @@ def create_vo_script_template_line():
 
 @vo_template_bp.route('/vo-script-template-lines/<int:line_id>', methods=['GET'])
 def get_vo_script_template_line(line_id):
-    """Gets details for a specific VO script template line."""
+    """Gets details for a specific non-deleted VO script template line."""
     db: Session = None
     try:
         db = next(get_db())
-        line = db.query(models.VoScriptTemplateLine).get(line_id)
+        line = db.query(models.VoScriptTemplateLine).filter(
+            models.VoScriptTemplateLine.id == line_id,
+            models.VoScriptTemplateLine.is_deleted == False
+        ).first()
         if line is None:
-            return make_api_response(error=f"Template line with ID {line_id} not found", status_code=404)
+            return make_api_response(error=f"Template line with ID {line_id} not found or has been deleted", status_code=404)
         return make_api_response(data=model_to_dict(line))
     except Exception as e:
         logging.exception(f"Error getting VO script template line {line_id}: {e}")
@@ -586,24 +688,27 @@ def update_vo_script_template_line(line_id):
 
 @vo_template_bp.route('/vo-script-template-lines/<int:line_id>', methods=['DELETE'])
 def delete_vo_script_template_line(line_id):
-    """Deletes a VO script template line."""
+    """Soft-deletes a VO script template line."""
     db: Session = None
     try:
         db = next(get_db())
-        line = db.query(models.VoScriptTemplateLine).get(line_id)
+        line = db.query(models.VoScriptTemplateLine).filter(
+            models.VoScriptTemplateLine.id == line_id,
+            models.VoScriptTemplateLine.is_deleted == False
+        ).first()
         if line is None:
-            return make_api_response(error=f"Template line with ID {line_id} not found", status_code=404)
+            return make_api_response(error=f"Template line with ID {line_id} not found or already deleted", status_code=404)
         
-        line_key = line.line_key # Get key for logging before deleting
+        line_key = line.line_key
         template_id = line.template_id
-        db.delete(line)
+        line.is_deleted = True
+        line.updated_at = datetime.now(timezone.utc)
         db.commit()
-        logging.info(f"Deleted VO script template line ID {line_id} (Key: '{line_key}') from template ID {template_id}")
-        return make_api_response(data={"message": f"Template line '{line_key}' deleted successfully"})
+        logging.info(f"Soft-deleted VO script template line ID {line_id} (Key: '{line_key}') from template ID {template_id}")
+        return make_api_response(data={"message": f"Template line '{line_key}' soft-deleted successfully"})
     except Exception as e:
         db.rollback()
-        # Note: Deleting a line shouldn't typically cause IntegrityError unless referenced elsewhere unexpectedly
-        logging.exception(f"Error deleting VO script template line {line_id}: {e}")
-        return make_api_response(error="Failed to delete VO script template line", status_code=500)
+        logging.exception(f"Error soft-deleting VO script template line {line_id}: {e}")
+        return make_api_response(error="Failed to soft-delete VO script template line", status_code=500)
     finally:
-        if db and db.is_active: db.close() 
+        if db and db.is_active: db.close()

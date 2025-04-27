@@ -16,6 +16,9 @@ from pydub import AudioSegment # Added for cropping
 import tempfile # Added for temporary file handling
 from celery import Task # Import base Task class
 from backend.script_agents.script_writer import ScriptWriterAgent # Import the agent # UNCOMMENTED
+import os # Added for environment variables
+import logging
+from sqlalchemy.orm import joinedload
 
 print("Celery Worker: Loading tasks.py...")
 
@@ -864,12 +867,14 @@ def run_script_creation_agent(self,
                               generation_job_db_id: int, 
                               vo_script_id: int, 
                               task_type: str, 
-                              feedback_data: dict | None):
+                              feedback_data: dict | None,
+                              category_name: str | None = None):
     """Celery task to run the ScriptWriterAgent."""
     task_id = self.request.id
     print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] Received script agent task.")
     print(f"  VO Script ID: {vo_script_id}")
     print(f"  Task Type: {task_type}")
+    print(f"  Category Name: {category_name}")
     print(f"  Feedback Data: {feedback_data}")
     
     db: Session = next(models.get_db())
@@ -883,35 +888,91 @@ def run_script_creation_agent(self,
         db_job.status = "STARTED"
         db_job.started_at = datetime.utcnow()
         db_job.celery_task_id = task_id
+        # Store category name in job parameters if provided
+        job_params = {}
+        try: 
+            job_params = json.loads(db_job.parameters_json) if db_job.parameters_json else {}
+        except json.JSONDecodeError:
+             logging.warning(f"[Task ID: {task_id}] Could not parse existing job parameters JSON.")
+
+        job_params['task_type'] = task_type # Ensure task_type is always there
+        if category_name:
+           job_params['category_name'] = category_name
+        if feedback_data: # Include feedback if provided
+             job_params['feedback'] = feedback_data
+             
+        db_job.parameters_json = json.dumps(job_params)
         db.commit()
-        self.update_state(state='STARTED', meta={'status': f'Agent task started ({task_type})', 'db_id': generation_job_db_id})
+        self.update_state(state='STARTED', meta={'status': f'Agent task started ({task_type}, Category: {category_name or "All"})', 'db_id': generation_job_db_id})
         
         # --- 2. Instantiate Agent --- 
-        # Agent initialization reads env vars and sets up tools internally
-        agent_instance = ScriptWriterAgent()
+        agent_model_name = os.environ.get('OPENAI_AGENT_MODEL', 'gpt-4o')
+        print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] Using Agent Model: {agent_model_name}")
+        agent_instance = ScriptWriterAgent(model_name=agent_model_name)
         
         # --- 3. Prepare Agent Input --- 
-        # TODO: Refine prompt construction based on task_type and feedback
+        initial_prompt = ""
+        user_provided_prompt = None # Variable to hold fetched prompt
+        
+        # --- Fetch relevant refinement prompt from DB --- #
+        script = db.query(models.VoScript).options(
+            # Load template and its categories if needed for prompts
+            joinedload(models.VoScript.template).selectinload(models.VoScriptTemplate.categories) 
+        ).get(vo_script_id)
+        if not script:
+             # Should not happen if job was created, but handle defensively
+             raise ValueError(f"VoScript with ID {vo_script_id} not found during task execution.")
+
+        if task_type == 'refine_category' and category_name:
+            # Find the specific category within the script's template to get its prompt
+            if script.template and script.template.categories:
+                target_category = next((cat for cat in script.template.categories if cat.name == category_name), None)
+                if target_category and target_category.refinement_prompt:
+                    user_provided_prompt = target_category.refinement_prompt
+                    logging.info(f"[Task ID: {task_id}] Using category-specific refinement prompt for '{category_name}'.")
+                else:
+                    logging.info(f"[Task ID: {task_id}] No specific refinement prompt found for category '{category_name}'.")
+            else:
+                 logging.warning(f"[Task ID: {task_id}] Could not find template or categories for script {vo_script_id} to fetch category prompt.")
+                 
+        elif task_type == 'refine_feedback':
+            # Use the script-level prompt if it exists
+            if script.refinement_prompt:
+                 user_provided_prompt = script.refinement_prompt
+                 logging.info(f"[Task ID: {task_id}] Using script-level refinement prompt.")
+            else:
+                 logging.info(f"[Task ID: {task_id}] No script-level refinement prompt found.")
+        # --- End Fetching Prompt --- #
+
+        # --- Construct Agent Prompt --- #
+        base_instruction = ""
         if task_type == 'generate_draft':
-             initial_prompt = f"Generate the initial draft for all 'pending' lines in VO Script ID {vo_script_id}. Use the available tools to fetch script details and update lines."
+             base_instruction = f"Generate the initial draft for all 'pending' lines in VO Script ID {vo_script_id}."
+        elif task_type == 'refine_category' and category_name:
+             base_instruction = f"Refine all generated lines within the '{category_name}' category for VO Script ID {vo_script_id}. Improve clarity, flow, and ensure they match the character description."
         elif task_type == 'refine_feedback':
              feedback_str = json.dumps(feedback_data) if feedback_data else "No specific feedback provided."
-             initial_prompt = f"Refine VO Script ID {vo_script_id} based on the latest user feedback. Process lines marked for review or those with new feedback: {feedback_str}. Use available tools."
+             base_instruction = f"Refine VO Script ID {vo_script_id} based on the latest user feedback: {feedback_str}. Process lines marked for review or those with new feedback."
         else:
-             # Should not happen due to API validation, but handle defensively
-             raise ValueError(f"Unsupported task_type for agent: {task_type}")
+             raise ValueError(f"Unsupported task_type ('{task_type}') or missing category_name for agent.")
+
+        # Prepend user prompt if available
+        if user_provided_prompt:
+            initial_prompt = f"Follow these instructions carefully: \"{user_provided_prompt}\".\n\n{base_instruction} Use the available tools to fetch script details and update lines."
+        else:
+            initial_prompt = f"{base_instruction} Use the available tools to fetch script details and update lines."
+        # --- End Construct Agent Prompt --- #
 
         # --- 4. Run the Agent --- 
+        print(f"[Task ID: {task_id}] Running agent with prompt: {initial_prompt[:200]}...")
         agent_result = agent_instance.run(initial_prompt=initial_prompt)
 
         # --- 5. Process Agent Result --- 
-        # Corrected: Check for final_output existence instead of status attribute
         if hasattr(agent_result, 'final_output') and agent_result.final_output:
              final_status = "SUCCESS"
              result_msg = f"Agent successfully completed task '{task_type}' for script {vo_script_id}. Output: {agent_result.final_output}"
         else:
              final_status = "FAILURE"
-             # Try to get some output for the error message if possible
              output_for_error = getattr(agent_result, 'final_output', '[No Output]') 
              result_msg = f"Agent task '{task_type}' failed or produced no output for script {vo_script_id}. Last Output: {output_for_error}"
 
@@ -931,9 +992,8 @@ def run_script_creation_agent(self,
             db_job.status = "FAILURE"; db_job.completed_at = datetime.utcnow(); db_job.result_message = error_msg
             try: db.commit()
             except: db.rollback()
-        # Update Celery task state as well
         self.update_state(state='FAILURE', meta={'status': error_msg, 'db_id': generation_job_db_id})
-        raise e # Re-raise to ensure Celery knows the task failed
+        raise e
     finally:
         if db: db.close()
 

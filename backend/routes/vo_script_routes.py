@@ -21,18 +21,21 @@ def create_vo_script():
     data = request.get_json()
     name = data.get('name')
     template_id = data.get('template_id')
-    character_description = data.get('character_description') # This should be a JSON object/dict
+    character_description = data.get('character_description') # Now expecting a string
 
-    if not name or not template_id or character_description is None:
+    # Validate required fields
+    if not name or not template_id or character_description is None: # Allow empty description string
         return make_api_response(error="Missing required fields: name, template_id, character_description", status_code=400)
     
+    # Validate template_id type
     try:
         template_id = int(template_id)
     except (ValueError, TypeError):
         return make_api_response(error="template_id must be an integer", status_code=400)
     
-    if not isinstance(character_description, dict):
-         return make_api_response(error="character_description must be a JSON object", status_code=400)
+    # Validate character_description type (should be string)
+    if not isinstance(character_description, str):
+         return make_api_response(error="character_description must be a string", status_code=400)
 
     db: Session = None
     try:
@@ -45,7 +48,7 @@ def create_vo_script():
         new_vo_script = models.VoScript(
             name=name,
             template_id=template_id,
-            character_description=character_description,
+            character_description=character_description, # Pass string directly
             status='drafting' # Initial status
         )
         db.add(new_vo_script)
@@ -73,12 +76,20 @@ def create_vo_script():
         db.commit()
         db.refresh(new_vo_script)
         logging.info(f"Created VO script ID {new_vo_script.id} ('{name}') using template ID {template_id}, added {len(vo_script_lines_to_add)} pending lines.")
-        return make_api_response(data=model_to_dict(new_vo_script), status_code=201)
+        # Include lines in the response? Maybe not for POST, keep it lean.
+        # Fetch again to include template name?
+        created_script = db.query(models.VoScript).options(joinedload(models.VoScript.template)).get(new_vo_script.id)
+        resp_data = model_to_dict(created_script)
+        resp_data['template_name'] = created_script.template.name if created_script.template else None
+        return make_api_response(data=resp_data, status_code=201)
         
     except IntegrityError as e:
         db.rollback()
-        # Should only be FK violation if template disappears mid-request
+        # Could be FK violation if template disappears, or duplicate name if unique constraint added
         logging.exception(f"Database integrity error creating vo_script: {e}")
+        # Check for unique constraint violation specifically? Depends on DB schema
+        # if "UNIQUE constraint failed" in str(e):
+        #     return make_api_response(error=f"VO Script with name '{name}' already exists.", status_code=409)
         return make_api_response(error="Database error creating script.", status_code=500)
     except Exception as e:
         db.rollback()
@@ -100,7 +111,7 @@ def list_vo_scripts():
         
         script_list = []
         for script in scripts:
-            s_dict = model_to_dict(script, ['id', 'name', 'template_id', 'status', 'updated_at'])
+            s_dict = model_to_dict(script, ['id', 'name', 'template_id', 'status', 'updated_at', 'character_description', 'created_at']) # Added missing fields
             # Add template name if loaded
             s_dict['template_name'] = script.template.name if script.template else None
             script_list.append(s_dict)
@@ -115,35 +126,68 @@ def list_vo_scripts():
 
 @vo_script_bp.route('/vo-scripts/<int:script_id>', methods=['GET'])
 def get_vo_script(script_id):
-    """Gets details for a specific VO script instance, including its lines."""
+    """Gets details for a specific VO script instance, including its lines and refinement prompts."""
     db: Session = None
     try:
         db = next(get_db())
-        # Eager load related data: template info, lines, and each line's template_line info
+        # Eager load related data: template info, lines, template lines, and categories
         script = db.query(models.VoScript).options(
-            joinedload(models.VoScript.template),
-            selectinload(models.VoScript.lines).selectinload(models.VoScriptLine.template_line)
+            joinedload(models.VoScript.template).selectinload(models.VoScriptTemplate.categories), # Load template and its categories
+            selectinload(models.VoScript.lines).selectinload(models.VoScriptLine.template_line) # Load lines and their template line link
         ).get(script_id)
         
         if script is None:
             return make_api_response(error=f"VO Script with ID {script_id} not found", status_code=404)
             
-        # Serialize the script and its nested lines
-        script_data = model_to_dict(script)
+        # Serialize the script, including the new refinement_prompt
+        script_data = model_to_dict(script) 
         if script.template:
             script_data['template_name'] = script.template.name
+            script_data['template_description'] = script.template.description 
+            script_data['template_prompt_hint'] = script.template.prompt_hint 
+            # Explicitly add categories with their refinement prompts
+            template_categories = {
+                c.id: {
+                    "id": c.id,
+                    "name": c.name,
+                    "instructions": c.prompt_instructions,
+                    "refinement_prompt": c.refinement_prompt
+                }
+                for c in script.template.categories
+            }
+        else:
+             template_categories = {}
             
-        # Order lines based on the template line's order_index
+        # Organize lines by category, fetching category data from the loaded template_categories dict
+        lines_by_category = {}
         ordered_lines = sorted(script.lines, key=lambda l: l.template_line.order_index if l.template_line else float('inf'))
         
-        script_data['lines'] = [
-            { 
-              **model_to_dict(line, ['id', 'generated_text', 'status', 'latest_feedback']),
-              'line_key': line.template_line.line_key if line.template_line else None, # Get key from template line
-              'order_index': line.template_line.order_index if line.template_line else None
-            } 
-            for line in ordered_lines
-        ]
+        for line in ordered_lines:
+            line_dict = { 
+              **model_to_dict(line, ['id', 'generated_text', 'status', 'latest_feedback', 'generation_history']), 
+              'template_line_id': line.template_line_id, 
+              'line_key': line.template_line.line_key if line.template_line else None,
+              'order_index': line.template_line.order_index if line.template_line else None,
+              'template_prompt_hint': line.template_line.prompt_hint if line.template_line else None,
+              'category_id': line.template_line.category_id if line.template_line else None
+            }
+            
+            category_id = line.template_line.category_id if line.template_line else None
+            category_info = template_categories.get(category_id) if category_id else None
+            
+            category_name = category_info['name'] if category_info else "Uncategorized"
+            
+            if category_name not in lines_by_category:
+                 lines_by_category[category_name] = {
+                     "id": category_id,
+                     'name': category_name,
+                     'instructions': category_info['instructions'] if category_info else None,
+                     'refinement_prompt': category_info['refinement_prompt'] if category_info else None, # Add category prompt
+                     'lines': []
+                 }
+            lines_by_category[category_name]['lines'].append(line_dict)
+
+        script_data['categories'] = list(lines_by_category.values())
             
         return make_api_response(data=script_data)
     except Exception as e:
@@ -154,7 +198,7 @@ def get_vo_script(script_id):
 
 @vo_script_bp.route('/vo-scripts/<int:script_id>', methods=['PUT'])
 def update_vo_script(script_id):
-    """Updates an existing VO script instance (name, character_description, status)."""
+    """Updates an existing VO script instance (name, char desc, status, refinement_prompt)."""
     if not request.is_json:
         return make_api_response(error="Request must be JSON", status_code=400)
     data = request.get_json()
@@ -167,6 +211,7 @@ def update_vo_script(script_id):
             return make_api_response(error=f"VO Script with ID {script_id} not found", status_code=404)
 
         updated = False
+        # --- Update Name --- #
         if 'name' in data:
             new_name = data['name']
             if not new_name:
@@ -174,17 +219,27 @@ def update_vo_script(script_id):
             if new_name != script.name:
                  script.name = new_name
                  updated = True
-                 
+        
+        # --- Update Character Description --- #         
         if 'character_description' in data:
             new_desc = data['character_description']
-            if not isinstance(new_desc, dict):
-                 return make_api_response(error="character_description must be a JSON object", status_code=400)
+            if not isinstance(new_desc, str):
+                 return make_api_response(error="character_description must be a string", status_code=400)
             if new_desc != script.character_description:
                  script.character_description = new_desc
                  updated = True
-                 
+        
+        # --- Update Refinement Prompt --- #
+        if 'refinement_prompt' in data:
+             new_prompt = data['refinement_prompt']
+             if not isinstance(new_prompt, (str, type(None))):
+                 return make_api_response(error="refinement_prompt must be a string or null", status_code=400)
+             if new_prompt != script.refinement_prompt:
+                  script.refinement_prompt = new_prompt
+                  updated = True
+        
+        # --- Update Status --- #
         if 'status' in data:
-            # Add validation for allowed statuses if needed
             new_status = data['status']
             allowed_statuses = ['drafting', 'review', 'locked'] # Example allowed statuses
             if new_status not in allowed_statuses:
@@ -193,18 +248,18 @@ def update_vo_script(script_id):
                  script.status = new_status
                  updated = True
 
+        # If nothing was actually changed, return the current script data 
         if not updated:
-            return make_api_response(data=model_to_dict(script)) # Return current data if no changes
+             # Return the basic script data (including refinement_prompt)
+             return make_api_response(data=model_to_dict(script))
 
+        # Commit changes if any were made
         db.commit()
-        db.refresh(script)
+        db.refresh(script) # Refresh to get updated timestamp etc.
         logging.info(f"Updated VO script ID {script.id}")
-        # Return the updated script, but maybe not the lines for brevity?
-        # Fetching again to include template name easily
-        updated_script = db.query(models.VoScript).options(joinedload(models.VoScript.template)).get(script_id)
-        resp_data = model_to_dict(updated_script)
-        resp_data['template_name'] = updated_script.template.name if updated_script.template else None
-        return make_api_response(data=resp_data)
+        
+        # Return the updated basic script data (client can refetch full details if needed)
+        return make_api_response(data=model_to_dict(script))
 
     except Exception as e:
         db.rollback()
@@ -243,12 +298,23 @@ def run_vo_script_agent(script_id):
     if not request.is_json:
         return make_api_response(error="Request must be JSON", status_code=400)
     data = request.get_json()
-    task_type = data.get('task_type', 'generate_draft') # e.g., 'generate_draft', 'refine_feedback'
-    feedback_data = data.get('feedback') # Optional feedback dict/list
-    allowed_task_types = ['generate_draft', 'refine_feedback']
+    task_type = data.get('task_type', 'generate_draft') 
+    feedback_data = data.get('feedback') # Optional feedback dict/list for refine_feedback
+    category_name = data.get('category_name') # Optional category name for refine_category
+    
+    # Define allowed task types
+    allowed_task_types = ['generate_draft', 'refine_feedback', 'refine_category']
     
     if task_type not in allowed_task_types:
         return make_api_response(error=f"Invalid task_type. Allowed: {allowed_task_types}", status_code=400)
+        
+    # Validate category_name if task_type requires it
+    if task_type == 'refine_category' and not category_name:
+         return make_api_response(error="Missing required field 'category_name' for task_type 'refine_category'", status_code=400)
+    
+    # Ensure category_name is string if provided
+    if category_name and not isinstance(category_name, str):
+         return make_api_response(error="'category_name' must be a string if provided", status_code=400)
         
     db: Session = None
     db_job = None
@@ -260,12 +326,17 @@ def run_vo_script_agent(script_id):
             return make_api_response(error=f"VO Script with ID {script_id} not found", status_code=404)
             
         # Create Job record
-        job_params = {"task_type": task_type, "feedback": feedback_data}
+        job_params = {"task_type": task_type} # Base params
+        if feedback_data:
+             job_params["feedback"] = feedback_data
+        if category_name:
+             job_params["category_name"] = category_name
+             
         db_job = models.GenerationJob(
             status="PENDING",
-            job_type="script_creation", # Specific job type for this agent
-            target_batch_id=str(script_id), # Using target_batch_id to store script_id
-            parameters_json=json.dumps(job_params) # Store task type and feedback
+            job_type="script_creation", 
+            target_batch_id=str(script_id), 
+            parameters_json=json.dumps(job_params) # Store task type, feedback, category
         )
         db.add(db_job)
         db.commit()
@@ -273,13 +344,13 @@ def run_vo_script_agent(script_id):
         db_job_id = db_job.id
         logging.info(f"Created Script Creation Job DB ID: {db_job_id} for VO Script ID {script_id}")
 
-        # Enqueue Celery task 
-        # Ensure the task exists in backend/tasks.py
+        # Enqueue Celery task
         task = tasks.run_script_creation_agent.delay(
             db_job_id,
             script_id,
             task_type,
-            feedback_data # Pass feedback (can be None)
+            feedback_data, # Pass feedback (can be None)
+            category_name # Pass category name (can be None)
         )
         logging.info(f"Enqueued script creation task: Celery ID {task.id}, DB Job ID {db_job_id}")
         
@@ -301,6 +372,66 @@ def run_vo_script_agent(script_id):
         elif db and db.is_active:
              db.rollback()
         return make_api_response(error="Failed to start script creation task", status_code=500)
+    finally:
+        if db and db.is_active: db.close()
+
+# --- VoScript Feedback --- #
+
+@vo_script_bp.route('/vo-scripts/<int:script_id>/feedback', methods=['POST'])
+def submit_vo_script_feedback(script_id):
+    """Submits user feedback for a specific line within a VO script."""
+    if not request.is_json:
+        return make_api_response(error="Request must be JSON", status_code=400)
+    data = request.get_json()
+    line_id = data.get('line_id')
+    feedback_text = data.get('feedback_text')
+
+    if line_id is None or feedback_text is None: # Allow empty feedback text
+        return make_api_response(error="Missing required fields: line_id, feedback_text", status_code=400)
+    
+    try:
+        line_id = int(line_id)
+    except (ValueError, TypeError):
+        return make_api_response(error="line_id must be an integer", status_code=400)
+        
+    if not isinstance(feedback_text, str):
+        return make_api_response(error="feedback_text must be a string", status_code=400)
+
+    db: Session = None
+    try:
+        db = next(get_db())
+        
+        # Find the specific VoScriptLine using both script_id and line_id
+        script_line = db.query(models.VoScriptLine).filter(
+            models.VoScriptLine.vo_script_id == script_id,
+            models.VoScriptLine.id == line_id
+        ).first()
+
+        if not script_line:
+            # Check if the script itself exists to provide a better error message
+            script_exists = db.query(models.VoScript.id).filter(models.VoScript.id == script_id).scalar() is not None
+            if not script_exists:
+                return make_api_response(error=f"VO Script with ID {script_id} not found", status_code=404)
+            else:
+                return make_api_response(error=f"Line with ID {line_id} not found within VO Script ID {script_id}", status_code=404)
+
+        # Update the feedback field
+        script_line.latest_feedback = feedback_text
+        
+        # Potentially update script status? Or just update the line?
+        # For now, just update the line.
+        
+        db.commit()
+        db.refresh(script_line) # Refresh to get updated timestamp if any
+        logging.info(f"Updated feedback for VO Script ID {script_id}, Line ID {line_id}")
+        
+        # Return the updated line info (or just success)
+        return make_api_response(data=model_to_dict(script_line, ['id', 'vo_script_id', 'latest_feedback', 'updated_at']))
+
+    except Exception as e:
+        db.rollback()
+        logging.exception(f"Error submitting feedback for VO script {script_id}, line {line_id}: {e}")
+        return make_api_response(error="Failed to submit feedback", status_code=500)
     finally:
         if db and db.is_active: db.close()
 

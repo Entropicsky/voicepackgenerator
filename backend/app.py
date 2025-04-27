@@ -37,7 +37,7 @@ VOICE_PREVIEW_TEXT = "Four score and seven years ago our fathers brought forth o
 # Within Docker, env vars are passed by docker-compose
 load_dotenv()
 
-app = Flask(__name__)
+app = Flask(__name__, instance_relative_config=True)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -50,7 +50,7 @@ app.wsgi_app = ProxyFix(
 
 # Initialize Flask-Migrate
 # Ensure the database engine is available
-migrate = Migrate(app, models.engine) # Pass the SQLAlchemy engine from models.py
+migrate = Migrate(app, models.engine)
 
 # Initialize Database
 try:

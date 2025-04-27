@@ -2,6 +2,7 @@
 import os
 import logging
 from typing import List, Dict, Any
+from datetime import datetime, timezone # Added for timestamp
 
 # Correct imports for Agents SDK
 from agents import Agent, Runner, function_tool
@@ -53,19 +54,30 @@ def get_vo_script_details(vo_script_id: int) -> Dict[str, Any]:
         if db and db.is_active: db.close()
 
 @function_tool
-def get_lines_for_processing(vo_script_id: int, statuses: List[str]) -> List[Dict[str, Any]]:
-    """Fetches VO Script Lines matching the given statuses for a specific VO Script. Includes template line info (key, hints, category info) and latest feedback."""
-    logging.info(f"[Tool] Called get_lines_for_processing for vo_script_id: {vo_script_id}, statuses: {statuses}")
+def get_lines_for_processing(vo_script_id: int, statuses: List[str], category_name: str | None = None) -> List[Dict[str, Any]]:
+    """Fetches VO Script Lines matching the given statuses for a specific VO Script. 
+    Optionally filters by a specific category_name. 
+    Includes template line info (key, hints, category info) and latest feedback.
+    """
+    logging.info(f"[Tool] Called get_lines_for_processing for vo_script_id: {vo_script_id}, statuses: {statuses}, category_name: {category_name}")
     db: Session = None
     try:
         db = next(get_db())
-        lines = db.query(models.VoScriptLine).options(
+        query = db.query(models.VoScriptLine).options(
             # Eager load the template line definition and its category
             joinedload(models.VoScriptLine.template_line).joinedload(models.VoScriptTemplateLine.category)
         ).filter(
             models.VoScriptLine.vo_script_id == vo_script_id,
             models.VoScriptLine.status.in_(statuses)
-        ).order_by(models.VoScriptLine.id).all() # Order consistently
+        )
+        
+        # --- Add category filtering --- 
+        if category_name:
+            query = query.join(models.VoScriptLine.template_line).join(models.VoScriptTemplateLine.category).filter(
+                models.VoScriptTemplateCategory.name == category_name
+            )
+        
+        lines = query.order_by(models.VoScriptLine.id).all() # Order consistently
         
         result_lines = []
         for line in lines:
@@ -82,7 +94,7 @@ def get_lines_for_processing(vo_script_id: int, statuses: List[str]) -> List[Dic
         # Order by template order index after fetching and merging data
         result_lines.sort(key=lambda l: l.get('order_index', float('inf')))
             
-        logging.info(f"[Tool] Returning {len(result_lines)} lines for processing for VO Script {vo_script_id}")
+        logging.info(f"[Tool] Returning {len(result_lines)} lines for processing for VO Script {vo_script_id} (Category: {category_name or 'All'})")
         return result_lines
     except Exception as e:
         logging.exception(f"[Tool] Error in get_lines_for_processing for {vo_script_id}: {e}")
@@ -92,7 +104,7 @@ def get_lines_for_processing(vo_script_id: int, statuses: List[str]) -> List[Dic
 
 @function_tool
 def update_script_line(vo_script_line_id: int, generated_text: str, new_status: str) -> bool:
-    """Updates the generated text and status for a specific VO Script Line."""
+    """Updates the generated text and status for a specific VO Script Line, appending to history."""
     logging.info(f"[Tool] Called update_script_line for vo_script_line_id: {vo_script_line_id}, status: {new_status}")
     db: Session = None
     try:
@@ -102,11 +114,26 @@ def update_script_line(vo_script_line_id: int, generated_text: str, new_status: 
             logging.error(f"[Tool] Line {vo_script_line_id} not found for update.")
             return False
         
+        # Update main fields
         line.generated_text = generated_text
         line.status = new_status
-        # Reset feedback only if the new status indicates processing/approval?
-        # e.g., if new_status in ['draft', 'approved']:
-        #     line.latest_feedback = None 
+        
+        # Update history
+        current_history = line.generation_history if line.generation_history else []
+        if isinstance(current_history, list): # Ensure it's a list
+             current_history.append({
+                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                 "type": "generation", # Or potentially 'refinement' based on context?
+                 "text": generated_text,
+                 "model": os.getenv("OPENAI_AGENT_MODEL", "unknown") # Log which model generated it
+             })
+             line.generation_history = current_history
+        else:
+             logging.warning(f"[Tool] generation_history for line {vo_script_line_id} was not a list. History not updated.")
+
+        # Optionally reset feedback (consider moving this logic to feedback endpoint?)
+        # line.latest_feedback = None 
+        
         db.commit()
         logging.info(f"[Tool] Successfully updated line {vo_script_line_id}")
         return True
@@ -120,8 +147,13 @@ def update_script_line(vo_script_line_id: int, generated_text: str, new_status: 
 # --- Agent Definition --- #
 
 class ScriptWriterAgent:
-    def __init__(self):
-        self.agent_model = os.getenv("OPENAI_AGENT_MODEL", "gpt-4o") # Default to gpt-4o
+    def __init__(self, model_name: str): # Accept model_name as an argument
+        # self.agent_model = os.getenv("OPENAI_AGENT_MODEL", "gpt-4o") # Don't read env var here
+        self.agent_model = model_name # Use the model name passed from the task
+        if not self.agent_model:
+             logging.warning("Agent model name was not provided, defaulting to gpt-4o")
+             self.agent_model = "gpt-4o" # Default if empty string is passed
+             
         self.instructions = ( # Combined instructions from tech spec
             "You are an expert creative writer specializing in voiceover scripts for video game characters. "
             "Your goal is to generate compelling, in-character lines based on a detailed character description and script structure templates. "
@@ -172,7 +204,10 @@ class ScriptWriterAgent:
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     print("Testing Agent Initialization...")
-    writer_agent = ScriptWriterAgent()
+    # Testing requires providing a model name now
+    test_model = os.getenv("OPENAI_AGENT_MODEL", "gpt-4o") # Read env var for testing
+    writer_agent = ScriptWriterAgent(model_name=test_model)
+    print(f"Test agent initialized with model: {writer_agent.agent_model}")
     # Example tool call (requires DB setup and existing data)
     # print("\nTesting get_vo_script_details tool...")
     # details = get_vo_script_details(vo_script_id=1) # Replace 1 with a valid ID

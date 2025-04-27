@@ -85,6 +85,7 @@ class VoScriptTemplate(Base):
     name = Column(String(255), nullable=False, unique=True, index=True)
     description = Column(Text, nullable=True)
     prompt_hint = Column(Text, nullable=True)
+    is_deleted = Column(Boolean, default=False, nullable=False, index=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
 
@@ -98,6 +99,8 @@ class VoScriptTemplateCategory(Base):
     template_id = Column(Integer, ForeignKey("vo_script_templates.id"), nullable=False, index=True)
     name = Column(String(255), nullable=False)
     prompt_instructions = Column(Text, nullable=True)
+    refinement_prompt = Column(Text, nullable=True)
+    is_deleted = Column(Boolean, default=False, nullable=False, index=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
 
@@ -115,6 +118,7 @@ class VoScriptTemplateLine(Base):
     line_key = Column(String(255), nullable=False)
     prompt_hint = Column(Text, nullable=True)
     order_index = Column(Integer, nullable=False)
+    is_deleted = Column(Boolean, default=False, nullable=False, index=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
 
@@ -130,7 +134,8 @@ class VoScript(Base):
     id = Column(Integer, primary_key=True)
     template_id = Column(Integer, ForeignKey("vo_script_templates.id"), nullable=False, index=True)
     name = Column(String(255), nullable=False, index=True) # Allow duplicate names initially?
-    character_description = Column(JSON().with_variant(postgresql.JSONB, "postgresql"), nullable=True)
+    character_description = Column(Text, nullable=True)
+    refinement_prompt = Column(Text, nullable=True)
     status = Column(String(50), nullable=False, default='drafting', index=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
