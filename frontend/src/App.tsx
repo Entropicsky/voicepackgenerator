@@ -9,6 +9,7 @@ import JobsPage from './pages/JobsPage';
 import VoiceDesignPage from './pages/VoiceDesignPage';
 import ManageScriptsPage from './pages/ManageScriptsPage';
 import ScriptEditorPage from './pages/ScriptEditorPage';
+import TemplateManagerPage from './pages/TemplateManagerPage';
 import { VoiceProvider } from './contexts/VoiceContext';
 import { RankingProvider } from './contexts/RankingContext';
 import { Notifications } from '@mantine/notifications';
@@ -20,6 +21,9 @@ import {
   QueryClient,
   QueryClientProvider,
 } from '@tanstack/react-query';
+import VoScriptListView from './pages/VoScriptListView'; // Assuming location
+import VoScriptCreateView from './pages/VoScriptCreateView'; // Assuming location
+import VoScriptDetailView from './pages/VoScriptDetailView'; // Assuming location
 
 // Create a client
 const queryClient = new QueryClient();
@@ -136,6 +140,28 @@ const AppLayout: React.FC = () => {
             paddingLeft: (location.pathname.startsWith('/batch') || location.pathname === '/batches') ? `calc(${theme.spacing.md} - 3px)` : theme.spacing.md,
           })}
         />
+        <NavLink 
+          label="Manage Templates" 
+          component={Link} 
+          to="/script-templates" 
+          active={location.pathname.startsWith('/script-templates')} 
+          onClick={handleNavClick} 
+          style={(theme) => ({
+            borderLeft: location.pathname.startsWith('/script-templates') ? `3px solid ${theme.colors.blue[6]}` : 'none',
+            paddingLeft: location.pathname.startsWith('/script-templates') ? `calc(${theme.spacing.md} - 3px)` : theme.spacing.md,
+          })}
+        />
+        <NavLink 
+          label="VO Scripts" 
+          component={Link} 
+          to="/vo-scripts" 
+          active={location.pathname.startsWith('/vo-scripts')} 
+          onClick={handleNavClick} 
+          style={(theme) => ({
+            borderLeft: location.pathname.startsWith('/vo-scripts') ? `3px solid ${theme.colors.blue[6]}` : 'none',
+            paddingLeft: location.pathname.startsWith('/vo-scripts') ? `calc(${theme.spacing.md} - 3px)` : theme.spacing.md,
+          })}
+        />
       </AppShell.Navbar>
 
       {/* Render the matched child route's element here */}
@@ -148,6 +174,7 @@ const AppLayout: React.FC = () => {
 
 // --- Main App Component --- 
 // Sets up providers, Router, and defines the route structure
+// Force rebuild comment: 2025-04-27 12:00 PM
 const App: React.FC = () => {
   return (
     <MantineProvider>
@@ -164,6 +191,14 @@ const App: React.FC = () => {
                 <Route path="scripts" element={<ManageScriptsPage />} />
                 <Route path="scripts/new" element={<ScriptEditorPage />} />
                 <Route path="scripts/:scriptId" element={<ScriptEditorPage />} />
+                <Route path="script-templates" element={<TemplateManagerPage />} />
+                
+                {/* --- VO Script Routes --- */}
+                <Route path="vo-scripts" element={<VoScriptListView />} />
+                <Route path="vo-scripts/new" element={<VoScriptCreateView />} />
+                <Route path="vo-scripts/:scriptId" element={<VoScriptDetailView />} />
+                {/* --- End VO Script Routes --- */}
+
                 <Route path="batch/*" element={<RankingPageRouteWrapper />} />
                 <Route path="batches" element={<BatchesPage />} />
                 <Route path="jobs" element={<JobsPage />} />
