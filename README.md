@@ -135,6 +135,9 @@ This project uses Docker Compose for a consistent local development environment.
         *   `R2_ENDPOINT_URL`: Your R2 S3 endpoint (e.g., `https://<account_id>.r2.cloudflarestorage.com`).
         *   `R2_ACCESS_KEY_ID`: Your R2 Access Key ID.
         *   `R2_SECRET_ACCESS_KEY`: Your R2 Secret Access Key.
+        *   `OPENAI_API_KEY`: Your OpenAI API Key (for AI Wizard / Script Agent).
+        *   `OPENAI_MODEL`: OpenAI model for text optimization (e.g., `gpt-4o`). Defaults to `gpt-4o` if not set.
+        *   `OPENAI_AGENT_MODEL`: OpenAI model for VO Script agent generation/refinement (e.g., `gpt-4o`). Defaults to `gpt-4o` if not set.
         *   Ensure `CELERY_BROKER_URL` and `CELERY_RESULT_BACKEND` are set to `redis://redis:6379/0` (or your local Redis if configured differently).
         *   Ensure `DATABASE_URL` is set for the local Postgres container (e.g., `postgresql://postgres:password@db:5432/app`).
 
@@ -188,7 +191,7 @@ Deployment to Heroku is managed via `heroku.yml` and uses Docker container build
     *   Starts Nginx, which then proxies `/api/` and `/audio/` requests to Gunicorn running on `127.0.0.1:5000`.
 *   **Worker Dyno (`worker`):** Builds using `Dockerfile.worker`. Runs the Celery worker directly.
 *   **Migrations:** The `release` phase in `heroku.yml` automatically runs `flask db upgrade` before new code is released, ensuring the Heroku Postgres database schema is up-to-date.
-*   **Environment Variables:** Required variables like `SECRET_KEY`, `ELEVENLABS_API_KEY`, `R2_BUCKET_NAME`, `R2_ENDPOINT_URL`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` must be set manually in the Heroku app's settings (Config Vars). `DATABASE_URL` and `REDIS_URL` are typically set automatically by the addons.
+*   **Environment Variables:** Required variables like `SECRET_KEY`, `ELEVENLABS_API_KEY`, `R2_BUCKET_NAME`, `R2_ENDPOINT_URL`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_AGENT_MODEL` must be set manually in the Heroku app's settings (Config Vars). `DATABASE_URL` and `REDIS_URL` are typically set automatically by the addons.
 *   **(New!)** Ensure `ffmpeg` is included in the backend Docker buildpack or build process for Heroku if not using the exact same Dockerfile base.
 
 **Deployment Steps:**
