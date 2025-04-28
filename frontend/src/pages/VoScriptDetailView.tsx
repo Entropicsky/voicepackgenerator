@@ -5,13 +5,13 @@ import {
     Title, Text, Paper, Stack, Group, Button, LoadingOverlay, Alert, 
     Accordion, Textarea, ActionIcon, Tooltip, Badge 
 } from '@mantine/core';
-import { IconPlayerPlay, IconSend, IconRefresh, IconDeviceFloppy } from '@tabler/icons-react';
+import { IconPlayerPlay, IconSend, IconRefresh, IconDeviceFloppy, IconSparkles } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 
 // Import API functions
 import { api } from '../api';
 // Import types
-import { VoScript, VoScriptLineData, JobSubmissionResponse, SubmitFeedbackPayload, RunAgentPayload, UpdateVoScriptPayload, UpdateVoScriptTemplateCategoryPayload, VoScriptCategoryData } from '../types';
+import { VoScript, VoScriptLineData, JobSubmissionResponse, SubmitFeedbackPayload, RunAgentPayload, UpdateVoScriptPayload, UpdateVoScriptTemplateCategoryPayload, VoScriptCategoryData, RefineLinePayload, RefineLineResponse, RefineCategoryPayload, RefineMultipleLinesResponse, RefineScriptPayload } from '../types';
 
 const VoScriptDetailView: React.FC = () => {
   const { scriptId } = useParams<{ scriptId: string }>();
@@ -24,6 +24,15 @@ const VoScriptDetailView: React.FC = () => {
   const [categoryRefinementPrompts, setCategoryRefinementPrompts] = useState<Record<string, string>>({}); // { categoryName: promptText }
   const [isScriptPromptDirty, setIsScriptPromptDirty] = useState(false);
   const [isCategoryPromptDirty, setIsCategoryPromptDirty] = useState<Record<string, boolean>>({}); // { categoryName: boolean }
+  // NEW: State for line refinement loading status
+  const [refiningLineId, setRefiningLineId] = useState<number | null>(null);
+  // NEW: State for category refinement loading status
+  const [refiningCategoryId, setRefiningCategoryId] = useState<number | null>(null);
+  // NEW: State for global script refinement loading status
+  const [isRefiningScript, setIsRefiningScript] = useState<boolean>(false);
+  // NEW: State for editable character description
+  const [editedCharacterDescription, setEditedCharacterDescription] = useState<string>('');
+  const [isDescriptionDirty, setIsDescriptionDirty] = useState<boolean>(false);
 
   // --- 1. Fetch VO Script Details --- //
   const { 
@@ -47,8 +56,11 @@ const VoScriptDetailView: React.FC = () => {
             initialCategoryPrompts[cat.name] = cat.refinement_prompt || '';
         });
         setCategoryRefinementPrompts(initialCategoryPrompts);
+        // Initialize editable description
+        setEditedCharacterDescription(voScript.character_description || ''); 
         setIsScriptPromptDirty(false);
         setIsCategoryPromptDirty({});
+        setIsDescriptionDirty(false); // Reset dirty flag for description
     }
   }, [voScript]);
 
@@ -80,17 +92,20 @@ const VoScriptDetailView: React.FC = () => {
       // Update the specific line in the cache for instant UI update
       queryClient.setQueryData<VoScript>(['voScriptDetail', numericScriptId], (oldData) => {
         if (!oldData) return oldData;
+        // Update line data within its category
         return {
           ...oldData,
-          categories: oldData.categories?.map(cat => 
-            cat.id === updatedLine.id ? { ...cat, ...updatedLine } : cat
-          )
+          categories: oldData.categories?.map(cat => ({
+             ...cat,
+             lines: cat.lines.map(l => l.id === updatedLine.id ? { ...l, ...updatedLine } : l)
+          }))
         };
       });
-      setFeedbackInputs(prev => ({ ...prev, [updatedLine.id]: '' })); 
+      // Don't clear feedback input upon saving feedback, user might want to refine it
+      // setFeedbackInputs(prev => ({ ...prev, [updatedLine.id]: '' })); 
       notifications.show({
         title: 'Feedback Submitted',
-        message: `Feedback submitted successfully.`,
+        message: `Feedback saved for line ID ${updatedLine.id}. You can now refine based on this feedback.`, // Updated message
         color: 'green',
       });
     },
@@ -108,14 +123,25 @@ const VoScriptDetailView: React.FC = () => {
     mutationFn: (payload) => api.updateVoScript(numericScriptId!, payload),
     onSuccess: (updatedScript) => {
         queryClient.setQueryData<VoScript>(['voScriptDetail', numericScriptId], (oldData) => 
-           oldData ? { ...oldData, refinement_prompt: updatedScript.refinement_prompt, updated_at: updatedScript.updated_at } : oldData
+           oldData ? { 
+               ...oldData, 
+               refinement_prompt: updatedScript.refinement_prompt !== undefined ? updatedScript.refinement_prompt : oldData.refinement_prompt,
+               character_description: updatedScript.character_description !== undefined ? updatedScript.character_description : oldData.character_description,
+               updated_at: updatedScript.updated_at
+            } : oldData
         );
-        setScriptRefinementPrompt(updatedScript.refinement_prompt || ''); // Update local state
-        setIsScriptPromptDirty(false); // Reset dirty flag
-        notifications.show({ title: 'Script Prompt Saved', message: 'Overall script refinement prompt updated.', color: 'green' });
+        if (updatedScript.refinement_prompt !== undefined) {
+            setScriptRefinementPrompt(updatedScript.refinement_prompt || '');
+            setIsScriptPromptDirty(false); 
+        }
+        if (updatedScript.character_description !== undefined) {
+             setEditedCharacterDescription(updatedScript.character_description || '');
+             setIsDescriptionDirty(false);
+        }
+        notifications.show({ title: 'Script Updated', message: 'Script details saved successfully.', color: 'green' });
     },
     onError: (err) => {
-        notifications.show({ title: 'Error Saving Script Prompt', message: err.message, color: 'red' });
+        notifications.show({ title: 'Error Saving Script Details', message: err.message, color: 'red' });
     }
   });
 
@@ -147,6 +173,127 @@ const VoScriptDetailView: React.FC = () => {
     }
   });
 
+  // --- NEW: Line Refinement Mutation --- //
+  const refineLineMutation = useMutation<RefineLineResponse, Error, { lineId: number; payload: RefineLinePayload }>({
+      mutationFn: ({ lineId, payload }) => api.refineVoScriptLine(numericScriptId!, lineId, payload),
+      onMutate: (variables) => {
+        // Set loading state for the specific line being refined
+        setRefiningLineId(variables.lineId);
+      },
+      onSuccess: (updatedLine) => {
+        // Update the specific line in the React Query cache
+        queryClient.setQueryData<VoScript>(['voScriptDetail', numericScriptId], (oldData) => {
+            if (!oldData) return oldData;
+            return {
+              ...oldData,
+              categories: oldData.categories?.map(cat => ({
+                 ...cat,
+                 lines: cat.lines.map(l => l.id === updatedLine.id ? { ...l, ...updatedLine } : l)
+              }))
+            };
+        });
+        notifications.show({
+          title: 'Line Refined',
+          message: `Line ${updatedLine.id} refined successfully. Status set to '${updatedLine.status}'.`,
+          color: 'blue',
+        });
+      },
+      onError: (err, variables) => {
+        notifications.show({
+          title: 'Error Refining Line',
+          message: err.message || `Could not refine line ${variables.lineId}.`,
+          color: 'red',
+        });
+      },
+      onSettled: () => {
+         // Clear loading state regardless of success or error
+        setRefiningLineId(null);
+      },
+  });
+  // --- END: Line Refinement Mutation --- //
+
+  // --- NEW: Category Refinement Mutation --- //
+  const refineCategoryMutation = useMutation<RefineMultipleLinesResponse, Error, { categoryId: number | null; payload: RefineCategoryPayload }>({
+    mutationFn: ({ payload }) => api.refineVoScriptCategory(numericScriptId!, payload),
+    onMutate: (variables) => {
+        // Set loading state for the specific category being refined
+        setRefiningCategoryId(variables.categoryId); // Use category ID for state
+    },
+    onSuccess: (response, variables) => {
+        // Update all returned lines in the React Query cache
+        queryClient.setQueryData<VoScript>(['voScriptDetail', numericScriptId], (oldData) => {
+            if (!oldData || !response.data) return oldData;
+            
+            // Create a map of updated lines for quick lookup
+            const updatedLinesMap = new Map(response.data.map(line => [line.id, line]));
+            
+            return {
+              ...oldData,
+              categories: oldData.categories?.map(cat => ({
+                 ...cat,
+                 // Update lines within this category if they exist in the response map
+                 lines: cat.lines.map(l => updatedLinesMap.has(l.id) ? { ...l, ...updatedLinesMap.get(l.id)! } : l)
+              }))
+            };
+        });
+        notifications.show({
+          title: 'Category Refined',
+          message: response.message || `Category '${variables.payload.category_name}' refined successfully. (${response.data.length} lines updated).`,
+          color: 'blue',
+        });
+    },
+    onError: (err, variables) => {
+        notifications.show({
+          title: 'Error Refining Category',
+          message: err.message || `Could not refine category '${variables.payload.category_name}'.`,
+          color: 'red',
+        });
+    },
+    onSettled: () => {
+        // Clear loading state
+        setRefiningCategoryId(null);
+    },
+  });
+  // --- END: Category Refinement Mutation --- //
+
+  // --- NEW: Script Refinement Mutation --- //
+  const refineScriptMutation = useMutation<RefineMultipleLinesResponse, Error, { payload: RefineScriptPayload }>({
+      mutationFn: ({ payload }) => api.refineVoScript(numericScriptId!, payload),
+      onMutate: () => {
+          setIsRefiningScript(true); // Set global loading state
+      },
+      onSuccess: (response) => {
+          // Update all returned lines in the React Query cache
+          queryClient.setQueryData<VoScript>(['voScriptDetail', numericScriptId], (oldData) => {
+              if (!oldData || !response.data) return oldData;
+              const updatedLinesMap = new Map(response.data.map(line => [line.id, line]));
+              return {
+                ...oldData,
+                categories: oldData.categories?.map(cat => ({
+                   ...cat,
+                   lines: cat.lines.map(l => updatedLinesMap.has(l.id) ? { ...l, ...updatedLinesMap.get(l.id)! } : l)
+                }))
+              };
+          });
+          notifications.show({
+            title: 'Script Refined',
+            message: response.message || `Script refined successfully. (${response.data.length} lines updated).`,
+            color: 'blue',
+          });
+      },
+      onError: (err) => {
+          notifications.show({
+            title: 'Error Refining Script',
+            message: err.message || `Could not refine the script.`,
+            color: 'red',
+          });
+      },
+      onSettled: () => {
+          setIsRefiningScript(false); // Clear global loading state
+      },
+    });
+  // --- END: Script Refinement Mutation --- //
+
   // --- Helper Functions --- //
   const handleFeedbackChange = (lineId: number, value: string) => {
     setFeedbackInputs(prev => ({ ...prev, [lineId]: value }));
@@ -155,29 +302,14 @@ const VoScriptDetailView: React.FC = () => {
   const handleFeedbackSubmit = (lineId: number) => {
     const feedbackText = feedbackInputs[lineId];
     if (feedbackText === undefined || feedbackText.trim() === '') {
-        notifications.show({ message: 'Feedback cannot be empty.', color: 'orange'});
+        notifications.show({ message: 'Feedback cannot be empty (or just whitespace). If you want to clear feedback, submit empty text after saving.', color: 'orange'});
         return;
     }
     submitFeedbackMutation.mutate({ line_id: lineId, feedback_text: feedbackText });
   };
   
-  const handleRunAgent = (taskType: 'generate_draft' | 'refine_feedback' | 'refine_category', categoryName?: string) => {
+  const handleRunAgent = (taskType: 'generate_draft') => { 
       let payload: RunAgentPayload = { task_type: taskType };
-      
-      if (taskType === 'refine_category') {
-          if (!categoryName) {
-              console.error("Category name is required for refine_category task type.");
-              notifications.show({ title: 'Error', message: 'Category name missing for refinement.', color: 'red' });
-              return;
-          }
-          payload.category_name = categoryName;
-          // TODO: Gather feedback specific to this category if needed?
-      } else if (taskType === 'refine_feedback') {
-           // TODO: Gather all feedback across the script?
-           // For now, sending null feedback for this task type.
-           payload.feedback = null; 
-      }
-      
       console.log("Running agent with payload:", payload);
       runAgentMutation.mutate(payload);
   }
@@ -209,6 +341,69 @@ const VoScriptDetailView: React.FC = () => {
     });
   };
 
+  // Reworked: Now triggers line refinement
+  const handleRefineLine = (lineId: number) => {
+      const promptText = feedbackInputs[lineId]; // Use feedback input as the prompt
+      if (promptText === undefined || promptText.trim() === '') {
+          notifications.show({ message: 'Refinement prompt cannot be empty. Please enter instructions in the text area first.', color: 'orange'});
+          return;
+      }
+      refineLineMutation.mutate({ lineId, payload: { line_prompt: promptText } });
+  };
+
+  // Reworked: Triggers category refinement API call
+  const handleRefineCategory = (categoryId: number | null, categoryName: string) => {
+      const promptText = categoryRefinementPrompts[categoryName];
+      if (!promptText?.trim()) {
+          notifications.show({ message: `Category refinement prompt for '${categoryName}' cannot be empty.`, color: 'orange' });
+          return;
+      }
+      if (numericScriptId === undefined) return; // Should not happen
+      
+      // TODO: Optionally gather visible line prompts within this category?
+      // const linePromptsInCategory = ... gather from feedbackInputs ...
+      
+      refineCategoryMutation.mutate({ 
+          categoryId,
+          payload: { category_name: categoryName, category_prompt: promptText }
+      });
+  };
+
+  // NEW: Triggers script refinement API call
+  const handleRefineScript = () => {
+      const promptText = scriptRefinementPrompt;
+      if (!promptText?.trim()) {
+          notifications.show({ message: `Overall script refinement prompt cannot be empty.`, color: 'orange' });
+          return;
+      }
+      if (numericScriptId === undefined) return;
+      
+      // TODO: Optionally gather visible category/line prompts?
+      
+      refineScriptMutation.mutate({ 
+          payload: { global_prompt: promptText }
+      });
+  };
+
+  // NEW: Handler for description change
+  const handleDescriptionChange = (value: string) => {
+      setEditedCharacterDescription(value);
+      // Check if different from original (fetched) description
+      setIsDescriptionDirty(value !== (voScript?.character_description || ''));
+  };
+
+  // NEW: Handler for saving description
+  const handleSaveDescription = () => {
+      if (!isDescriptionDirty) return; // Don't save if no changes
+      // Use the existing updateVoScript mutation, passing only the description
+      updateScriptPromptMutation.mutate({ character_description: editedCharacterDescription });
+      // Note: updateScriptPromptMutation onSuccess needs to handle description update in cache
+      // OR create a dedicated mutation for description update.
+      // For now, reusing existing mutation assuming it handles partial updates correctly
+      // and its onSuccess updates the cache appropriately. We may need to adjust this.
+      setIsDescriptionDirty(false); // Optimistically reset dirty flag
+  };
+
   // --- 4. Render View --- //
   if (!numericScriptId) {
     return <Alert color="red">Invalid Script ID provided in URL.</Alert>;
@@ -236,7 +431,7 @@ const VoScriptDetailView: React.FC = () => {
 
   return (
     <Stack>
-      <LoadingOverlay visible={runAgentMutation.isPending} overlayProps={{ radius: "sm", blur: 2 }} />
+      <LoadingOverlay visible={isRefiningScript} overlayProps={{ radius: "sm", blur: 2 }} />
       {/* Header: Title, Status, Actions */}
       <Group justify="space-between">
         <Stack gap="xs">
@@ -252,20 +447,20 @@ const VoScriptDetailView: React.FC = () => {
             <Button 
                 leftSection={<IconPlayerPlay size={14} />} 
                 onClick={() => handleRunAgent('generate_draft')} 
-                disabled={runAgentMutation.isPending || !hasPending}
+                disabled={runAgentMutation.isPending || isRefiningScript}
                 loading={runAgentMutation.isPending && runAgentMutation.variables?.task_type === 'generate_draft'}
                 variant="gradient" gradient={{ from: 'blue', to: 'cyan' }}
             >
                 Generate Draft
             </Button>
-             <Button 
-                leftSection={<IconRefresh size={14} />} 
-                onClick={() => handleRunAgent('refine_feedback')} 
-                disabled={runAgentMutation.isPending}
-                loading={runAgentMutation.isPending && runAgentMutation.variables?.task_type === 'refine_feedback'}
+            <Button 
+                leftSection={<IconSparkles size={14} />}
+                onClick={handleRefineScript}
+                disabled={isRefiningScript || runAgentMutation.isPending}
+                loading={isRefiningScript}
                 variant="gradient" gradient={{ from: 'teal', to: 'lime' }}
             >
-                Refine All (Feedback)
+                Refine Script
             </Button>
         </Group>
       </Group>
@@ -279,29 +474,49 @@ const VoScriptDetailView: React.FC = () => {
                 variant="light" 
                 leftSection={<IconDeviceFloppy size={14}/>}
                 onClick={handleSaveScriptPrompt}
-                disabled={!isScriptPromptDirty || updateScriptPromptMutation.isPending}
+                disabled={!isScriptPromptDirty || updateScriptPromptMutation.isPending || isRefiningScript}
                 loading={updateScriptPromptMutation.isPending}
             >
                 Save Script Prompt
             </Button>
           </Group>
           <Textarea
-            placeholder="Enter overall instructions for refining the entire script (e.g., 'Make all lines more aggressive')"
+            placeholder="Enter overall instructions... Click 'Refine Script' above to apply."
             value={scriptRefinementPrompt}
             onChange={(e) => handleScriptPromptChange(e.currentTarget.value)}
             minRows={3}
             autosize
-            disabled={updateScriptPromptMutation.isPending}
+            disabled={updateScriptPromptMutation.isPending || isRefiningScript}
           />
       </Paper>
       {/* --- End Script Refinement Prompt --- */}
 
-      {/* Display Character Description */}
+      {/* Display Character Description - MODIFIED */}
       <Paper withBorder p="md" mt="md">
-          <Title order={4} mb="xs">Character Description</Title>
-          <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '200px', overflowY: 'auto', background: '#f9f9f9', padding: '10px', borderRadius: '4px', fontFamily: 'monospace' }}>
+          <Group justify="space-between" mb="xs">
+              <Title order={4}>Character Description</Title>
+              <Button
+                  size="xs"
+                  variant="light"
+                  leftSection={<IconDeviceFloppy size={14}/>}
+                  onClick={handleSaveDescription}
+                  disabled={!isDescriptionDirty || updateScriptPromptMutation.isPending || isRefiningScript}
+                  loading={updateScriptPromptMutation.isPending}
+              >
+                  Save Description
+              </Button>
+          </Group>
+          <Textarea
+              placeholder="Enter detailed character description..."
+              value={editedCharacterDescription}
+              onChange={(event) => handleDescriptionChange(event.currentTarget.value)}
+              minRows={5} // Adjust rows as needed
+              autosize
+              disabled={updateScriptPromptMutation.isPending || isRefiningScript}
+          />
+          {/* <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '200px', overflowY: 'auto', background: '#f9f9f9', padding: '10px', borderRadius: '4px', fontFamily: 'monospace' }}>
               {voScript.character_description} 
-          </pre>
+          </pre> */}
       </Paper>
 
       {/* Lines Accordion (Grouped by Category) */}
@@ -320,11 +535,11 @@ const VoScriptDetailView: React.FC = () => {
                         color="grape"
                         leftSection={<IconRefresh size={12} />} 
                         onClick={(e) => { 
-                            e.stopPropagation(); // Prevent accordion toggle
-                            handleRunAgent('refine_category', category.name);
+                            e.stopPropagation(); 
+                            handleRefineCategory(category.id, category.name); // Call new handler
                         }}
-                        disabled={runAgentMutation.isPending} // Disable if any agent task is running
-                        loading={refiningCategory && refiningWhichCategory === category.name}
+                        disabled={refineCategoryMutation.isPending && refiningCategoryId === category.id}
+                        loading={refineCategoryMutation.isPending && refiningCategoryId === category.id}
                     >
                         Refine Category
                     </Button>
@@ -340,19 +555,19 @@ const VoScriptDetailView: React.FC = () => {
                             variant="outline" 
                             leftSection={<IconDeviceFloppy size={12}/>}
                             onClick={() => category.id !== null && handleSaveCategoryPrompt(category.name, category.id)}
-                            disabled={!isCategoryPromptDirty[category.name] || updateCategoryPromptMutation.isPending || category.id === null}
+                            disabled={!isCategoryPromptDirty[category.name] || updateCategoryPromptMutation.isPending || category.id === null || (refineCategoryMutation.isPending && refiningCategoryId === category.id)}
                             loading={updateCategoryPromptMutation.isPending && updateCategoryPromptMutation.variables?.categoryId === category.id}
                         >
                             Save Category Prompt
                         </Button>
                     </Group>
                     <Textarea
-                        placeholder={`Enter instructions specific to refining the '${category.name}' category...`}
+                        placeholder={`Enter instructions specific to refining the '${category.name}' category... Click \"Refine Category\" above to apply.`}
                         value={categoryRefinementPrompts[category.name] || ''}
                         onChange={(e) => handleCategoryPromptChange(category.name, e.currentTarget.value)}
                         minRows={2}
                         autosize
-                        disabled={updateCategoryPromptMutation.isPending}
+                        disabled={updateCategoryPromptMutation.isPending || (refineCategoryMutation.isPending && refiningCategoryId === category.id)}
                         />
                 </Paper>
                 {/* Stack for lines */}
@@ -385,24 +600,43 @@ const VoScriptDetailView: React.FC = () => {
                             {/* Feedback Input Area */}
                             <Group align="flex-end">
                                 <Textarea
-                                    placeholder="Provide feedback for this line..."
+                                    label="Feedback / Refinement Prompt"
+                                    placeholder="Provide feedback or enter a prompt to refine this line..."
                                     value={feedbackInputs[line.id] || ''}
                                     onChange={(e) => handleFeedbackChange(line.id, e.currentTarget.value)}
                                     minRows={1}
                                     autosize
                                     style={{ flexGrow: 1 }}
-                                    disabled={submitFeedbackMutation.isPending && submitFeedbackMutation.variables?.line_id === line.id}
+                                    disabled={submitFeedbackMutation.isPending && submitFeedbackMutation.variables?.line_id === line.id 
+                                              || refineLineMutation.isPending && refiningLineId === line.id
+                                             }
                                 />
-                                <Tooltip label="Submit Feedback">
+                                <Tooltip label="Save Feedback">
                                     <ActionIcon 
                                         onClick={() => handleFeedbackSubmit(line.id)} 
                                         variant="filled" 
-                                        color="blue"
+                                        color="yellow"
                                         size="lg"
                                         loading={submitFeedbackMutation.isPending && submitFeedbackMutation.variables?.line_id === line.id}
-                                        disabled={!feedbackInputs[line.id]?.trim()}
+                                        disabled={!feedbackInputs[line.id]?.trim() 
+                                                  || refineLineMutation.isPending && refiningLineId === line.id
+                                                 }
                                     >
-                                        <IconSend size={18} />
+                                        <IconDeviceFloppy size={18} />
+                                    </ActionIcon>
+                                </Tooltip>
+                                <Tooltip label="Refine Line (uses text above as prompt)">
+                                     <ActionIcon 
+                                        onClick={() => handleRefineLine(line.id)} 
+                                        variant="filled" 
+                                        color="blue"
+                                        size="lg"
+                                        loading={refineLineMutation.isPending && refiningLineId === line.id}
+                                        disabled={!feedbackInputs[line.id]?.trim() 
+                                                  || submitFeedbackMutation.isPending && submitFeedbackMutation.variables?.line_id === line.id
+                                                 }
+                                    >
+                                        <IconSparkles size={18} />
                                     </ActionIcon>
                                 </Tooltip>
                             </Group>

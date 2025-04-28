@@ -366,17 +366,17 @@ export interface SubmitFeedbackPayload {
     feedback_text: string;
 }
 
-// Payload for running the agent
+// Payload for running the agent task
 export interface RunAgentPayload {
     task_type: 'generate_draft' | 'refine_feedback' | 'refine_category';
-    feedback?: any; // Optional feedback data for refinement task
-    category_name?: string; // Optional category name for refine_category task
+    feedback?: any; // Type depends on task
+    category_name?: string;
 }
 
-// Response from submitting an agent job (matches GenerationStartResponse)
+// Response from agent task submission
 export interface JobSubmissionResponse {
+  job_id: number;
   task_id: string | null; // Celery Task ID (can be null if submit fails)
-  job_id: number;        // Database Job ID
 }
 
 // Added: Type for the items returned by GET /api/vo-scripts list endpoint
@@ -414,3 +414,38 @@ export interface UpdateVoScriptTemplateCategoryPayload {
     prompt_instructions?: string | null;
     refinement_prompt?: string | null;
 }
+
+// --- NEW Types for Refinement API Calls --- //
+
+// Payload for refining a single line
+export interface RefineLinePayload {
+  line_prompt: string;
+  model?: string; // Optional model override
+}
+
+// Response for single line refinement (returns the updated line)
+export interface RefineLineResponse extends VoScriptLineData {}
+
+// Payload for refining a category
+export interface RefineCategoryPayload {
+  category_name: string;
+  category_prompt: string;
+  // line_prompts?: Record<number, string>; // Optional: { lineId: promptText }
+  model?: string; // Optional model override
+}
+
+// Response for category/script refinement (returns list of updated lines)
+export interface RefineMultipleLinesResponse {
+  message: string; // e.g., "Category refinement completed successfully."
+  data: VoScriptLineData[]; // List of lines that were updated
+}
+
+// Payload for refining the whole script
+export interface RefineScriptPayload {
+  global_prompt: string;
+  // category_prompts?: Record<string, string>; // Optional: { categoryName: promptText }
+  // line_prompts?: Record<number, string>; // Optional: { lineId: promptText }
+  model?: string; // Optional model override
+}
+
+// --- END NEW Types --- //

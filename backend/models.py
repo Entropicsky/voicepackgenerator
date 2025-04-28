@@ -1,5 +1,6 @@
 # backend/models.py
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, JSON, ForeignKey, func, Boolean, Index
+from sqlalchemy import sql
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 from sqlalchemy.dialects import postgresql # Import postgresql dialect
 from datetime import datetime
@@ -152,7 +153,8 @@ class VoScriptLine(Base):
     status = Column(String(50), nullable=False, default='pending', index=True)
     generation_history = Column(JSON().with_variant(postgresql.JSONB, "postgresql"), nullable=True) # Optional history
     latest_feedback = Column(Text, nullable=True)
-    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    is_locked = Column(Boolean, nullable=False, default=False, server_default=sql.false())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
 
     vo_script = relationship("VoScript", back_populates="lines")

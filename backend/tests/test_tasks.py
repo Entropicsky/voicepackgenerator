@@ -3,10 +3,11 @@ import pytest
 import json
 from unittest import mock
 from celery.exceptions import Ignore, Retry
-# Use relative imports
-from .. import tasks
-from .. import utils_elevenlabs # To mock its functions
-from .. import utils_fs       # To mock its functions
+# Use relative imports or imports from 'backend'
+from backend import tasks
+from backend import utils_elevenlabs # To mock its functions
+from backend import utils_r2       # Use backend.utils_r2
+# from backend import utils_fs       # Use backend.utils_fs -> REMOVED as utils_fs was removed
 
 # --- Test Data ---
 valid_config_dict = {
@@ -41,16 +42,15 @@ def mock_task_base(mocker):
 
 # --- Tests for run_generation --- #
 
-@mock.patch('backend.utils_fs.save_metadata')
-@mock.patch('backend.utils_fs.find_batches')
-@mock.patch('backend.utils_elevenlabs.generate_tts_audio')
+@mock.patch('backend.utils_r2.upload_blob')
+@mock.patch('backend.utils_elevenlabs.generate_tts_audio_bytes')
 @mock.patch('backend.utils_elevenlabs.get_available_voices')
 @mock.patch('pathlib.Path.mkdir')
 def test_run_generation_success(
-    mock_mkdir, mock_get_voices, mock_generate_tts, mock_find_batches, mock_save_meta,
-    mock_task_base # Use the mocked base task methods
+    mock_mkdir, mock_get_voices, mock_generate_tts, mock_upload_blob,
+    mock_task_base
 ):
-    """Test successful run of the generation task."""
+    """Test successful run of the generation task (using R2)."""
     mock_update_state, _ = mock_task_base
     mock_get_voices.return_value = [
         {'voice_id': 'voice1', 'name': 'Voice One'},
@@ -89,12 +89,18 @@ def test_run_generation_success(
     assert 'TestSkin/Voice One-voice1' in first_call_args['output_path']
     assert 'Intro_1_take_1.mp3' in first_call_args['output_path']
 
-    # Check metadata saving (once per voice)
-    assert mock_save_meta.call_count == 2
-    first_save_call_args = mock_save_meta.call_args_list[0][0] # Get args of first call
-    saved_metadata = first_save_call_args[1] # The metadata dict
+    # Check R2 upload calls instead of fs save
+    assert mock_upload_blob.call_count == 10 # 8 takes + 2 metadata files
+    # Check metadata upload call
+    meta_upload_call = [c for c in mock_upload_blob.call_args_list if 'metadata.json' in c[1]['blob_name']]
+    assert len(meta_upload_call) == 2
+    # Example check on one metadata upload
+    saved_metadata = json.loads(meta_upload_call[0][1]['data'].decode('utf-8'))
     assert saved_metadata['voice_name'] == 'Voice One-voice1'
     assert len(saved_metadata['takes']) == 4
+    # Check take upload call
+    take_upload_call = [c for c in mock_upload_blob.call_args_list if 'takes/' in c[1]['blob_name']]
+    assert len(take_upload_call) == 8
 
 def test_run_generation_invalid_json_config(mock_task_base):
     mock_update_state, _ = mock_task_base
@@ -112,16 +118,19 @@ def test_run_generation_missing_keys(mock_task_base):
     failure_meta = mock_update_state.call_args.kwargs['meta']
     assert "Missing required configuration keys: ['voice_ids']" in failure_meta['status']
 
-@mock.patch('backend.utils_elevenlabs.generate_tts_audio')
+@mock.patch('backend.utils_elevenlabs.generate_tts_audio_bytes')
 def test_run_generation_elevenlabs_error_continues(mock_generate_tts, mock_task_base, mock_env_vars):
     """Test that an error generating one take doesn't stop the whole batch (by default)."""
     mock_update_state, _ = mock_task_base
-    mock_generate_tts.side_effect = [utils_elevenlabs.ElevenLabsError("Test API Error")] * 2 + [None] * 6
+    # Simulate failure for first take of each voice
+    mock_generate_tts.side_effect = [
+        utils_elevenlabs.ElevenLabsError("Fail 1"), b"audio", b"audio", b"audio", # Voice 1
+        utils_elevenlabs.ElevenLabsError("Fail 2"), b"audio", b"audio", b"audio"  # Voice 2
+    ]
 
-    # Need to adjust patch paths here too if they were absolute
     with mock.patch('backend.utils_elevenlabs.get_available_voices') as mock_get_voices, \
-         mock.patch('backend.utils_fs.save_metadata') as mock_save_meta, \
-         mock.patch('pathlib.Path.mkdir'): # Mock mkdir too
+         mock.patch('backend.utils_r2.upload_blob') as mock_upload_blob, \
+         mock.patch('pathlib.Path.mkdir'):
 
         mock_get_voices.return_value = [
             {'voice_id': 'voice1', 'name': 'Voice One'},
@@ -130,11 +139,29 @@ def test_run_generation_elevenlabs_error_continues(mock_generate_tts, mock_task_
 
         result = tasks.run_generation(json.dumps(valid_config_dict))
 
-    # Should still succeed overall, but generate one less take per voice
-    assert result['status'] == 'SUCCESS'
-    # Check counts carefully based on side_effect
-    assert result['generated_batches'][0]['take_count'] == 3 # voice1: 4 total - 1 failed = 3
-    assert result['generated_batches'][1]['take_count'] == 3 # voice2: 4 total - 1 failed = 3
-    assert mock_generate_tts.call_count == 8 # Still attempted all
-    assert mock_save_meta.call_count == 2 # Metadata still saved
-    mock_update_state.assert_called_with(state='SUCCESS', meta=result) 
+    # Should complete with errors
+    assert result['status'] == 'COMPLETED_WITH_ERRORS'
+    assert result['generated_batches'][0]['take_count'] == 3 # 4 attempted - 1 failed
+    assert result['generated_batches'][1]['take_count'] == 3 # 4 attempted - 1 failed
+    assert mock_generate_tts.call_count == 8
+    assert mock_upload_blob.call_count == 8 # 6 takes + 2 metadata
+    mock_update_state.assert_called_with(state='COMPLETED_WITH_ERRORS', meta=result)
+
+# --- Tests for regenerate_line_takes --- #
+@mock.patch('backend.utils_r2.delete_blob')
+@mock.patch('backend.utils_r2.list_blobs_in_prefix')
+@mock.patch('backend.utils_r2.upload_blob')
+@mock.patch('backend.utils_r2.download_blob_to_memory')
+@mock.patch('backend.utils_elevenlabs.generate_tts_audio_bytes')
+@mock.patch('backend.models.get_db')
+def test_regenerate_line_takes_success_replace(
+    mock_get_db, mock_generate_tts, mock_download_meta, mock_upload_blob, mock_list_blobs, mock_delete_blob,
+    mock_task_base
+):
+    # ... setup mocks for DB, R2 download/upload/list/delete, elevenlabs ...
+    pass # TODO: Implement test logic
+
+# ... other tests for regenerate_line_takes ...
+
+# --- Tests for crop_audio_take --- #
+# ... tests for crop_audio_take ... 

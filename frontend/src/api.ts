@@ -36,7 +36,12 @@ import {
   // Add new types
   UpdateVoScriptPayload, 
   UpdateVoScriptTemplateCategoryPayload,
-  VoScriptCategoryData // Re-confirming import
+  VoScriptCategoryData, // Re-confirming import
+  RefineLinePayload, // NEW
+  RefineLineResponse, // NEW
+  RefineCategoryPayload, // NEW
+  RefineMultipleLinesResponse, // NEW
+  RefineScriptPayload, // NEW
 } from './types';
 
 // Define options for filtering/sorting voices
@@ -509,15 +514,15 @@ export const api = {
       return handleApiResponse<any>(response);
   },
   
-  getVoScriptTemplateCategory: async (categoryId: number): Promise<VoScriptTemplateCategoryData> => {
+  getVoScriptTemplateCategory: async (categoryId: number): Promise<VoScriptCategoryData> => {
     const url = `${API_BASE}/api/vo-script-template-categories/${categoryId}`;
     console.log(`[API] Getting VO Script Template Category ${categoryId}...`);
     const response = await fetch(url);
     // Returns full category object including refinement_prompt
-    return handleApiResponse<VoScriptTemplateCategoryData>(response); 
+    return handleApiResponse<VoScriptCategoryData>(response); 
   },
 
-  updateVoScriptTemplateCategory: async (categoryId: number, payload: UpdateVoScriptTemplateCategoryPayload): Promise<VoScriptTemplateCategoryData> => {
+  updateVoScriptTemplateCategory: async (categoryId: number, payload: UpdateVoScriptTemplateCategoryPayload): Promise<VoScriptCategoryData> => {
     const url = `${API_BASE}/api/vo-script-template-categories/${categoryId}`;
     console.log(`[API] Updating VO Script Template Category ${categoryId}:`, payload);
     const response = await fetch(url, {
@@ -528,7 +533,7 @@ export const api = {
         body: JSON.stringify(payload),
     });
     // Returns the updated category object
-    return handleApiResponse<VoScriptTemplateCategoryData>(response);
+    return handleApiResponse<VoScriptCategoryData>(response);
   },
 
   deleteVoScriptTemplateCategory: async (categoryId: number): Promise<any> => {
@@ -681,6 +686,122 @@ export const api = {
     });
     // Returns { job_id, task_id }
     return handleApiResponse<JobSubmissionResponse>(response);
+  },
+
+  // --- NEW VO Script Refinement Functions --- //
+
+  refineVoScriptLine: async (scriptId: number, lineId: number, payload: RefineLinePayload): Promise<RefineLineResponse> => {
+    const url = `${API_BASE}/api/vo-scripts/${scriptId}/lines/${lineId}/refine`;
+    console.log(`[API] Refining line ${lineId} for script ${scriptId}:`, payload);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    // Expects { data: VoScriptLineData }
+    return handleApiResponse<RefineLineResponse>(response);
+  },
+
+  refineVoScriptCategory: async (scriptId: number, payload: RefineCategoryPayload): Promise<RefineMultipleLinesResponse> => {
+    const url = `${API_BASE}/api/vo-scripts/${scriptId}/categories/refine`;
+    console.log(`[API] Refining category ${payload.category_name} for script ${scriptId}:`, payload);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    // Expects { message: string, data: VoScriptLineData[] }
+    // handleApiResponse extracts the 'data' field, so we might need adjustment
+    // Let's modify handleApiResponse or handle the structure here.
+    // For now, assume handleApiResponse gives us the inner { message, data } object if wrapped
+    // OR use a different handler if response structure is not { data: { message: ..., data: [...] } }
+    
+    // Assuming backend returns { message: "...", data: [...] } directly (not wrapped in another data key)
+    if (!response.ok) {
+      let errorMsg = `HTTP error! status: ${response.status}`;
+      try {
+        const errorBody = await response.json();
+        errorMsg = errorBody.error || errorMsg;
+      } catch (e) { /* Ignore */ }
+      throw new Error(errorMsg);
+    }
+    // Directly return the JSON response as it matches the expected type
+    return response.json(); 
+  },
+
+  refineVoScript: async (scriptId: number, payload: RefineScriptPayload): Promise<RefineMultipleLinesResponse> => {
+    const url = `${API_BASE}/api/vo-scripts/${scriptId}/refine`;
+    console.log(`[API] Refining script ${scriptId}:`, payload);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    // Assuming backend returns { message: "...", data: [...] } directly
+    if (!response.ok) {
+      let errorMsg = `HTTP error! status: ${response.status}`;
+      try {
+        const errorBody = await response.json();
+        errorMsg = errorBody.error || errorMsg;
+      } catch (e) { /* Ignore */ }
+      throw new Error(errorMsg);
+    }
+    return response.json(); 
+  },
+  // --- END NEW Refinement Functions --- //
+
+  // --- NEW Line Action Functions --- //
+  toggleLockVoScriptLine: async (scriptId: number, lineId: number): Promise<{ id: number; is_locked: boolean; updated_at: string | null; }> => {
+      const url = `${API_BASE}/api/vo-scripts/${scriptId}/lines/${lineId}/toggle-lock`;
+      console.log(`[API] Toggling lock for line ${lineId}, script ${scriptId}...`);
+      const response = await fetch(url, {
+          method: 'PATCH',
+          headers: {
+              'Content-Type': 'application/json',
+          },
+          // No body needed for toggle
+      });
+      // Expects { data: { id, is_locked, updated_at } }
+      // Use handleApiResponse as it expects a 'data' wrapper
+      return handleApiResponse<{ id: number; is_locked: boolean; updated_at: string | null; }>(response);
+  },
+
+  updateLineText: async (scriptId: number, lineId: number, newText: string): Promise<VoScriptLineData> => {
+    const url = `${API_BASE}/api/vo-scripts/${scriptId}/lines/${lineId}/update-text`;
+    console.log(`[API] Updating text for line ${lineId}, script ${scriptId}...`);
+    const response = await fetch(url, {
+        method: 'PATCH',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ generated_text: newText }),
+    });
+    // Expects { data: VoScriptLineData }
+    return handleApiResponse<VoScriptLineData>(response);
+  },
+
+  deleteVoScriptLine: async (scriptId: number, lineId: number): Promise<{ message: string }> => {
+    const url = `${API_BASE}/api/vo-scripts/${scriptId}/lines/${lineId}`;
+    console.log(`[API] Deleting line ${lineId}, script ${scriptId}...`);
+    const response = await fetch(url, {
+        method: 'DELETE',
+    });
+    // Expects { message: "..." } - NOT wrapped in data by backend
+    if (!response.ok) {
+      let errorMsg = `HTTP error! status: ${response.status}`;
+      try {
+        const errorBody = await response.json();
+        errorMsg = errorBody.error || errorMsg;
+      } catch (e) { /* Ignore */ }
+      throw new Error(errorMsg);
+    }
+    return response.json(); 
   },
 
 };
