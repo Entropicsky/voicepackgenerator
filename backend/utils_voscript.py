@@ -8,6 +8,7 @@ from sqlalchemy import asc # Import asc for ordering
 from backend import models
 from datetime import datetime, timezone # Add datetime, timezone
 import os # Need os for model name logging
+from sqlalchemy.orm.attributes import flag_modified # Import flag_modified
 
 # TODO: Implement DB utility functions (get_line_context, get_category_lines_context, get_script_lines_context, update_line_in_db)
 
@@ -275,9 +276,7 @@ def update_line_in_db(db: Session, line_id: int, new_text: str, new_status: str,
         line.status = new_status
 
         # Update history
-        # Ensure history is initialized as a list if null
         current_history = line.generation_history if isinstance(line.generation_history, list) else []
-        
         history_entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "type": "generation", # TODO: Maybe refine type based on context?
@@ -285,10 +284,9 @@ def update_line_in_db(db: Session, line_id: int, new_text: str, new_status: str,
             "model": model_name
         }
         current_history.append(history_entry)
-        
-        # Assign the potentially new list back to the attribute
-        # This is important for SQLAlchemy change tracking with mutable types like JSON
-        line.generation_history = current_history 
+        line.generation_history = current_history
+        # Explicitly flag the JSONB field as modified for SQLAlchemy
+        flag_modified(line, "generation_history")
 
         db.commit()
         logging.info(f"Successfully updated line {line_id} with status {new_status}.")

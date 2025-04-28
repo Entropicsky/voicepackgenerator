@@ -349,6 +349,7 @@ export interface VoScriptLineData {
   generation_history?: any[]; 
   order_index?: number;
   template_prompt_hint?: string; 
+  is_locked?: boolean; // Add is_locked field
 }
 
 // Represents a category containing lines for the detail view
@@ -449,3 +450,12 @@ export interface RefineScriptPayload {
 }
 
 // --- END NEW Types --- //
+
+// NEW: Add AddVoScriptLinePayload here
+export interface AddVoScriptLinePayload {
+  line_key: string;
+  category_name: string;
+  order_index: number;
+  initial_text?: string | null;
+  prompt_hint?: string | null;
+}

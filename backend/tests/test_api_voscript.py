@@ -6,6 +6,7 @@ from unittest import mock
 from unittest.mock import MagicMock # Correct import
 from flask import Flask
 from datetime import datetime, timezone # Ensure datetime is imported
+from sqlalchemy.orm import Session # Import Session
 
 # Import necessary components (adjust imports based on actual structure)
 # from backend.app import create_app # Assuming create_app is the factory
@@ -610,5 +611,112 @@ def test_delete_line_not_found(mock_get_db, test_client):
 
     response = test_client.delete('/api/vo-scripts/1/lines/999')
     assert response.status_code == 404
+
+# --- Tests for Add New Line Endpoint --- #
+
+@mock.patch('backend.routes.vo_script_routes.get_db')
+def test_add_line_success(mock_get_db, test_client):
+    """Test successfully adding a new custom line to a script."""
+    script_id = 1
+    payload = {
+        "line_key": "CUSTOM_GREET",
+        "category_name": "Greetings", # Specify category by name
+        "initial_text": "A custom hello.",
+        "order_index": 5,
+        "prompt_hint": "Custom hint."
+    }
+    
+    # Mock category lookup
+    mock_category = MagicMock(spec=models.VoScriptTemplateCategory)
+    mock_category.id = 303 # Found category ID
+    
+    # Mock session and query/add/commit
+    mock_session = MagicMock(spec=Session)
+    # Mock finding the category by name and script's template_id (assuming script is fetched first)
+    mock_script = MagicMock(spec=models.VoScript, template_id=404)
+    mock_session.query.return_value.get.return_value = mock_script # Mock get script
+    mock_session.query.return_value.filter.return_value.first.return_value = mock_category # Mock find category
+    
+    # Capture the object added to the session
+    added_line = None
+    def capture_add(obj):
+        nonlocal added_line
+        if isinstance(obj, models.VoScriptLine):
+            added_line = obj
+    mock_session.add.side_effect = capture_add
+    
+    mock_get_db_iterator = MagicMock()
+    mock_get_db_iterator.__next__.return_value = mock_session
+    mock_get_db.return_value = mock_get_db_iterator
+
+    # Call API
+    response = test_client.post(f'/api/vo-scripts/{script_id}/lines', json=payload)
+    
+    # Assertions
+    assert response.status_code == 201
+    mock_session.add.assert_called_once() # Check add was called
+    assert added_line is not None
+    assert added_line.vo_script_id == script_id
+    assert added_line.line_key == payload['line_key']
+    assert added_line.category_id == mock_category.id
+    assert added_line.generated_text == payload['initial_text']
+    assert added_line.order_index == payload['order_index']
+    assert added_line.prompt_hint == payload['prompt_hint']
+    assert added_line.template_line_id is None # Should be null for custom line
+    assert added_line.status == 'manual' # Should start as manual?
+    mock_session.commit.assert_called_once()
+    
+    json_data = response.get_json()
+    assert 'data' in json_data
+    assert json_data['data']['line_key'] == payload['line_key']
+    assert json_data['data']['status'] == 'manual'
+
+@mock.patch('backend.routes.vo_script_routes.get_db')
+def test_add_line_missing_fields(mock_get_db, test_client):
+    """Test adding line with missing required fields."""
+    script_id = 1
+    # Missing line_key
+    payload1 = { "category_name": "Cat", "initial_text": "Hi", "order_index": 1 }
+    response1 = test_client.post(f'/api/vo-scripts/{script_id}/lines', json=payload1)
+    assert response1.status_code == 400
+    assert "Missing 'line_key'" in response1.get_json()['error']
+    
+    # Missing category_name
+    payload2 = { "line_key": "Key", "initial_text": "Hi", "order_index": 1 }
+    response2 = test_client.post(f'/api/vo-scripts/{script_id}/lines', json=payload2)
+    assert response2.status_code == 400
+    assert "Missing 'category_name'" in response2.get_json()['error']
+
+@mock.patch('backend.routes.vo_script_routes.get_db')
+def test_add_line_script_not_found(mock_get_db, test_client):
+    """Test adding line to a non-existent script."""
+    mock_session = MagicMock()
+    mock_session.query.return_value.get.return_value = None # Script not found
+    mock_get_db_iterator = MagicMock()
+    mock_get_db_iterator.__next__.return_value = mock_session
+    mock_get_db.return_value = mock_get_db_iterator
+    
+    payload = { "line_key": "Key", "category_name": "Cat", "order_index": 1 }
+    response = test_client.post('/api/vo-scripts/999/lines', json=payload)
+    assert response.status_code == 404
+    assert "Script not found" in response.get_json()['error']
+
+@mock.patch('backend.routes.vo_script_routes.get_db')
+def test_add_line_category_not_found(mock_get_db, test_client):
+    """Test adding line when specified category doesn't exist for the script's template."""
+    mock_session = MagicMock()
+    mock_script = MagicMock(spec=models.VoScript, template_id=404)
+    mock_session.query.return_value.get.return_value = mock_script # Script found
+    # Category not found
+    mock_session.query.return_value.filter.return_value.first.return_value = None 
+    
+    mock_get_db_iterator = MagicMock()
+    mock_get_db_iterator.__next__.return_value = mock_session
+    mock_get_db.return_value = mock_get_db_iterator
+    
+    payload = { "line_key": "Key", "category_name": "BadCat", "order_index": 1 }
+    response = test_client.post('/api/vo-scripts/1/lines', json=payload)
+    assert response.status_code == 404
+    assert "Category 'BadCat' not found" in response.get_json()['error']
 
 # ... rest of tests ... 

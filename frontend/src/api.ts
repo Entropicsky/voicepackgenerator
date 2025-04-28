@@ -804,4 +804,19 @@ export const api = {
     return response.json(); 
   },
 
+  // NEW Function to add a line
+  addVoScriptLine: async (scriptId: number, payload: AddVoScriptLinePayload): Promise<VoScriptLineData> => {
+    const url = `${API_BASE}/api/vo-scripts/${scriptId}/lines`;
+    console.log(`[API] Adding line to script ${scriptId}:`, payload);
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+    });
+    // Expects { data: VoScriptLineData } (for the created line)
+    return handleApiResponse<VoScriptLineData>(response);
+  },
+
 };

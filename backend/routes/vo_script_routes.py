@@ -169,7 +169,10 @@ def get_vo_script(script_id):
         
         for line in ordered_lines:
             line_dict = { 
-              **model_to_dict(line, ['id', 'generated_text', 'status', 'latest_feedback', 'generation_history']), 
+              **model_to_dict(line, [
+                  'id', 'generated_text', 'status', 'latest_feedback', 
+                  'generation_history', 'is_locked'
+              ]), 
               'template_line_id': line.template_line_id, 
               'line_key': line.template_line.line_key if line.template_line else None,
               'order_index': line.template_line.order_index if line.template_line else None,
@@ -830,29 +833,30 @@ def update_vo_script_line_text(script_id: int, line_id: int):
         db.refresh(line)
         logging.info(f"Manually updated text for line {line_id} (script {script_id})")
         
-        # Manually construct response dict
+        # Manually construct simpler response dict (avoiding potentially unloaded attrs)
         response_data = {
             "id": line.id,
-            "vo_script_id": line.vo_script_id,
-            "template_line_id": line.template_line_id,
-            "category_id": line.category_id,
+            # "vo_script_id": line.vo_script_id,
+            # "template_line_id": line.template_line_id,
+            # "category_id": line.category_id, # Removed potentially problematic attribute
             "generated_text": line.generated_text,
             "status": line.status,
             "latest_feedback": line.latest_feedback,
             "generation_history": line.generation_history,
-            "line_key": line.line_key,
-            "order_index": line.order_index,
-            "prompt_hint": line.prompt_hint,
+            # "line_key": line.line_key, # Removed potentially problematic attribute
+            # "order_index": line.order_index, # Removed potentially problematic attribute
+            # "prompt_hint": line.prompt_hint, # Removed potentially problematic attribute
             "is_locked": line.is_locked,
             "created_at": line.created_at.isoformat() if line.created_at else None,
             "updated_at": line.updated_at.isoformat() if line.updated_at else None
         }
-        return jsonify({"data": response_data}), 200 # Return full updated line manually constructed
+        # Return the updated line data using the standard wrapper
+        return make_api_response(data=response_data), 200
 
     except Exception as e:
         db.rollback()
         logging.exception(f"Error updating text for line {line_id}, script {script_id}: {e}")
-        return jsonify({"error": "Failed to update line text."}), 500
+        return make_api_response(error="Failed to update line text.", status_code=500) # Use standard wrapper
     finally:
         if db:
             db.close()
@@ -881,6 +885,85 @@ def delete_vo_script_line(script_id: int, line_id: int):
         db.rollback()
         logging.exception(f"Error deleting line {line_id}, script {script_id}: {e}")
         return jsonify({"error": "Failed to delete line."}), 500
+    finally:
+        if db:
+            db.close()
+
+# --- NEW: Add Line Endpoint --- #
+@vo_script_bp.route('/vo-scripts/<int:script_id>/lines', methods=['POST'])
+def add_vo_script_line(script_id: int):
+    """Adds a new custom line to a VO script."""
+    from backend.app import model_to_dict # Import locally
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Missing request body"}), 400
+    
+    # Validate required fields
+    line_key = data.get('line_key')
+    category_name = data.get('category_name')
+    order_index = data.get('order_index')
+    if not line_key:
+        return jsonify({"error": "Missing 'line_key' in request body"}), 400
+    if not category_name:
+        return jsonify({"error": "Missing 'category_name' in request body"}), 400
+    if order_index is None: # Allow 0
+        return jsonify({"error": "Missing 'order_index' in request body"}), 400
+        
+    # Optional fields
+    initial_text = data.get('initial_text')
+    prompt_hint = data.get('prompt_hint')
+    
+    db: Session = next(get_db())
+    try:
+        # 1. Find parent script
+        script = db.query(models.VoScript).get(script_id)
+        if not script:
+            return jsonify({"error": f"Script not found with ID {script_id}"}), 404
+        if not script.template_id:
+            # Should not happen based on current logic, but good check
+            return jsonify({"error": f"Script {script_id} does not have an associated template.", "detail": "Cannot determine category without a template."}), 400
+            
+        # 2. Find the category ID based on name and script's template ID
+        category = db.query(models.VoScriptTemplateCategory).filter(
+            models.VoScriptTemplateCategory.template_id == script.template_id,
+            models.VoScriptTemplateCategory.name == category_name,
+            models.VoScriptTemplateCategory.is_deleted == False # Ensure category not deleted
+        ).first()
+        
+        if not category:
+            return jsonify({"error": f"Category '{category_name}' not found for the template associated with script {script_id}"}), 404
+
+        # 3. Create the new line
+        new_line = models.VoScriptLine(
+            vo_script_id=script_id,
+            template_line_id=None, 
+            generated_text=initial_text, 
+            status='manual' if initial_text else 'pending',
+            is_locked=False 
+            # Cannot set category_id, line_key, order_index, prompt_hint here
+        )
+        # Set attributes after creation
+        new_line.category_id = category.id
+        new_line.line_key = line_key
+        new_line.order_index = order_index
+        new_line.prompt_hint = prompt_hint
+        
+        db.add(new_line)
+        db.commit()
+        db.refresh(new_line)
+        logging.info(f"Added new custom line (key: {line_key}) with ID {new_line.id} to script {script_id} under category {category_name} (ID: {category.id})")
+        
+        return jsonify({"data": model_to_dict(new_line)}), 201
+
+    except IntegrityError as e:
+        db.rollback()
+        # Potential issue: duplicate line_key within the script? (Need constraint?)
+        logging.exception(f"Database integrity error adding line to script {script_id}: {e}")
+        return jsonify({"error": "Database error adding line. Potential duplicate key?"}), 500
+    except Exception as e:
+        db.rollback()
+        logging.exception(f"Error adding line to script {script_id}: {e}")
+        return jsonify({"error": "Failed to add line."}), 500
     finally:
         if db:
             db.close()
