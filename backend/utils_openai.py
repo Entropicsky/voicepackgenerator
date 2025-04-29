@@ -12,7 +12,8 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 # Note: Ensure OPENAI_API_KEY is set in your .env file or environment
 client = openai.OpenAI()
 
-DEFAULT_REFINEMENT_MODEL = "gpt-4o"
+# Use OPENAI_AGENT_MODEL from environment variables with fallback to gpt-4o
+DEFAULT_REFINEMENT_MODEL = os.getenv("OPENAI_AGENT_MODEL", "gpt-4o")
 DEFAULT_MAX_TOKENS = 4096 # Updated based on GPT-4o max output limit
 DEFAULT_TEMPERATURE = 0.7 # Default for creative tasks
 

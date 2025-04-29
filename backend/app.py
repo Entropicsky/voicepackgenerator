@@ -261,57 +261,63 @@ def get_voices():
 
 @app.route('/api/generate', methods=['POST'])
 def start_generation():
-    """Endpoint to start an asynchronous generation task and record it."""
+    """Endpoint to start an asynchronous generation task using VO Script."""
     if not request.is_json:
         return make_api_response(error="Request must be JSON", status_code=400)
 
     config_data = request.get_json()
-    # config_data_json = json.dumps(config_data) # Store later after validation
+    
+    # --- NEW: Expect vo_script_id --- 
+    vo_script_id = config_data.get('vo_script_id')
+    if vo_script_id is None: # Check if None explicitly
+         return make_api_response(error="Missing required field: vo_script_id", status_code=400)
+         
+    # --- REMOVE Old Script Source Validation --- 
+    # script_csv_content = config_data.get('script_csv_content')
+    # script_id = config_data.get('script_id')
+    # script_source_info = {}
+    # if script_id is not None and script_csv_content is not None: ...
+    # elif script_id is None and script_csv_content is None: ...
+    # elif script_id is not None: ...
+    # elif script_csv_content is not None: ...
+    # --- END REMOVED --- 
+    
+    # --- NEW: Validate vo_script_id --- 
+    vo_script_name = "Unknown"
+    db: Session = next(models.get_db())
+    try:
+        vo_script_id = int(vo_script_id)
+        vo_script = db.query(models.VoScript).get(vo_script_id)
+        if not vo_script:
+            db.close()
+            return make_api_response(error=f"VO Script with ID {vo_script_id} not found.", status_code=404)
+        vo_script_name = vo_script.name # Get name for logging/metadata
+        print(f"Using VO Script ID {vo_script_id} ('{vo_script_name}') for generation.")
+    except ValueError:
+        db.close()
+        return make_api_response(error="Invalid vo_script_id format, must be an integer.", status_code=400)
+    except Exception as e:
+        logging.exception(f"Error validating vo_script_id {vo_script_id}: {e}")
+        db.rollback() # Rollback potential transaction issues
+        db.close()
+        return make_api_response(error="Failed to validate VO Script ID", status_code=500)
+    finally:
+        # Ensure session is closed if not already closed in specific paths
+        if db.is_active: db.close()
+    # --- END NEW Validation ---
 
-    # --- MODIFIED: Script Source Validation --- 
-    script_csv_content = config_data.get('script_csv_content')
-    script_id = config_data.get('script_id')
-    script_source_info = {}
-
-    if script_id is not None and script_csv_content is not None:
-        return make_api_response(error="Provide either 'script_id' or 'script_csv_content', not both.", status_code=400)
-    elif script_id is None and script_csv_content is None:
-        return make_api_response(error="Missing required script input: provide either 'script_id' or 'script_csv_content'.", status_code=400)
-    elif script_id is not None:
-        # Validate script_id is an integer and exists
-        try:
-            script_id = int(script_id)
-            db: Session = next(models.get_db()) # Need DB context here for validation
-            script = db.query(models.Script).get(script_id)
-            if not script:
-                 db.close()
-                 return make_api_response(error=f"Script with ID {script_id} not found.", status_code=404)
-            script_source_info = {"source_type": "db", "script_id": script_id, "script_name": script.name}
-            print(f"Using script ID {script_id} ('{script.name}') for generation.")
-            db.close() # Close session after validation
-        except ValueError:
-            return make_api_response(error="Invalid script_id format, must be an integer.", status_code=400)
-        except Exception as e:
-            if 'db' in locals() and db.is_active: db.close()
-            print(f"Error validating script_id {script_id}: {e}")
-            return make_api_response(error="Failed to validate script ID", status_code=500)
-        # Remove script_csv_content from config_data to avoid storing it unnecessarily
-        config_data.pop('script_csv_content', None)
-    elif script_csv_content is not None:
-        script_source_info = {"source_type": "csv", "details": "CSV content provided"}
-        print("Using provided CSV content for generation.")
-        # Remove script_id from config_data if it was present but None
-        config_data.pop('script_id', None)
-    # --- END MODIFIED --- 
-
-    # Basic validation for other keys (ensure required keys exist, excluding the script source handled above)
+    # Basic validation for other keys
     required_keys = ['skin_name', 'voice_ids', 'variants_per_line']
     if not all(key in config_data for key in required_keys):
         missing = [key for key in required_keys if key not in config_data]
         return make_api_response(error=f'Missing required configuration keys: {missing}', status_code=400)
     
-    # Add script source info to the config before saving to JSON
-    config_data['script_source'] = script_source_info
+    # Prepare config_data for storage, removing potentially large fields we don't need
+    # Remove old script fields if they accidentally slipped through
+    config_data.pop('script_id', None)
+    config_data.pop('script_csv_content', None)
+    # Update script_source info
+    config_data['script_source'] = {"source_type": "vo_script", "vo_script_id": vo_script_id, "vo_script_name": vo_script_name}
     config_data_json = json.dumps(config_data)
 
     db: Session = next(models.get_db()) # Get DB session again for job creation
@@ -320,8 +326,8 @@ def start_generation():
         # 1. Create Job record in DB
         db_job = models.GenerationJob(
             status="PENDING",
-            parameters_json=config_data_json
-            # submitted_at is default
+            parameters_json=config_data_json,
+            job_type="full_batch" # Explicitly set job type
         )
         db.add(db_job)
         db.commit()
@@ -329,15 +335,12 @@ def start_generation():
         db_job_id = db_job.id
         print(f"Created GenerationJob record with DB ID: {db_job_id}")
 
-        # 2. Enqueue Celery task, passing DB ID and script source
-        # --- MODIFIED: Pass either script_id or csv_content to task --- 
+        # 2. Enqueue Celery task, passing DB ID and NEW vo_script_id
         task = tasks.run_generation.delay(
             db_job_id,
             config_data_json, # Pass full config for other params
-            script_id=script_id if script_id is not None else None, # Pass script_id if used
-            script_csv_content=script_csv_content if script_csv_content is not None else None # Pass CSV if used
+            vo_script_id=vo_script_id # Pass the validated vo_script_id
         )
-        # --- END MODIFIED --- 
         print(f"Enqueued generation task with Celery ID: {task.id} for DB Job ID: {db_job_id}")
 
         # 3. Update Job record with Celery task ID
@@ -358,12 +361,12 @@ def start_generation():
             except Exception as db_err:
                  print(f"Failed to update job status after enqueue error: {db_err}")
                  db.rollback() # Rollback any partial changes
-        elif db.is_active:
+        elif db and db.is_active:
             db.rollback()
 
         return make_api_response(error="Failed to start generation task", status_code=500)
     finally:
-        if db.is_active: db.close() # Ensure session is closed
+        if db and db.is_active: db.close() # Ensure session is closed
 
 @app.route('/api/generate/<task_id>/status', methods=['GET'])
 def get_task_status(task_id):

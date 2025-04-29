@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { GenerationConfig, ModelOption, ScriptMetadata } from '../../types';
+import { GenerationConfig, ModelOption, VoScriptListItem } from '../../types';
 import Slider from 'rc-slider';
 import 'rc-slider/assets/index.css';
 import { api } from '../../api';
@@ -68,7 +68,7 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
     initialValues: {
       skinName: 'MyNewSkin',
       variants: 3,
-      selectedScriptId: null as string | null,
+      selectedVoScriptId: null as string | null,
       selectedModelId: DEFAULT_MODEL_ID,
       // Load initial values from session storage or use defaults
       stabilityRange: getCachedOrDefault<[number, number]>(SESSION_STORAGE_KEYS.STABILITY, DEFAULT_STABILITY_RANGE),
@@ -80,18 +80,16 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
     validate: {
       skinName: isNotEmpty('Skin Name is required'),
       variants: (value) => (value <= 0 ? 'Takes must be at least 1' : null),
-      selectedScriptId: isNotEmpty('Please select a script'),
-      // selectedVoiceIds: (value, values) => (selectedVoiceIds.length === 0 ? 'Please select at least one voice' : null), // REMOVED - Validation handled in submit handler
+      selectedVoScriptId: isNotEmpty('Please select a VO script'),
       // Add range validation if needed
     },
-    // Add a reference to selectedVoiceIds for validation purposes
     validateInputOnBlur: true,
   });
 
-  // Script State (keep separate from form state for fetching)
-  const [availableScripts, setAvailableScripts] = useState<ScriptMetadata[]>([]);
-  const [scriptsLoading, setScriptsLoading] = useState<boolean>(false);
-  const [scriptsError, setScriptsError] = useState<string | null>(null);
+  // VO Script State (RENAMED)
+  const [availableVoScripts, setAvailableVoScripts] = useState<VoScriptListItem[]>([]);
+  const [voScriptsLoading, setVoScriptsLoading] = useState<boolean>(false);
+  const [voScriptsError, setVoScriptsError] = useState<string | null>(null);
 
   // Model State (keep separate)
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
@@ -120,23 +118,23 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
     fetchModels();
   }, []);
 
-  // Fetch available scripts on mount
+  // Fetch available VO scripts on mount (UPDATED)
   useEffect(() => {
-    setScriptsLoading(true);
-    setScriptsError(null);
-    api.listScripts(false)
-      .then(scripts => {
-        setAvailableScripts(scripts);
+    setVoScriptsLoading(true);
+    setVoScriptsError(null);
+    api.listVoScripts() // Use new API function
+      .then(voScripts => {
+        setAvailableVoScripts(voScripts);
         // Reset selection if current one disappears?
-        if (form.values.selectedScriptId && !scripts.find(s => s.id.toString() === form.values.selectedScriptId)) {
-          form.setFieldValue('selectedScriptId', null);
+        if (form.values.selectedVoScriptId && !voScripts.find(s => s.id.toString() === form.values.selectedVoScriptId)) {
+          form.setFieldValue('selectedVoScriptId', null);
         }
       })
       .catch(err => {
-        setScriptsError(`Failed to load scripts: ${err.message}`);
+        setVoScriptsError(`Failed to load VO scripts: ${err.message}`);
         console.error(err);
       })
-      .finally(() => setScriptsLoading(false));
+      .finally(() => setVoScriptsLoading(false));
   }, []);
 
   // --- Session Storage & Callback Effect ---
@@ -167,7 +165,7 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
     onRangesChange // Include callback in dependency array
   ]);
 
-  // Handle form submission
+  // Handle form submission (UPDATED)
   const handleFormSubmit = (values: typeof form.values) => {
     // Add validation for selected voices again just before submit
     if (selectedVoiceIds.length === 0) {
@@ -186,7 +184,7 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
       speed_range: values.speedRange,
       use_speaker_boost: values.speakerBoost,
       model_id: values.selectedModelId,
-      script_id: parseInt(values.selectedScriptId!, 10), // Already validated not null
+      vo_script_id: parseInt(values.selectedVoScriptId!, 10), // Use vo_script_id
     };
 
     onSubmit(finalConfig);
@@ -219,23 +217,22 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
         {...form.getInputProps('variants')}
       />
 
-      {/* Use Mantine Select with consistent styling */}
+      {/* VO Script Select (UPDATED) */}
       <Select
-          label="Select Script"
-          placeholder="Choose a script..."
+          label="Select VO Script" // UPDATED Label
+          placeholder="Choose a VO script..."
           required
-          data={availableScripts.map(script => ({
+          data={availableVoScripts.map(script => ({
             value: script.id.toString(),
-            label: `${script.name} (${script.line_count} lines, updated ${new Date(script.updated_at).toLocaleDateString()})`
+            // Adjust label as needed based on VoScriptListItem type fields
+            label: `${script.name} (Status: ${script.status}, Updated: ${new Date(script.updated_at).toLocaleDateString()})` 
           }))}
           searchable
-          nothingFoundMessage={scriptsLoading ? "Loading scripts..." : scriptsError ? "Error loading scripts" : "No scripts found"}
-          disabled={scriptsLoading || !!scriptsError}
-          error={scriptsError || form.errors.selectedScriptId} // Show fetch error or validation error
+          nothingFoundMessage={voScriptsLoading ? "Loading VO scripts..." : voScriptsError ? "Error loading VO scripts" : "No VO scripts found"}
+          disabled={voScriptsLoading || !!voScriptsError}
+          error={voScriptsError || form.errors.selectedVoScriptId} // Use new state/form prop
           mt="md"
-          {...form.getInputProps('selectedScriptId')}
-          // Add style props for consistency if needed
-          // styles={{ input: { borderColor: form.errors.selectedScriptId ? 'red' : undefined } }}
+          {...form.getInputProps('selectedVoScriptId')} // Use new form prop
         />
 
       {/* Use Mantine Select for Model */}
@@ -270,7 +267,7 @@ const GenerationForm: React.FC<GenerationFormProps> = ({ selectedVoiceIds, onSub
               <Box style={{
                   position: 'absolute',
                   left: `${calculateMidpointPercent(form.values.stabilityRange, 0, 1)}%`,
-                  top: 'calc(50% + 4px)', // Might need slight adjustment after removing slider padding
+                  top: 'calc(50% + 4px)',
                   width: '2px',
                   height: '10px',
                   backgroundColor: 'grey',

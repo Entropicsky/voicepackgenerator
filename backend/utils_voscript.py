@@ -80,6 +80,72 @@ def get_line_context(db: Session, line_id: int) -> Optional[Dict[str, Any]]:
         logging.exception(f"Error fetching context for line {line_id}: {e}")
         return None 
 
+def get_sibling_lines_in_category(db: Session, script_id: int, line_id: int, category_name: str = None, limit: int = 5) -> List[Dict[str, Any]]:
+    """Fetches sibling lines in the same category as the specified line.
+    
+    If category_name is provided, uses that to find siblings.
+    Otherwise, determines the category from the specified line.
+    
+    Args:
+        db: The database session.
+        script_id: The ID of the parent VoScript.
+        line_id: The ID of the line whose siblings to find.
+        category_name: Optional name of the category to search in.
+        limit: Maximum number of sibling lines to return.
+        
+    Returns:
+        A list of sibling lines with their key details (line_key, text).
+    """
+    siblings = []
+    try:
+        # Determine the category if not provided
+        if not category_name:
+            line_context = get_line_context(db, line_id)
+            if not line_context:
+                logging.warning(f"get_sibling_lines_in_category: Line {line_id} not found.")
+                return []
+            category_name = line_context.get("category_name")
+            if not category_name:
+                logging.warning(f"get_sibling_lines_in_category: Line {line_id} has no category.")
+                return []
+        
+        # Query lines in the same category, excluding the current line
+        query = db.query(models.VoScriptLine).options(
+            joinedload(models.VoScriptLine.template_line)
+        ).filter(
+            models.VoScriptLine.vo_script_id == script_id,
+            models.VoScriptLine.id != line_id,
+            models.VoScriptLine.generated_text != None,  # Exclude lines without generated text
+            models.VoScriptLine.generated_text != ""     # Exclude empty strings
+        ).join(
+            models.VoScriptLine.template_line
+        ).join(
+            models.VoScriptTemplateLine.category
+        ).filter(
+            models.VoScriptTemplateCategory.name == category_name
+        ).order_by(
+            asc(models.VoScriptTemplateLine.order_index),
+            asc(models.VoScriptLine.id)
+        ).limit(limit)
+        
+        sibling_lines = query.all()
+        
+        # Format the results
+        for line in sibling_lines:
+            line_key = line.template_line.line_key if line.template_line else f"line_{line.id}"
+            siblings.append({
+                "line_id": line.id,
+                "line_key": line_key,
+                "text": line.generated_text
+            })
+            
+        logging.info(f"get_sibling_lines_in_category: Found {len(siblings)} siblings for line {line_id} in category '{category_name}'.")
+        return siblings
+    
+    except Exception as e:
+        logging.exception(f"Error fetching sibling lines for line {line_id} in category '{category_name}': {e}")
+        return []
+
 def get_category_lines_context(db: Session, script_id: int, category_name: str) -> List[Dict[str, Any]]:
     """Fetches comprehensive context for all VO Script Lines within a specific category 
        for a given script, including the script's refinement prompt.
@@ -102,7 +168,8 @@ def get_category_lines_context(db: Session, script_id: int, category_name: str) 
              logging.warning(f"get_category_lines_context: Parent script {script_id} not found.")
              return []
              
-        script_refinement_prompt = parent_script.refinement_prompt
+        # MODIFIED: Don't use stored refinement_prompt
+        script_refinement_prompt = None  # Set to None regardless of what's stored in DB
 
         # Now query the lines
         query = db.query(models.VoScriptLine).options(
@@ -189,7 +256,8 @@ def get_script_lines_context(db: Session, script_id: int) -> List[Dict[str, Any]
              logging.warning(f"get_script_lines_context: Parent script {script_id} not found.")
              return []
              
-        script_refinement_prompt = parent_script.refinement_prompt
+        # MODIFIED: Don't use stored refinement_prompt
+        script_refinement_prompt = None  # Set to None regardless of what's stored in DB
         template_categories = {c.id: c for c in parent_script.template.categories} if parent_script.template else {}
 
         # Now query the lines
@@ -224,7 +292,7 @@ def get_script_lines_context(db: Session, script_id: int) -> List[Dict[str, Any]
                 "line_template_hint": None,
                 "category_name": None,
                 "category_instructions": None,
-                "category_refinement_prompt": None, # Add new field
+                "category_refinement_prompt": None, # MODIFIED: Always set to None
                 "script_name": parent_script.name,
                 "character_description": parent_script.character_description,
                 "template_name": parent_script.template.name if parent_script.template else None,
@@ -240,7 +308,8 @@ def get_script_lines_context(db: Session, script_id: int) -> List[Dict[str, Any]
                 if category:
                     context["category_name"] = category.name
                     context["category_instructions"] = category.prompt_instructions
-                    context["category_refinement_prompt"] = category.refinement_prompt # Add category prompt
+                    # MODIFIED: Don't use stored category.refinement_prompt
+                    context["category_refinement_prompt"] = None
             
             lines_context.append(context)
 
@@ -295,3 +364,124 @@ def update_line_in_db(db: Session, line_id: int, new_text: str, new_status: str,
         db.rollback()
         logging.exception(f"Error updating line {line_id}: {e}")
         return None 
+
+def analyze_category_variety(db: Session, script_id: int, category_name: str) -> dict:
+    """Analyzes the variety of lines in a category to identify potential repetition/similarity issues.
+    
+    Args:
+        db: The database session
+        script_id: The script ID to analyze
+        category_name: The category name to analyze
+        
+    Returns:
+        A dictionary with analysis results, including:
+        - repeat_patterns: Common repeated patterns/phrases
+        - similar_openings: Lines with similar opening words
+        - overall_variety_score: 0-100 score of line variety
+        - total_lines: Number of lines analyzed
+        - improvement_suggestions: List of suggested improvements
+    """
+    try:
+        # Get all lines in the category
+        lines_to_analyze = get_category_lines_context(db, script_id, category_name)
+        
+        # Filter to only include lines with text
+        lines_with_text = [line for line in lines_to_analyze if line.get('current_text')]
+        
+        if not lines_with_text:
+            return {
+                "total_lines": 0,
+                "message": f"No lines with text found in category '{category_name}'",
+                "variety_score": 0,
+                "repeat_patterns": [],
+                "similar_openings": [],
+                "improvement_suggestions": []
+            }
+            
+        # Extract just the text for analysis
+        texts = [line.get('current_text', '') for line in lines_with_text]
+        
+        # Basic analysis
+        total_lines = len(texts)
+        
+        # 1. Check for similar openings (first 3 words)
+        openings = {}
+        for text in texts:
+            words = text.split()
+            if len(words) >= 2:
+                opening = ' '.join(words[:2]).lower()
+                if opening in openings:
+                    openings[opening].append(text)
+                else:
+                    openings[opening] = [text]
+        
+        repeated_openings = {k: v for k, v in openings.items() if len(v) > 1}
+        
+        # 2. Find common phrases (3+ words that appear multiple times)
+        import re
+        from collections import Counter
+        
+        # Extract 3-grams from all texts
+        phrases = []
+        for text in texts:
+            # Clean text a bit
+            clean_text = re.sub(r'[,.!?;:"]', '', text.lower())
+            words = clean_text.split()
+            if len(words) >= 3:
+                for i in range(len(words) - 2):
+                    phrase = ' '.join(words[i:i+3])
+                    phrases.append(phrase)
+        
+        # Count occurrences
+        phrase_counter = Counter(phrases)
+        repeated_phrases = {phrase: count for phrase, count in phrase_counter.items() if count > 1}
+        
+        # 3. Measure vocabulary diversity
+        all_words = []
+        for text in texts:
+            clean_text = re.sub(r'[,.!?;:"]', '', text.lower())
+            all_words.extend(clean_text.split())
+            
+        unique_words = set(all_words)
+        vocabulary_ratio = len(unique_words) / len(all_words) if all_words else 0
+        
+        # 4. Calculate an overall variety score (0-100)
+        # Higher is better (more variety)
+        opening_penalty = min(30, len(repeated_openings) * 10)
+        phrase_penalty = min(30, sum(repeated_phrases.values()) * 5)
+        vocab_score = min(40, int(vocabulary_ratio * 100))
+        
+        variety_score = max(0, 100 - opening_penalty - phrase_penalty + vocab_score)
+        
+        # 5. Generate improvement suggestions
+        suggestions = []
+        
+        if repeated_openings:
+            suggestions.append(f"Vary the opening words of lines. {len(repeated_openings)} different openings are used multiple times.")
+            
+        if repeated_phrases:
+            suggestions.append(f"Avoid repeating common phrases. Found {len(repeated_phrases)} phrases used multiple times.")
+            
+        if vocabulary_ratio < 0.7:
+            suggestions.append("Use more diverse vocabulary across lines.")
+            
+        # Add specific suggestions if score is low
+        if variety_score < 50:
+            suggestions.append("Consider regenerating some lines with more variety instruction.")
+            
+        # Return the analysis results
+        return {
+            "total_lines": total_lines,
+            "variety_score": variety_score,
+            "repeat_patterns": [{"phrase": k, "count": v} for k, v in repeated_phrases.items()],
+            "similar_openings": [{"opening": k, "lines": v} for k, v in repeated_openings.items()],
+            "vocabulary_ratio": round(vocabulary_ratio, 2),
+            "improvement_suggestions": suggestions
+        }
+        
+    except Exception as e:
+        logging.exception(f"Error analyzing category variety for script {script_id}, category '{category_name}': {e}")
+        return {
+            "error": f"Failed to analyze category: {str(e)}",
+            "variety_score": 0
+        } 

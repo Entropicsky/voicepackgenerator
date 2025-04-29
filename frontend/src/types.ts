@@ -58,8 +58,7 @@ export interface TaskStatus {
 export interface GenerationConfig {
   skin_name: string;
   voice_ids: string[];
-  script_csv_content?: string; // Make CSV optional
-  script_id?: number; // Add optional script ID
+  vo_script_id: number;
   variants_per_line: number;
   model_id?: string;
   // Use RANGES for randomization settings
@@ -424,6 +423,7 @@ export interface UpdateVoScriptTemplateCategoryPayload {
 export interface RefineLinePayload {
   line_prompt: string;
   model?: string; // Optional model override
+  apply_best_practices?: boolean; // NEW
 }
 
 // Response for single line refinement (returns the updated line)
@@ -435,6 +435,7 @@ export interface RefineCategoryPayload {
   category_prompt: string;
   // line_prompts?: Record<number, string>; // Optional: { lineId: promptText }
   model?: string; // Optional model override
+  apply_best_practices?: boolean; // NEW
 }
 
 // Response for category/script refinement (returns list of updated lines)
@@ -449,6 +450,7 @@ export interface RefineScriptPayload {
   // category_prompts?: Record<string, string>; // Optional: { categoryName: promptText }
   // line_prompts?: Record<number, string>; // Optional: { lineId: promptText }
   model?: string; // Optional model override
+  apply_best_practices?: boolean; // NEW
 }
 
 // --- END NEW Types --- //

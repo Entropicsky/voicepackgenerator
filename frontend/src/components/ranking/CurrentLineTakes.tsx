@@ -100,7 +100,7 @@ const CurrentLineTakes: React.FC = () => {
       
       {/* Header Section (Always Visible) */} 
       <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', marginBottom: '15px'}}>
-          <h3>Takes for Line: {selectedLineKey}</h3>
+          <h3>Line Key: {selectedLineKey}</h3>
           <div>
              {/* Only show Regen/STS buttons when NOT editing */}
              {!isEditModalOpen && (

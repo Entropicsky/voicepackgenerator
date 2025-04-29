@@ -85,6 +85,18 @@ const AppLayout: React.FC = () => {
       </AppShell.Header>
 
       <AppShell.Navbar p="md">
+        {/* --- NEW ORDER: Create Scripts (formerly VO Scripts) first --- */}
+        <NavLink 
+          label="Create Scripts" // RENAMED
+          component={Link} 
+          to="/vo-scripts" 
+          active={location.pathname.startsWith('/vo-scripts')} 
+          onClick={handleNavClick} 
+          style={(theme) => ({
+            borderLeft: location.pathname.startsWith('/vo-scripts') ? `3px solid ${theme.colors.blue[6]}` : 'none',
+            paddingLeft: location.pathname.startsWith('/vo-scripts') ? `calc(${theme.spacing.md} - 3px)` : theme.spacing.md,
+          })}
+        />
         <NavLink 
           label="Create Voices" 
           component={Link} 
@@ -96,6 +108,8 @@ const AppLayout: React.FC = () => {
             paddingLeft: (location.pathname === '/voice-design' || location.pathname === '/') ? `calc(${theme.spacing.md} - 3px)` : theme.spacing.md,
           })}
         />
+        {/* --- HIDDEN: Legacy Manage Scripts --- */}
+        {/* 
         <NavLink 
           label="Manage Scripts" 
           component={Link} 
@@ -107,6 +121,7 @@ const AppLayout: React.FC = () => {
             paddingLeft: location.pathname.startsWith('/scripts') ? `calc(${theme.spacing.md} - 3px)` : theme.spacing.md,
           })}
         />
+        */}
         <NavLink 
           label="Generate Recordings" 
           component={Link} 
@@ -151,6 +166,8 @@ const AppLayout: React.FC = () => {
             paddingLeft: location.pathname.startsWith('/script-templates') ? `calc(${theme.spacing.md} - 3px)` : theme.spacing.md,
           })}
         />
+        {/* --- MOVED TO TOP --- */}
+        {/* 
         <NavLink 
           label="VO Scripts" 
           component={Link} 
@@ -162,6 +179,7 @@ const AppLayout: React.FC = () => {
             paddingLeft: location.pathname.startsWith('/vo-scripts') ? `calc(${theme.spacing.md} - 3px)` : theme.spacing.md,
           })}
         />
+        */}
       </AppShell.Navbar>
 
       {/* Render the matched child route's element here */}

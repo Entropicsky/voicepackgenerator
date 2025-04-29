@@ -699,7 +699,7 @@ export const api = {
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(payload), // Payload now includes optional apply_best_practices
     });
     // Expects { data: VoScriptLineData }
     return handleApiResponse<RefineLineResponse>(response);
@@ -725,14 +725,8 @@ export const api = {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(payload), // Payload now includes optional apply_best_practices
     });
-    // Expects { message: string, data: VoScriptLineData[] }
-    // handleApiResponse extracts the 'data' field, so we might need adjustment
-    // Let's modify handleApiResponse or handle the structure here.
-    // For now, assume handleApiResponse gives us the inner { message, data } object if wrapped
-    // OR use a different handler if response structure is not { data: { message: ..., data: [...] } }
-    
     // Assuming backend returns { message: "...", data: [...] } directly (not wrapped in another data key)
     if (!response.ok) {
       let errorMsg = `HTTP error! status: ${response.status}`;
@@ -754,7 +748,7 @@ export const api = {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(payload), // Payload now includes optional apply_best_practices
     });
     // Assuming backend returns { message: "...", data: [...] } directly
     if (!response.ok) {

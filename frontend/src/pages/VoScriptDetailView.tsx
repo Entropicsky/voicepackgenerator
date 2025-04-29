@@ -3,7 +3,8 @@ import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
     Title, Text, Paper, Stack, Group, Button, LoadingOverlay, Alert, 
-    Accordion, Textarea, ActionIcon, Tooltip, Badge, Table, Modal, TextInput, Progress, ScrollArea
+    Accordion, Textarea, ActionIcon, Tooltip, Badge, Table, Modal, TextInput, Progress, ScrollArea,
+    Checkbox
 } from '@mantine/core';
 import { IconPlayerPlay, IconSend, IconRefresh, IconDeviceFloppy, IconSparkles, IconLock, IconLockOpen, IconTrash, IconPlus, IconHistory, IconCheck } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
@@ -20,8 +21,8 @@ const VoScriptDetailView: React.FC = () => {
   const numericScriptId = scriptId ? parseInt(scriptId, 10) : undefined;
 
   // --- State --- //
-  const [feedbackInputs, setFeedbackInputs] = useState<Record<number, string>>({}); 
-  const [categoryRefinementPrompts, setCategoryRefinementPrompts] = useState<Record<string, string>>({}); // { categoryName: promptText }
+  const [feedbackInputs, setFeedbackInputs] = useState<Record<number, string>>({});
+  // Removed categoryRefinementPrompts state - using transitory approach
   const [isDescriptionDirty, setIsDescriptionDirty] = useState<boolean>(false);
   // NEW: State for line refinement loading status
   const [refiningLineId, setRefiningLineId] = useState<number | null>(null);
@@ -71,6 +72,10 @@ const VoScriptDetailView: React.FC = () => {
   // NEW: State for Script Refine Modal
   const [scriptRefineModalOpened, { open: openScriptRefineModal, close: closeScriptRefineModal }] = useDisclosure(false);
   const [scriptRefinePromptInput, setScriptRefinePromptInput] = useState<string>('');
+  // NEW: State for checkboxes
+  const [applyRulesToLine, setApplyRulesToLine] = useState<boolean>(false);
+  const [applyRulesToCategory, setApplyRulesToCategory] = useState<boolean>(false);
+  const [applyRulesToScript, setApplyRulesToScript] = useState<boolean>(false);
 
   // --- 1. Fetch VO Script Details --- //
   const { 
@@ -150,33 +155,6 @@ const VoScriptDetailView: React.FC = () => {
     },
     onError: (err) => {
         notifications.show({ title: 'Error Saving Script Details', message: err.message, color: 'red' });
-    }
-  });
-
-  // --- NEW: Category Prompt Update Mutation --- //
-  // We need the category ID for the API call, but we might only have the name easily available
-  // Fetching category details or adding ID to the category data structure in getVoScript might be needed
-  // For now, assuming we can get category ID somehow (e.g., if added to VoScriptCategoryData type)
-  // TODO: Refactor this if category ID isn't readily available
-  const updateCategoryPromptMutation = useMutation<VoScriptCategoryData, Error, { categoryId: number; payload: UpdateVoScriptTemplateCategoryPayload }>({
-    mutationFn: ({ categoryId, payload }) => api.updateVoScriptTemplateCategory(categoryId, payload),
-    onSuccess: (updatedCategory) => {
-        queryClient.setQueryData<VoScript>(['voScriptDetail', numericScriptId], (oldData) => {
-            if (!oldData) return oldData;
-            return {
-                ...oldData,
-                categories: oldData.categories?.map((cat: VoScriptCategoryData) => 
-                    cat.id === updatedCategory.id 
-                    ? { ...cat, refinement_prompt: updatedCategory.refinement_prompt } 
-                    : cat
-                )
-            };
-        });
-        setCategoryRefinementPrompts(prev => ({ ...prev, [updatedCategory.name]: updatedCategory.refinement_prompt || '' }));
-        notifications.show({ title: 'Category Prompt Saved', message: `Refinement prompt for category '${updatedCategory.name}' updated.`, color: 'green' });
-    },
-    onError: (err) => {
-        notifications.show({ title: 'Error Saving Category Prompt', message: err.message, color: 'red' });
     }
   });
 
@@ -292,40 +270,46 @@ const VoScriptDetailView: React.FC = () => {
 
   // --- NEW: Script Refinement Mutation --- //
   const refineScriptMutation = useMutation<RefineMultipleLinesResponse, Error, { payload: RefineScriptPayload }>({
-      mutationFn: ({ payload }) => api.refineVoScript(numericScriptId!, payload),
-      onMutate: () => {
-          setIsRefiningScript(true); // Set global loading state
-      },
-      onSuccess: (response) => {
-          // Update all returned lines in the React Query cache
-          queryClient.setQueryData<VoScript>(['voScriptDetail', numericScriptId], (oldData) => {
-              if (!oldData || !response.data) return oldData;
-              const updatedLinesMap = new Map(response.data.map(line => [line.id, line]));
-              return {
-                ...oldData,
-                categories: oldData.categories?.map(cat => ({
-                   ...cat,
-                   lines: cat.lines.map(l => updatedLinesMap.has(l.id) ? { ...l, ...updatedLinesMap.get(l.id)! } : l)
-                }))
-              };
-          });
-          notifications.show({
-            title: 'Script Refined',
-            message: response.message || `Script refined successfully. (${response.data.length} lines updated).`,
-            color: 'blue',
-          });
-      },
-      onError: (err) => {
-          notifications.show({
-            title: 'Error Refining Script',
-            message: err.message || `Could not refine the script.`,
-            color: 'red',
-          });
-      },
-      onSettled: () => {
-          setIsRefiningScript(false); // Clear global loading state
-      },
-    });
+    mutationFn: ({ payload }) => api.refineVoScript(numericScriptId!, payload),
+    onMutate: () => {
+        // Set loading state
+        setIsRefiningScript(true);
+    },
+    onSuccess: (response) => {
+        // Update all returned lines in the React Query cache
+        queryClient.setQueryData<VoScript>(['voScriptDetail', numericScriptId], (oldData) => {
+            if (!oldData || !response.data) return oldData;
+            
+            // Create a map of updated lines for quick lookup
+            const updatedLinesMap = new Map(response.data.map(line => [line.id, line]));
+            
+            return {
+              ...oldData,
+              categories: oldData.categories?.map(cat => ({
+                 ...cat,
+                 // Update lines that exist in the response map
+                 lines: cat.lines.map(l => updatedLinesMap.has(l.id) ? { ...l, ...updatedLinesMap.get(l.id)! } : l)
+              }))
+            };
+        });
+        notifications.show({
+          title: 'Script Refined',
+          message: response.message || `Script refined successfully. (${response.data.length} lines updated).`,
+          color: 'blue',
+        });
+    },
+    onError: (err) => {
+        notifications.show({
+          title: 'Error Refining Script',
+          message: err.message || `Script refinement failed.`,
+          color: 'red',
+        });
+    },
+    onSettled: () => {
+        // Clear loading state
+        setIsRefiningScript(false);
+    },
+  });
   // --- END: Script Refinement Mutation --- //
 
   // --- NEW: Manual Text Update Mutation --- //
@@ -619,26 +603,27 @@ const VoScriptDetailView: React.FC = () => {
   // UPDATED: Opens Category Refine Modal
   const handleOpenCategoryRefineModal = (category: { id: number | null, name: string }) => {
     setCategoryToRefine(category);
-    setCategoryRefinePromptInput(categoryRefinementPrompts[category.name] || ''); // Pre-fill with saved prompt if exists
+    // MODIFIED: Always start with an empty prompt (transitory approach)
+    setCategoryRefinePromptInput('');
     openCategoryRefineModal();
   };
 
   // UPDATED: Handles submission from Category Refine Modal
-  const handleRefineCategory = async () => { // Now takes no args, uses state
-      if (!categoryToRefine || !categoryRefinePromptInput.trim()) {
-          notifications.show({ message: `Category refinement prompt cannot be empty.`, color: 'orange' });
+  const handleRefineCategory = async () => {
+      // Validate: require either a prompt OR the checkbox to be checked
+      if (!categoryToRefine || (!categoryRefinePromptInput.trim() && !applyRulesToCategory)) {
+          notifications.show({ message: `Category refinement prompt cannot be empty unless "Apply ElevenLabs Best Practices" is checked.`, color: 'orange' });
           return;
       }
       if (numericScriptId === undefined) return; 
-      
-      // No implicit save needed as prompt is from modal
       
       console.log(`Triggering refinement mutation for category: ${categoryToRefine.name}`);
       refineCategoryMutation.mutate({
           categoryId: categoryToRefine.id,
           payload: { 
               category_name: categoryToRefine.name, 
-              category_prompt: categoryRefinePromptInput // Use modal input state
+              category_prompt: categoryRefinePromptInput, // Send prompt even if empty
+              apply_best_practices: applyRulesToCategory // Send checkbox state
           }
       }, {
           onSuccess: () => closeCategoryRefineModal(), // Close modal on success
@@ -654,117 +639,22 @@ const VoScriptDetailView: React.FC = () => {
   
   // UPDATED: Handles submission from Script Refine Modal
   const handleRefineScript = async () => {
-      const globalPromptText = scriptRefinePromptInput; // Use modal input state
-      if (!globalPromptText?.trim()) {
-          notifications.show({ message: `Overall script refinement prompt cannot be empty.`, color: 'orange' });
+      // Validate: require either a prompt OR the checkbox to be checked
+      const globalPromptText = scriptRefinePromptInput;
+      if ((!globalPromptText?.trim()) && !applyRulesToScript) {
+          notifications.show({ message: `Overall script refinement prompt cannot be empty unless "Apply ElevenLabs Best Practices" is checked.`, color: 'orange' });
           return;
       }
       if (numericScriptId === undefined || !voScript) return;
       
-      closeScriptRefineModal(); // Close modal immediately before starting long process
-      setIsRefiningScript(true); 
+      closeScriptRefineModal();
       
-      // NO implicit save needed for global prompt from modal
-      
-      console.log("Starting frontend refinement orchestration...");
-      
-      // 1. Identify lines (remains the same)
-      const linesToProcess: VoScriptLineData[] = [];
-      const categoryPromptsMap = new Map<number | null, string | null>();
-      voScript.categories?.forEach(cat => {
-          categoryPromptsMap.set(cat.id, cat.refinement_prompt);
-          cat.lines.forEach(line => {
-              if (!line.is_locked) {
-                  linesToProcess.push(line);
-              }
-          });
-      });
-
-      if (linesToProcess.length === 0) {
-          notifications.show({ message: 'No lines available for refinement (check locks?).', color: 'blue' });
-          setIsRefiningScript(false); // Clear loading state
-          return;
-      }
-
-      // 2. Initialize Progress State (running is already true via setIsRefiningScript, adjust structure)
-      setRefinementProgress({
-          total: linesToProcess.length,
-          completed: 0,
-          currentKey: null,
-          errors: [],
-          running: true // Mark as running
-      });
-
-      // 3. Process lines sequentially (remains the same)
-      const errorMessages: string[] = [];
-      for (const line of linesToProcess) {
-          // ... update progress state ...
-          setRefinementProgress(prev => ({ ...prev, currentKey: line.line_key || `ID: ${line.id}` }));
-          
-          // Construct Hierarchical Prompt (using fetched data)
-          const scriptPrompt = globalPromptText;
-          const categoryId = line.category_id;
-          const category = categoryId != null ? voScript.categories?.find(c => c.id === categoryId) : undefined;
-          const categoryName = category?.name || 'N/A'; // Use derived categoryName
-          const categoryInstructions = category?.instructions || 'N/A';
-          const categoryPrompt = categoryPromptsMap.get(line.category_id) || 'N/A'; // Get saved cat prompt
-          const lineFeedback = line.latest_feedback || 'N/A';
-          const characterDesc = voScript.character_description || 'N/A';
-          const templateHint = voScript.template_prompt_hint || 'N/A';
-          const lineKey = line.line_key || `(ID: ${line.id})`;
-          const lineHint = line.template_prompt_hint || 'N/A';
-          const currentText = line.generated_text || '';
-
-          const openai_prompt = `You are a creative writer for video game voiceovers.
-Character Description:
-${characterDesc}
-
-Template Hint: ${templateHint}
-Category: ${categoryName} 
-Category Instructions: ${categoryInstructions}
-Line Key: ${lineKey}
-Line Hint: ${lineHint}
-
---- Prompts (Apply these hierarchically) ---
-Global Script Prompt: ${scriptPrompt}
-Category Prompt: ${categoryPrompt}
-Line Feedback/Prompt: ${lineFeedback}
---- End Prompts ---
-
-Current Line Text:
-${currentText}
-
-Rewrite the 'Current Line Text' based on ALL applicable prompts above (Global, Category, Line), while staying consistent with the character description and other hints. Prioritize the most specific prompt if conflicts arise. Only output the refined line text, with no extra explanation or preamble. If no change is needed based on the prompts, output the original text exactly.`;
-
-          try {
-              await refineLineMutation.mutateAsync({ 
-                  lineId: line.id, 
-                  payload: { line_prompt: openai_prompt }
-              });
-          } catch (error: any) {
-              console.error(`Error refining line ${line.id}:`, error);
-              errorMessages.push(`Line ${line.line_key || line.id}: ${error.message || 'Unknown error'}`);
+      // Use the mutation instead of direct API call
+      refineScriptMutation.mutate({
+          payload: {
+              global_prompt: globalPromptText,
+              apply_best_practices: applyRulesToScript
           }
-          
-          // Update progress
-           setRefinementProgress(prev => ({ 
-                ...prev, 
-                completed: prev.completed + 1, 
-                currentKey: null, 
-                errors: errorMessages 
-            }));
-      }
-
-      // 4. Finalize (remains the same)
-      setIsRefiningScript(false); 
-      setRefinementProgress(prev => ({ ...prev, running: false, currentKey: null }));
-      notifications.show({
-          title: 'Script Refinement Complete',
-          message: errorMessages.length > 0 
-              ? `Finished with ${errorMessages.length} error(s). Check console/notifications for details.` 
-              : `All ${linesToProcess.length} lines processed successfully.`,
-          color: errorMessages.length > 0 ? 'orange' : 'green',
-          autoClose: 6000
       });
   };
 
@@ -821,19 +711,25 @@ Rewrite the 'Current Line Text' based on ALL applicable prompts above (Global, C
       openRefineModal();
   };
 
-  // Handler to submit refinement from the modal
+  // UPDATED: Handler to submit refinement from the line modal
   const handleSubmitRefineFromModal = () => {
-      if (!lineToRefine || !refineLinePromptInput.trim()) {
-           notifications.show({ message: 'Refinement prompt cannot be empty.', color: 'orange'});
+      // Validate: require either a prompt OR the checkbox to be checked
+      if (!lineToRefine || (!refineLinePromptInput.trim() && !applyRulesToLine)) {
+           notifications.show({ message: `Refinement prompt cannot be empty unless 'Apply ElevenLabs Best Practices' is checked.`, color: 'orange'});
            return;
       }
       refineLineMutation.mutate(
-          { lineId: lineToRefine.id, payload: { line_prompt: refineLinePromptInput } },
+          {
+              lineId: lineToRefine.id,
+              payload: { 
+                  line_prompt: refineLinePromptInput, // Send prompt even if empty, backend handles it
+                  apply_best_practices: applyRulesToLine // Send checkbox state
+              } 
+          },
           {
               onSuccess: () => {
                   closeRefineModal(); // Close modal on success
               }
-              // onError is handled by the mutation definition
           }
       );
   };
@@ -1219,7 +1115,6 @@ Rewrite the 'Current Line Text' based on ALL applicable prompts above (Global, C
             size="lg"
             withinPortal={false}
         >
-           {/* Restore original modal content */}
            <Stack>
                  <Text size="sm">Original Text:</Text>
                  <Paper withBorder p="xs" bg="gray.1">
@@ -1227,13 +1122,20 @@ Rewrite the 'Current Line Text' based on ALL applicable prompts above (Global, C
                 </Paper>
                 <Textarea 
                     label="Refinement Prompt"
-                    placeholder="Enter instructions to refine this line..."
-                    required
+                    placeholder="Enter instructions to refine this line (e.g., 'make it sound more hesitant'). Leave blank to only apply best practices."
                     minRows={3}
                     autosize
                     value={refineLinePromptInput}
                     onChange={(e) => setRefineLinePromptInput(e.currentTarget.value)}
                     disabled={refineLineMutation.isPending && refiningLineId === lineToRefine?.id}
+                />
+                {/* NEW Checkbox */}
+                <Checkbox
+                    label="Apply ElevenLabs Best Practices (Pauses, Formatting, etc.)"
+                    checked={applyRulesToLine}
+                    onChange={(event) => setApplyRulesToLine(event.currentTarget.checked)}
+                    disabled={refineLineMutation.isPending && refiningLineId === lineToRefine?.id}
+                    mt="sm"
                 />
                 <Group justify="flex-end" mt="md">
                     <Button variant="default" onClick={closeRefineModal} disabled={refineLineMutation.isPending && refiningLineId === lineToRefine?.id}>
@@ -1242,7 +1144,7 @@ Rewrite the 'Current Line Text' based on ALL applicable prompts above (Global, C
                     <Button 
                         onClick={handleSubmitRefineFromModal}
                         loading={refineLineMutation.isPending && refiningLineId === lineToRefine?.id}
-                        disabled={!refineLinePromptInput.trim()}
+                        disabled={!refineLinePromptInput.trim() && !applyRulesToLine} // Disable if both prompt and checkbox are empty/false
                     >
                         Submit Refinement
                     </Button>
@@ -1379,22 +1281,29 @@ Rewrite the 'Current Line Text' based on ALL applicable prompts above (Global, C
             <Stack>
                  <Textarea 
                     label="Category Refinement Prompt"
-                    placeholder={`Enter instructions to refine all lines in the '${categoryToRefine?.name || ''}' category...`}
-                    required
+                    placeholder={`Enter instructions to refine all lines in the '${categoryToRefine?.name || ''}' category... Leave blank to only apply best practices.`}
                     minRows={4}
                     autosize
                     value={categoryRefinePromptInput}
                     onChange={(e) => setCategoryRefinePromptInput(e.currentTarget.value)}
                     disabled={refineCategoryMutation.isPending && refiningCategoryId === categoryToRefine?.id}
                  />
+                 {/* NEW Checkbox */}
+                 <Checkbox
+                     label="Apply ElevenLabs Best Practices (Pauses, Formatting, etc.)"
+                     checked={applyRulesToCategory}
+                     onChange={(event) => setApplyRulesToCategory(event.currentTarget.checked)}
+                     disabled={refineCategoryMutation.isPending && refiningCategoryId === categoryToRefine?.id}
+                     mt="sm"
+                 />
                  <Group justify="flex-end" mt="md">
                     <Button variant="default" onClick={closeCategoryRefineModal} disabled={refineCategoryMutation.isPending && refiningCategoryId === categoryToRefine?.id}>
                         Cancel
                     </Button>
                     <Button 
-                        onClick={handleRefineCategory} // Call updated handler
+                        onClick={handleRefineCategory}
                         loading={refineCategoryMutation.isPending && refiningCategoryId === categoryToRefine?.id}
-                        disabled={!categoryRefinePromptInput.trim()}
+                        disabled={!categoryRefinePromptInput.trim() && !applyRulesToCategory} // Disable if both empty/false
                     >
                         Refine This Category
                     </Button>
@@ -1414,22 +1323,29 @@ Rewrite the 'Current Line Text' based on ALL applicable prompts above (Global, C
              <Stack>
                  <Textarea 
                     label="Overall Script Refinement Prompt"
-                    placeholder={`Enter instructions to refine the entire script...`}
-                    required
+                    placeholder={`Enter instructions to refine the entire script... Leave blank to only apply best practices.`}
                     minRows={4}
                     autosize
                     value={scriptRefinePromptInput}
                     onChange={(e) => setScriptRefinePromptInput(e.currentTarget.value)}
                     disabled={isRefiningScript} // Disable if script refinement orchestration is running
                  />
+                 {/* NEW Checkbox */}
+                 <Checkbox
+                     label="Apply ElevenLabs Best Practices (Pauses, Formatting, etc.)"
+                     checked={applyRulesToScript}
+                     onChange={(event) => setApplyRulesToScript(event.currentTarget.checked)}
+                     disabled={isRefiningScript}
+                     mt="sm"
+                 />
                  <Group justify="flex-end" mt="md">
                     <Button variant="default" onClick={closeScriptRefineModal} disabled={isRefiningScript}>
                         Cancel
                     </Button>
                     <Button 
-                        onClick={handleRefineScript} // Call updated handler
-                        loading={isRefiningScript} // Use orchestration loading state
-                        disabled={!scriptRefinePromptInput.trim()}
+                        onClick={handleRefineScript} 
+                        loading={isRefiningScript} 
+                        disabled={!scriptRefinePromptInput.trim() && !applyRulesToScript} // Disable if both empty/false
                     >
                         Refine Entire Script
                     </Button>
