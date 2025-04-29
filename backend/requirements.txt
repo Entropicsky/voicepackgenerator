@@ -48,3 +48,4 @@ pydub>=0.25.1,<0.26.0 # Added for audio cropping
 openai==1.74.0 
 openai-agents==0.0.9
 tenacity # Add tenacity for retries 
+openpyxl>=3.1.0 # Added for Excel generation 

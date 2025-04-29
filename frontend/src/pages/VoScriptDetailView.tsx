@@ -9,6 +9,8 @@ import {
 import { IconPlayerPlay, IconSend, IconRefresh, IconDeviceFloppy, IconSparkles, IconLock, IconLockOpen, IconTrash, IconPlus, IconHistory, IconCheck } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useDisclosure } from '@mantine/hooks';
+import { DownloadOutlined } from '@ant-design/icons';
+import axios from 'axios';
 
 // Import API functions
 import { api } from '../api';
@@ -792,6 +794,68 @@ const VoScriptDetailView: React.FC = () => {
       setOpenCategories([]);
   };
 
+  // --- NEW: Handler for Excel Download ---
+  const handleDownloadExcel = async () => {
+    if (!scriptId) return; // Should not happen, but safeguard
+
+    const downloadUrl = `/api/vo-scripts/${scriptId}/download-excel`;
+    
+    try {
+      // We can trigger the download by simply navigating the browser to the URL
+      // or by creating a link and clicking it.
+      // Option 1: Direct navigation (simplest)
+      // window.location.href = downloadUrl;
+
+      // Option 2: Create link and click (might offer more control/feedback)
+      const response = await axios.get(downloadUrl, {
+        responseType: 'blob', // Important for handling file downloads
+      });
+
+      // Extract filename from Content-Disposition header if available
+      const contentDisposition = response.headers['content-disposition'];
+      let filename = 'vo_script.xlsx'; // Default filename
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i);
+        if (filenameMatch && filenameMatch.length === 2) {
+          filename = filenameMatch[1];
+        }
+      }
+      
+      // Create a temporary link element
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+
+      // Clean up the temporary link and object URL
+      link.parentNode?.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      notifications.show({
+        title: 'Excel Download Started',
+        message: 'Excel file download started.',
+        color: 'green',
+      });
+    } catch (error) {
+      console.error('Error downloading Excel file:', error);
+      notifications.show({
+        title: 'Excel Download Error',
+        message: 'Failed to download Excel file.',
+        color: 'red',
+      });
+      // Potentially show more specific error from backend if available
+      // if (axios.isAxiosError(error) && error.response?.data?.error) {
+      //   notifications.show({
+      //     title: 'Excel Download Error',
+      //     message: `Failed to download: ${error.response.data.error}`,
+      //     color: 'red',
+      //   });
+      // }
+    }
+  };
+
   // --- 4. Render View --- //
   if (!numericScriptId) {
     return <Alert color="red">Invalid Script ID provided in URL.</Alert>;
@@ -878,6 +942,12 @@ const VoScriptDetailView: React.FC = () => {
                 </Button> 
                 <Button size="xs" variant="outline" onClick={handleExpandAll} ml="lg">Expand All Categories</Button>
                 <Button size="xs" variant="outline" onClick={handleCollapseAll}>Collapse All Categories</Button>
+                <Button 
+                    leftSection={<DownloadOutlined />} 
+                    onClick={handleDownloadExcel}
+                >
+                    Download Excel
+                </Button>
             </Group>
         </Group>
         

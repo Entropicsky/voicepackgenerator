@@ -1,6 +1,6 @@
 # backend/routes/vo_script_routes.py
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, send_file
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.attributes import flag_modified # Import flag_modified
@@ -8,6 +8,10 @@ import logging
 import json # Added import
 import os
 from datetime import datetime, timezone # Import datetime utils
+import io # For in-memory file handling
+from openpyxl import Workbook # For creating Excel file
+from openpyxl.styles import Font, Alignment, PatternFill # For formatting
+from openpyxl.utils import get_column_letter # For setting column width
 
 # Assuming models and helpers are accessible, adjust imports as necessary
 from backend import models, tasks # Added tasks import
@@ -1898,4 +1902,154 @@ def analyze_category_variety_endpoint(script_id: int, category_name: str):
         return make_api_response(error=f"Failed to analyze category variety: {str(e)}", status_code=500)
     finally:
         if db:
+            db.close()
+
+# --- NEW: Excel Download Endpoint --- #
+@vo_script_bp.route('/vo-scripts/<int:script_id>/download-excel', methods=['GET'])
+def download_vo_script_excel(script_id: int):
+    """Generates and returns an Excel file for a VO script."""
+    db: Session = None
+    try:
+        db = next(get_db())
+        # Fetch script details, similar to get_vo_script but leaner if possible
+        script = db.query(models.VoScript).options(
+            joinedload(models.VoScript.template), # Load template info
+            selectinload(models.VoScript.lines).selectinload(models.VoScriptLine.template_line).selectinload(models.VoScriptTemplateLine.category) # Load lines -> template line -> category
+        ).get(script_id)
+        
+        if script is None:
+            return make_api_response(error=f"VO Script with ID {script_id} not found", status_code=404)
+            
+        # Create Excel Workbook and Sheet
+        wb = Workbook()
+        ws = wb.active
+        ws.title = script.name[:30] # Use script name for sheet title (Excel limit ~31 chars)
+
+        # --- Define Styles ---
+        header_font = Font(name='Calibri', size=14, bold=True)
+        category_font = Font(name='Calibri', size=12, bold=True)
+        category_fill = PatternFill(start_color="D9EAD3", end_color="D9EAD3", fill_type="solid") # Light green fill
+        wrapped_alignment = Alignment(wrap_text=True, vertical='top')
+
+        # --- Populate Header Info ---
+        # Script Name (A1)
+        ws['A1'] = script.name
+        ws['A1'].font = header_font
+        
+        # Character Description (A2, merged)
+        ws['A2'] = script.character_description
+        # Merge cells A2 to E2 (or adjust as needed)
+        merge_range = 'A2:E2' 
+        ws.merge_cells(merge_range) 
+        ws['A2'].alignment = wrapped_alignment
+        # Estimate row height based on text length (basic estimation)
+        desc_len = len(script.character_description or "")
+        estimated_lines = max(1, (desc_len // 80) + 1) # Rough guess: 80 chars per line
+        ws.row_dimensions[2].height = estimated_lines * 15 # 15 points per line height
+
+        # --- Organize Lines by Category ---
+        lines_by_category = {}
+        for line in script.lines:
+            # Determine category (similar logic to get_vo_script)
+            category_id = getattr(line, 'category_id', None)
+            category_name = "Uncategorized"
+            category_obj = None
+            if category_id: # Line has direct category_id (custom line)
+                category_obj = db.query(models.VoScriptTemplateCategory).get(category_id)
+            elif line.template_line and line.template_line.category: # Line linked via template
+                 category_obj = line.template_line.category
+            
+            if category_obj:
+                category_name = category_obj.name
+                category_id = category_obj.id # Ensure we have the ID
+            
+            if category_id not in lines_by_category:
+                 lines_by_category[category_id] = {'name': category_name, 'lines': []}
+            
+            # Simplified line data for Excel
+            line_data = {
+                'key': getattr(line, 'line_key', line.template_line.line_key if line.template_line else f'line_{line.id}'),
+                'text': line.generated_text or "",
+                'order': getattr(line, 'order_index', line.template_line.order_index if line.template_line else float('inf'))
+            }
+            lines_by_category[category_id]['lines'].append(line_data)
+
+        # Sort lines within each category, handling None values
+        for cat_id in lines_by_category:
+            lines_by_category[cat_id]['lines'].sort(key=lambda x: x['order'] if x['order'] is not None else float('inf'))
+
+        # --- Populate Categories and Lines ---
+        current_row = 4 # Start after header and a blank row
+        
+        # Sort categories by name (optional, but makes sense)
+        sorted_category_ids = sorted(lines_by_category.keys(), key=lambda cid: lines_by_category[cid]['name'])
+        
+        for category_id in sorted_category_ids:
+            category_data = lines_by_category[category_id]
+            category_name = category_data['name']
+            
+            # Category Header Row
+            cat_cell = ws[f'A{current_row}']
+            cat_cell.value = category_name
+            cat_cell.font = category_font
+            cat_cell.fill = category_fill
+            # Merge category header across a few columns for visibility
+            ws.merge_cells(f'A{current_row}:C{current_row}') 
+            current_row += 1
+            
+            # Line Rows
+            for line in category_data['lines']:
+                key_cell = ws[f'B{current_row}']
+                text_cell = ws[f'C{current_row}']
+                
+                key_cell.value = line['key']
+                text_cell.value = line['text']
+                text_cell.alignment = wrapped_alignment
+                
+                current_row += 1
+                
+            # Add a blank row between categories
+            current_row += 1
+
+        # --- Set Column Widths ---
+        ws.column_dimensions['A'].width = 30 # Category name
+        ws.column_dimensions['B'].width = 25 # Line Key
+        ws.column_dimensions['C'].width = 80 # Line Text
+
+        # --- Prepare Response ---
+        # Save workbook to a BytesIO buffer
+        excel_buffer = io.BytesIO()
+        wb.save(excel_buffer)
+        excel_buffer.seek(0) # Rewind buffer to the beginning
+
+        # Sanitize filename
+        sanitized_name = "".join(c if c.isalnum() or c in (' ', '_', '-') else '_' for c in script.name)
+        # Strip any trailing underscores that might result from sanitization
+        sanitized_name = sanitized_name.rstrip('_') 
+        # Also strip leading/trailing whitespace just in case
+        sanitized_name = sanitized_name.strip()
+        # Ensure filename isn't empty after stripping
+        if not sanitized_name:
+            sanitized_name = "vo_script"
+        filename = f"{sanitized_name}.xlsx"
+        
+        logging.info(f"Final calculated filename for download: '{filename}'") # ADD THIS LINE
+        logging.info(f"Generated Excel file for VO Script ID {script_id}")
+        
+        return send_file(
+            excel_buffer,
+            as_attachment=True,
+            download_name=filename,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+
+    except Exception as e:
+        logging.exception(f"Error generating Excel for VO script {script_id}: {e}")
+        # Ensure DB session is closed if active
+        if db and db.is_active: 
+            try: db.rollback() 
+            except: pass
+        return make_api_response(error="Failed to generate Excel file", status_code=500)
+    finally:
+        if db and db.is_active:
             db.close()
