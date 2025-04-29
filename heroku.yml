@@ -15,11 +15,11 @@ build:
     # api process removed
     worker: Dockerfile.worker
 
-# UPDATED: Release phase to use custom migration script
-release:
-  command:
-    - python run_migrations.py
-  image: release
+# Temporarily disabled until we can run migrations manually
+# release:
+#   command:
+#     - python run_migrations.py
+#   image: release
 
 run:
   # Run the consolidated start script for web
