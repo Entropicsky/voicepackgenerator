@@ -71,11 +71,14 @@ def create_vo_script():
         
         vo_script_lines_to_add = []
         for t_line in template_lines:
-            vo_script_lines_to_add.append(models.VoScriptLine(
+            # Create a new line with the template line's key copied over
+            new_line = models.VoScriptLine(
                 vo_script=new_vo_script, # Associate with the script being created
                 template_line_id=t_line.id,
-                status='pending' # Initial status for generation
-            ))
+                status='pending', # Initial status for generation
+                line_key=t_line.line_key  # Copy the line_key from the template line
+            )
+            vo_script_lines_to_add.append(new_line)
             
         if vo_script_lines_to_add:
             db.add_all(vo_script_lines_to_add)
@@ -1722,7 +1725,17 @@ def _generate_lines_batch(db: Session, script_id: int, pending_lines: list, exis
             
             logging.info(f"Updating line {line_id} with generated text: '{generated_text[:50]}...'")
             
-            # Update in DB
+            # Before updating in DB, make sure to fetch the line with template_line to copy line_key
+            line = db.query(models.VoScriptLine).options(
+                joinedload(models.VoScriptLine.template_line)
+            ).get(line_id)
+            
+            if line and line.line_key is None and line.template_line and line.template_line.line_key:
+                line.line_key = line.template_line.line_key
+                logging.info(f"Setting line_key '{line.template_line.line_key}' for line {line_id} during batch generation")
+                db.flush()  # Send this update to DB but don't commit yet
+                
+            # Continue with normal update through utility function
             updated_line = utils_voscript.update_line_in_db(
                 db, 
                 line_id, 

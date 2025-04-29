@@ -335,7 +335,10 @@ def update_line_in_db(db: Session, line_id: int, new_text: str, new_status: str,
         The updated VoScriptLine object if successful, otherwise None.
     """
     try:
-        line = db.query(models.VoScriptLine).get(line_id)
+        line = db.query(models.VoScriptLine).options(
+            joinedload(models.VoScriptLine.template_line)
+        ).get(line_id)
+        
         if not line:
             logging.warning(f"update_line_in_db: Line {line_id} not found for update.")
             return None
@@ -343,6 +346,11 @@ def update_line_in_db(db: Session, line_id: int, new_text: str, new_status: str,
         # Update main fields
         line.generated_text = new_text
         line.status = new_status
+        
+        # Copy the line_key from template_line if it's not already set
+        if line.line_key is None and line.template_line and line.template_line.line_key:
+            line.line_key = line.template_line.line_key
+            logging.info(f"Copying line_key '{line.template_line.line_key}' from template to line {line_id}")
 
         # Update history
         current_history = line.generation_history if isinstance(line.generation_history, list) else []
@@ -363,7 +371,7 @@ def update_line_in_db(db: Session, line_id: int, new_text: str, new_status: str,
     except Exception as e:
         db.rollback()
         logging.exception(f"Error updating line {line_id}: {e}")
-        return None 
+        return None
 
 def analyze_category_variety(db: Session, script_id: int, category_name: str) -> dict:
     """Analyzes the variety of lines in a category to identify potential repetition/similarity issues.
