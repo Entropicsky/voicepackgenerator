@@ -148,7 +148,11 @@ class VoScriptLine(Base):
     __tablename__ = "vo_script_lines"
     id = Column(Integer, primary_key=True)
     vo_script_id = Column(Integer, ForeignKey("vo_scripts.id"), nullable=False, index=True)
-    template_line_id = Column(Integer, ForeignKey("vo_script_template_lines.id"), nullable=False, index=True)
+    template_line_id = Column(Integer, ForeignKey("vo_script_template_lines.id"), nullable=True, index=True)
+    category_id = Column(Integer, ForeignKey("vo_script_template_categories.id"), nullable=True, index=True)
+    line_key = Column(String(255), nullable=True)
+    order_index = Column(Integer, nullable=True)
+    prompt_hint = Column(Text, nullable=True)
     generated_text = Column(Text, nullable=True)
     status = Column(String(50), nullable=False, default='pending', index=True)
     generation_history = Column(JSON().with_variant(postgresql.JSONB, "postgresql"), nullable=True) # Optional history

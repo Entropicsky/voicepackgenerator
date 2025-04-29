@@ -46,6 +46,7 @@ services:
       - PYTHONPATH=/app # Explicitly add project root to path
       # Add DATABASE_URL for local Postgres
       - DATABASE_URL=postgresql://postgres:password@db:5432/app
+      - LOG_LEVEL=DEBUG # Set log level to DEBUG
     # Command to run the Flask dev server (host 0.0.0.0 makes it accessible)
     command: flask --app backend.app:app run --host=0.0.0.0 --port=5000
     depends_on:

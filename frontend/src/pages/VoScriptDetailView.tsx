@@ -5,7 +5,7 @@ import {
     Title, Text, Paper, Stack, Group, Button, LoadingOverlay, Alert, 
     Accordion, Textarea, ActionIcon, Tooltip, Badge, Table, Modal, TextInput, Progress, ScrollArea
 } from '@mantine/core';
-import { IconPlayerPlay, IconSend, IconRefresh, IconDeviceFloppy, IconSparkles, IconLock, IconLockOpen, IconTrash, IconPlus, IconHistory } from '@tabler/icons-react';
+import { IconPlayerPlay, IconSend, IconRefresh, IconDeviceFloppy, IconSparkles, IconLock, IconLockOpen, IconTrash, IconPlus, IconHistory, IconCheck } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useDisclosure } from '@mantine/hooks';
 
@@ -21,10 +21,8 @@ const VoScriptDetailView: React.FC = () => {
 
   // --- State --- //
   const [feedbackInputs, setFeedbackInputs] = useState<Record<number, string>>({}); 
-  const [scriptRefinementPrompt, setScriptRefinementPrompt] = useState<string>('');
   const [categoryRefinementPrompts, setCategoryRefinementPrompts] = useState<Record<string, string>>({}); // { categoryName: promptText }
-  const [isScriptPromptDirty, setIsScriptPromptDirty] = useState(false);
-  const [isCategoryPromptDirty, setIsCategoryPromptDirty] = useState<Record<string, boolean>>({}); // { categoryName: boolean }
+  const [isDescriptionDirty, setIsDescriptionDirty] = useState<boolean>(false);
   // NEW: State for line refinement loading status
   const [refiningLineId, setRefiningLineId] = useState<number | null>(null);
   // NEW: State for category refinement loading status
@@ -33,7 +31,6 @@ const VoScriptDetailView: React.FC = () => {
   const [isRefiningScript, setIsRefiningScript] = useState<boolean>(false);
   // NEW: State for editable character description
   const [editedCharacterDescription, setEditedCharacterDescription] = useState<string>('');
-  const [isDescriptionDirty, setIsDescriptionDirty] = useState<boolean>(false);
   // NEW: State for inline text edits { lineId: editedText }
   const [editedLineText, setEditedLineText] = useState<Record<number, string>>({});
   // NEW: State for manual save loading
@@ -65,6 +62,15 @@ const VoScriptDetailView: React.FC = () => {
   // NEW: State for History Modal
   const [historyModalOpened, { open: openHistoryModal, close: closeHistoryModal }] = useDisclosure(false);
   const [lineToViewHistory, setLineToViewHistory] = useState<VoScriptLineData | null>(null);
+  // NEW: State for controlled accordion
+  const [openCategories, setOpenCategories] = useState<string[]>([]); 
+  // NEW: State for Category Refine Modal
+  const [categoryRefineModalOpened, { open: openCategoryRefineModal, close: closeCategoryRefineModal }] = useDisclosure(false);
+  const [categoryToRefine, setCategoryToRefine] = useState<{ id: number | null, name: string } | null>(null);
+  const [categoryRefinePromptInput, setCategoryRefinePromptInput] = useState<string>('');
+  // NEW: State for Script Refine Modal
+  const [scriptRefineModalOpened, { open: openScriptRefineModal, close: closeScriptRefineModal }] = useDisclosure(false);
+  const [scriptRefinePromptInput, setScriptRefinePromptInput] = useState<string>('');
 
   // --- 1. Fetch VO Script Details --- //
   const { 
@@ -82,40 +88,12 @@ const VoScriptDetailView: React.FC = () => {
   // --- Initialize state based on fetched data --- //
   useEffect(() => {
     if (voScript) {
-        setScriptRefinementPrompt(voScript.refinement_prompt || '');
-        const initialCategoryPrompts: Record<string, string> = {};
-        voScript.categories?.forEach((cat: VoScriptCategoryData) => {
-            initialCategoryPrompts[cat.name] = cat.refinement_prompt || '';
-        });
-        setCategoryRefinementPrompts(initialCategoryPrompts);
-        // Initialize editable description
         setEditedCharacterDescription(voScript.character_description || ''); 
-        setIsScriptPromptDirty(false);
-        setIsCategoryPromptDirty({});
-        setIsDescriptionDirty(false); // Reset dirty flag for description
+        setIsDescriptionDirty(false);
+        const allCategoryNames = voScript.categories?.map(c => c.name) || [];
+        setOpenCategories(allCategoryNames);
     }
   }, [voScript]);
-
-  // --- 2. Mutation for Running the Agent --- //
-  const runAgentMutation = useMutation<JobSubmissionResponse, Error, RunAgentPayload>({
-    mutationFn: (payload) => api.runVoScriptAgent(numericScriptId!, payload), // Use actual API function
-    onSuccess: (data, variables) => {
-      notifications.show({
-        title: 'Agent Job Submitted',
-        message: `Agent task '${variables.task_type}' (Job ID: ${data.job_id}) submitted successfully. Monitor progress on the Jobs page.`,
-        color: 'blue',
-      });
-      // Consider invalidating or refetching after a delay?
-      // setTimeout(() => queryClient.invalidateQueries({ queryKey: ['voScriptDetail', numericScriptId] }), 5000);
-    },
-    onError: (err, variables) => {
-       notifications.show({
-        title: 'Error Running Agent',
-        message: err.message || `Could not submit agent task '${variables.task_type}'.`,
-        color: 'red',
-      });
-    },
-  });
 
   // --- 3. Mutation for Submitting Feedback --- //
   const submitFeedbackMutation = useMutation<VoScriptLineData, Error, SubmitFeedbackPayload>({
@@ -150,27 +128,25 @@ const VoScriptDetailView: React.FC = () => {
     },
   });
 
-  // --- NEW: Script Prompt Update Mutation --- //
+  // --- RE-ADD: Script Update Mutation (for Character Description) --- //
   const updateScriptPromptMutation = useMutation<VoScript, Error, UpdateVoScriptPayload>({
     mutationFn: (payload) => api.updateVoScript(numericScriptId!, payload),
     onSuccess: (updatedScript) => {
         queryClient.setQueryData<VoScript>(['voScriptDetail', numericScriptId], (oldData) => 
            oldData ? { 
                ...oldData, 
-               refinement_prompt: updatedScript.refinement_prompt !== undefined ? updatedScript.refinement_prompt : oldData.refinement_prompt,
+               // Only handle character_description update here
                character_description: updatedScript.character_description !== undefined ? updatedScript.character_description : oldData.character_description,
                updated_at: updatedScript.updated_at
             } : oldData
         );
-        if (updatedScript.refinement_prompt !== undefined) {
-            setScriptRefinementPrompt(updatedScript.refinement_prompt || '');
-            setIsScriptPromptDirty(false); 
-        }
+        // Only handle description state update here
         if (updatedScript.character_description !== undefined) {
              setEditedCharacterDescription(updatedScript.character_description || '');
              setIsDescriptionDirty(false);
         }
-        notifications.show({ title: 'Script Updated', message: 'Script details saved successfully.', color: 'green' });
+        // Adjust notification if needed, or keep general
+        notifications.show({ title: 'Script Updated', message: 'Script details saved successfully.', color: 'green' }); 
     },
     onError: (err) => {
         notifications.show({ title: 'Error Saving Script Details', message: err.message, color: 'red' });
@@ -197,7 +173,6 @@ const VoScriptDetailView: React.FC = () => {
             };
         });
         setCategoryRefinementPrompts(prev => ({ ...prev, [updatedCategory.name]: updatedCategory.refinement_prompt || '' }));
-        setIsCategoryPromptDirty(prev => ({ ...prev, [updatedCategory.name]: false })); 
         notifications.show({ title: 'Category Prompt Saved', message: `Refinement prompt for category '${updatedCategory.name}' updated.`, color: 'green' });
     },
     onError: (err) => {
@@ -287,6 +262,33 @@ const VoScriptDetailView: React.FC = () => {
     },
   });
   // --- END: Category Refinement Mutation --- //
+
+  // --- NEW: Generate Single Line Mutation --- //
+  const generateLineMutation = useMutation<VoScriptLineData, Error, { lineId: number }>({ 
+      mutationFn: ({ lineId }) => api.generateVoScriptLine(numericScriptId!, lineId),
+      // Note: onSuccess/onError/onSettled for individual lines during orchestration
+      // will be handled within the loop calling mutateAsync, but we can define
+      // generic handlers here if needed for other use cases later.
+      onSuccess: (updatedLine) => {
+        // Update cache for this single generated line
+        queryClient.setQueryData<VoScript>(['voScriptDetail', numericScriptId], (oldData) => {
+            if (!oldData) return oldData;
+            return {
+              ...oldData,
+              categories: oldData.categories?.map(cat => ({
+                 ...cat,
+                 lines: cat.lines.map(l => l.id === updatedLine.id ? { ...l, ...updatedLine } : l)
+              }))
+            };
+        });
+        // Don't show notification here, will be handled by orchestration
+      },
+      onError: (err, variables) => {
+        // Error will be caught and logged by the orchestration loop
+        console.error(`Error generating line ${variables.lineId} via mutation:`, err);
+      },
+      // No specific onMutate/onSettled needed here as loading is handled by orchestration state
+  });
 
   // --- NEW: Script Refinement Mutation --- //
   const refineScriptMutation = useMutation<RefineMultipleLinesResponse, Error, { payload: RefineScriptPayload }>({
@@ -487,7 +489,52 @@ const VoScriptDetailView: React.FC = () => {
   });
   // --- END: Add Line Mutation --- //
 
+  // --- NEW: Accept Line Mutation --- //
+  const acceptLineMutation = useMutation<VoScriptLineData, Error, { lineId: number }>({ 
+      mutationFn: ({ lineId }) => api.acceptVoScriptLine(numericScriptId!, lineId),
+      onSuccess: (updatedLine) => {
+        queryClient.setQueryData<VoScript>(['voScriptDetail', numericScriptId], (oldData) => {
+            if (!oldData) return oldData;
+            return {
+              ...oldData,
+              categories: oldData.categories?.map(cat => ({
+                 ...cat,
+                 lines: cat.lines.map(l => l.id === updatedLine.id ? { ...l, ...updatedLine } : l)
+              }))
+            };
+        });
+        notifications.show({
+              title: 'Line Accepted',
+              message: `Line ${updatedLine.id} status set to '${updatedLine.status}'.`,
+              color: 'teal',
+          });
+      },
+      onError: (err, variables) => {
+          notifications.show({
+              title: 'Error Accepting Line',
+              message: err.message || `Could not accept line ${variables.lineId}.`,
+              color: 'red',
+          });
+      },
+       // Add onMutate/onSettled if specific loading state is desired for the accept button
+       // onMutate: (variables) => { /* set loading state */ },
+       // onSettled: () => { /* clear loading state */ },
+  });
+
   // --- Helper Functions --- //
+
+  // NEW: Helper to get color based on line status
+  const getStatusColorForLine = (status: string): string => {
+    switch (status?.toLowerCase()) {
+        case 'generated': return 'blue';
+        case 'review': return 'orange';
+        case 'manual': return 'gray';
+        case 'pending': return 'yellow';
+        case 'failed': return 'red';
+        default: return 'gray'; // Default color
+    }
+  };
+  
   const handleFeedbackChange = (lineId: number, value: string) => {
     setFeedbackInputs(prev => ({ ...prev, [lineId]: value }));
   };
@@ -501,101 +548,124 @@ const VoScriptDetailView: React.FC = () => {
     submitFeedbackMutation.mutate({ line_id: lineId, feedback_text: feedbackText });
   };
   
-  const handleRunAgent = (taskType: 'generate_draft') => { 
-      let payload: RunAgentPayload = { task_type: taskType };
-      console.log("Running agent with payload:", payload);
-      runAgentMutation.mutate(payload);
-  }
+  // REFACTORED: Generate Draft orchestrates on frontend
+  const handleGenerateDraft = async () => { 
+      if (numericScriptId === undefined || !voScript) return;
 
-  const handleScriptPromptChange = (value: string) => {
-    setScriptRefinementPrompt(value);
-    setIsScriptPromptDirty(true);
-  };
+      console.log("Starting frontend draft generation orchestration...");
+      setIsRefiningScript(true); // Re-use the global loading/progress state
 
-  const handleSaveScriptPrompt = () => {
-    updateScriptPromptMutation.mutate({ refinement_prompt: scriptRefinementPrompt });
-  };
+      // 1. Identify pending lines
+      const linesToProcess: VoScriptLineData[] = [];
+      voScript.categories?.forEach(cat => {
+          cat.lines.forEach(line => {
+              // Target lines specifically in 'pending' status for initial generation
+              if (line.status === 'pending') { 
+                  linesToProcess.push(line);
+              }
+          });
+      });
 
-  const handleCategoryPromptChange = (categoryName: string, value: string) => {
-    setCategoryRefinementPrompts(prev => ({ ...prev, [categoryName]: value }));
-    setIsCategoryPromptDirty(prev => ({ ...prev, [categoryName]: true }));
-  };
-
-  const handleSaveCategoryPrompt = (categoryName: string, categoryId?: number) => {
-    if (categoryId === undefined) {
-         console.error("Cannot save category prompt without category ID.");
-         notifications.show({ title: 'Error', message: 'Cannot save prompt, category ID missing.', color: 'red' });
-         return;
-    }
-    const promptText = categoryRefinementPrompts[categoryName];
-    updateCategoryPromptMutation.mutate({ 
-        categoryId: categoryId,
-        payload: { refinement_prompt: promptText }
-    });
-  };
-
-  // REWORKED: Implicitly saves prompt if dirty, then triggers category refinement
-  const handleRefineCategory = async (categoryId: number | null, categoryName: string) => {
-      const promptText = categoryRefinementPrompts[categoryName];
-      if (!promptText?.trim()) {
-          notifications.show({ message: `Category refinement prompt for '${categoryName}' cannot be empty.`, color: 'orange' });
+      if (linesToProcess.length === 0) {
+          notifications.show({ message: 'No pending lines found to generate.', color: 'blue' });
+          setIsRefiningScript(false); // Clear loading state
           return;
       }
-      if (numericScriptId === undefined) return; 
 
-      // --- Implicit Save Logic --- //
-      if (isCategoryPromptDirty[categoryName] && categoryId !== null) {
-          console.log(`Implicitly saving dirty prompt for category: ${categoryName}`);
+      // 2. Initialize Progress State
+      setRefinementProgress({
+          total: linesToProcess.length,
+          completed: 0,
+          currentKey: null,
+          errors: [],
+          running: true 
+      });
+
+      // 3. Process lines sequentially
+      const errorMessages: string[] = [];
+      for (const line of linesToProcess) {
+          setRefinementProgress(prev => ({ ...prev, currentKey: line.line_key || `ID: ${line.id}` }));
+          
           try {
-              await updateCategoryPromptMutation.mutateAsync({ 
-                  categoryId: categoryId,
-                  payload: { refinement_prompt: promptText }
-              });
-              console.log(`Implicit save successful for category: ${categoryName}`);
-          } catch (error) {
-              console.error(`Implicit save failed for category ${categoryName}:`, error);
-              return; 
+              // Call the NEW generate mutation for this line
+              await generateLineMutation.mutateAsync({ lineId: line.id }); 
+          } catch (error: any) { 
+              console.error(`Error generating line ${line.id}:`, error);
+              errorMessages.push(`Line ${line.line_key || line.id}: ${error.message || 'Unknown API error'}`); // Use API error if possible
           }
-      } else {
-          console.log(`Category prompt for ${categoryName} is not dirty or categoryId is null, skipping implicit save.`);
+          
+          // Update progress
+           setRefinementProgress(prev => ({ 
+                ...prev, 
+                completed: prev.completed + 1, 
+                currentKey: null, 
+                errors: errorMessages 
+            }));
       }
-      // --- End Implicit Save Logic --- //
-      
-      console.log(`Triggering refinement mutation for category: ${categoryName}`);
-      refineCategoryMutation.mutate({ 
-          categoryId,
-          payload: { category_name: categoryName, category_prompt: promptText }
+
+      // 4. Finalize
+      setIsRefiningScript(false); 
+      setRefinementProgress(prev => ({ ...prev, running: false, currentKey: null }));
+      notifications.show({
+          title: 'Draft Generation Complete',
+          message: errorMessages.length > 0 
+              ? `Finished with ${errorMessages.length} error(s). Check console/notifications for details.` 
+              : `All ${linesToProcess.length} pending lines generated successfully.`,
+          color: errorMessages.length > 0 ? 'orange' : 'green',
+          autoClose: 6000
       });
   };
 
-  // REFACTORED: Implicitly saves global prompt, then orchestrates script refinement
+  // UPDATED: Opens Category Refine Modal
+  const handleOpenCategoryRefineModal = (category: { id: number | null, name: string }) => {
+    setCategoryToRefine(category);
+    setCategoryRefinePromptInput(categoryRefinementPrompts[category.name] || ''); // Pre-fill with saved prompt if exists
+    openCategoryRefineModal();
+  };
+
+  // UPDATED: Handles submission from Category Refine Modal
+  const handleRefineCategory = async () => { // Now takes no args, uses state
+      if (!categoryToRefine || !categoryRefinePromptInput.trim()) {
+          notifications.show({ message: `Category refinement prompt cannot be empty.`, color: 'orange' });
+          return;
+      }
+      if (numericScriptId === undefined) return; 
+      
+      // No implicit save needed as prompt is from modal
+      
+      console.log(`Triggering refinement mutation for category: ${categoryToRefine.name}`);
+      refineCategoryMutation.mutate({
+          categoryId: categoryToRefine.id,
+          payload: { 
+              category_name: categoryToRefine.name, 
+              category_prompt: categoryRefinePromptInput // Use modal input state
+          }
+      }, {
+          onSuccess: () => closeCategoryRefineModal(), // Close modal on success
+          onError: () => { /* Error already handled by mutation */ }
+      });
+  };
+
+  // UPDATED: Opens Script Refine Modal (No longer pre-fills)
+  const handleOpenScriptRefineModal = () => {
+      setScriptRefinePromptInput(''); // Start with empty prompt
+      openScriptRefineModal();
+  };
+  
+  // UPDATED: Handles submission from Script Refine Modal
   const handleRefineScript = async () => {
-      const globalPromptText = scriptRefinementPrompt;
+      const globalPromptText = scriptRefinePromptInput; // Use modal input state
       if (!globalPromptText?.trim()) {
           notifications.show({ message: `Overall script refinement prompt cannot be empty.`, color: 'orange' });
           return;
       }
       if (numericScriptId === undefined || !voScript) return;
       
-      setIsRefiningScript(true); // Set loading state early
+      closeScriptRefineModal(); // Close modal immediately before starting long process
+      setIsRefiningScript(true); 
       
-      // --- Implicit Save Logic for Global Prompt --- //
-      if (isScriptPromptDirty) {
-          console.log("Implicitly saving dirty global script prompt...");
-          try {
-              await updateScriptPromptMutation.mutateAsync({ 
-                  refinement_prompt: globalPromptText 
-              });
-              console.log("Implicit save successful for global prompt.");
-          } catch (error) {
-              console.error("Implicit save failed for global script prompt:", error);
-              setIsRefiningScript(false); // Clear loading state on save failure
-              return; // Stop if save fails
-          }
-      }
-      // --- End Implicit Save Logic --- //
+      // NO implicit save needed for global prompt from modal
       
-      // --- Proceed with Refinement Orchestration --- //
       console.log("Starting frontend refinement orchestration...");
       
       // 1. Identify lines (remains the same)
@@ -816,6 +886,16 @@ Rewrite the 'Current Line Text' based on ALL applicable prompts above (Global, C
     openHistoryModal();
   };
 
+  // NEW: Handlers for Expand/Collapse All
+  const handleExpandAll = () => {
+      const allCategoryNames = voScript?.categories?.map(c => c.name) || [];
+      setOpenCategories(allCategoryNames);
+  };
+
+  const handleCollapseAll = () => {
+      setOpenCategories([]);
+  };
+
   // --- 4. Render View --- //
   if (!numericScriptId) {
     return <Alert color="red">Invalid Script ID provided in URL.</Alert>;
@@ -834,18 +914,17 @@ Rewrite the 'Current Line Text' based on ALL applicable prompts above (Global, C
   }
 
   // Determine overall script generation status (simplified)
-  const isGenerating = runAgentMutation.isPending; // Basic check if agent is running
+  const isGenerating = false; // Basic check if agent is running
   const hasPending = voScript.categories?.some(cat => cat.lines.some(l => l.status === 'pending'));
   const hasFeedback = voScript.categories?.some(cat => cat.lines.some(l => !!l.latest_feedback));
   // Determine if any category refine is running for button states
-  const refiningCategory = runAgentMutation.isPending && runAgentMutation.variables?.task_type === 'refine_category';
-  const refiningWhichCategory = refiningCategory ? runAgentMutation.variables?.category_name : null;
+  const refiningCategory = false;
+  const refiningWhichCategory = refiningCategory ? 'N/A' : null;
 
   return (
     <Stack>
-        <Text>-- COMPONENT RENDER TEST --</Text>
+        {/* <Text>-- COMPONENT RENDER TEST --</Text> */}
         
-        {/* Temporarily comment out entire original content */}
         {/* UNCOMMENTING Progress and Header */}
         {/* <LoadingOverlay visible={isRefiningScript} overlayProps={{ radius: "sm", blur: 2 }} /> */}
         {refinementProgress.running && (
@@ -885,76 +964,71 @@ Rewrite the 'Current Line Text' based on ALL applicable prompts above (Global, C
                 </Badge>
                 <Button 
                     leftSection={<IconPlayerPlay size={14} />} 
-                    onClick={() => handleRunAgent('generate_draft')} 
-                    disabled={runAgentMutation.isPending || isRefiningScript}
-                    loading={runAgentMutation.isPending && runAgentMutation.variables?.task_type === 'generate_draft'}
+                    onClick={handleGenerateDraft}
+                    disabled={isRefiningScript}
+                    loading={isRefiningScript}
                     variant="gradient" gradient={{ from: 'blue', to: 'cyan' }}
                 >
                     Generate Draft
                 </Button>
                 <Button 
                     leftSection={<IconSparkles size={14} />} 
-                    onClick={handleRefineScript}
-                    disabled={isRefiningScript || runAgentMutation.isPending}
+                    onClick={handleOpenScriptRefineModal}
+                    disabled={isRefiningScript}
                     loading={isRefiningScript}
                     variant="gradient" gradient={{ from: 'teal', to: 'lime' }}
                 >
                     Refine Script
                 </Button> 
+                <Button size="xs" variant="outline" onClick={handleExpandAll} ml="lg">Expand All Categories</Button>
+                <Button size="xs" variant="outline" onClick={handleCollapseAll}>Collapse All Categories</Button>
             </Group>
         </Group>
         
-        {/* UNCOMMENTING Prompt and Description Papers */}
-        <Paper withBorder p="md" mt="md">
-            <Group justify="space-between" mb="xs">
-                <Title order={4}>Overall Script Refinement Prompt</Title>
-                <Button 
-                    size="xs" 
-                    variant="light" 
-                    leftSection={<IconDeviceFloppy size={14}/>}
-                    onClick={handleSaveScriptPrompt}
-                    disabled={!isScriptPromptDirty || updateScriptPromptMutation.isPending || isRefiningScript}
-                    loading={updateScriptPromptMutation.isPending}
-                >
-                    Save Script Prompt
-                </Button>
-            </Group>
-            <Textarea
-                placeholder="Enter overall instructions... Click 'Refine Script' above to apply."
-                value={scriptRefinementPrompt}
-                onChange={(e) => handleScriptPromptChange(e.currentTarget.value)}
-                minRows={3}
-                autosize
-                disabled={updateScriptPromptMutation.isPending || isRefiningScript}
-            />
-        </Paper>
-        
-        <Paper withBorder p="md" mt="md">
-             <Group justify="space-between" mb="xs">
-                <Title order={4}>Character Description</Title>
-                 <Button
-                    size="xs"
-                    variant="light"
-                    leftSection={<IconDeviceFloppy size={14}/>}
-                    onClick={handleSaveDescription}
-                    disabled={!isDescriptionDirty || updateScriptPromptMutation.isPending || isRefiningScript}
-                    loading={updateScriptPromptMutation.isPending}
-                 >
-                    Save Description
-                 </Button>
-            </Group>
-            <Textarea
-                placeholder="Enter detailed character description..."
-                value={editedCharacterDescription}
-                onChange={(event) => handleDescriptionChange(event.currentTarget.value)}
-                minRows={5} 
-                autosize
-                disabled={updateScriptPromptMutation.isPending || isRefiningScript}
-            />
-        </Paper>
+        {/* Display Character Description - NOW COLLAPSIBLE */}
+        <Accordion> 
+            <Accordion.Item value="character-description">
+                <Accordion.Control>
+                    <Title order={4}>Character Description</Title>
+                 </Accordion.Control>
+                 <Accordion.Panel>
+                    <Paper withBorder p="md" mt="xs"> {/* Use mt=xs or remove if panel provides padding */} 
+                        <Group justify="space-between" mb="xs">
+                            {/* Removed Title from here as it's in Accordion.Control */}
+                            {/* <Title order={4}>Character Description</Title> */}
+                            {/* Use an empty span or fragment to push button right, or adjust Group props */}
+                            <span /> {/* Keep button pushed right */} 
+                            <Button
+                                size="xs"
+                                variant="light"
+                                leftSection={<IconDeviceFloppy size={14}/>}
+                                onClick={handleSaveDescription}
+                                disabled={!isDescriptionDirty || updateScriptPromptMutation.isPending || isRefiningScript}
+                                loading={updateScriptPromptMutation.isPending}
+                            >
+                                Save Description
+                            </Button>
+                        </Group>
+                        <Textarea
+                            placeholder="Enter detailed character description..."
+                            value={editedCharacterDescription}
+                            onChange={(event) => handleDescriptionChange(event.currentTarget.value)}
+                            minRows={5} 
+                            autosize
+                            disabled={updateScriptPromptMutation.isPending || isRefiningScript}
+                        />
+                    </Paper>
+                </Accordion.Panel>
+            </Accordion.Item>
+        </Accordion>
 
         {/* UNCOMMENTING Accordion */}
-        <Accordion multiple defaultValue={voScript?.categories?.map((c: VoScriptCategoryData) => c.name) || []}>
+        <Accordion 
+            multiple 
+            value={openCategories} // Use state value
+            onChange={setOpenCategories} // Use state setter
+            // remove defaultValue={voScript?.categories?.map((c: VoScriptCategoryData) => c.name) || []}
+        >
            {(voScript?.categories || []).map((category: VoScriptCategoryData) => ( 
             <Accordion.Item key={category.name} value={category.name}>
                 <Accordion.Control>
@@ -970,7 +1044,7 @@ Rewrite the 'Current Line Text' based on ALL applicable prompts above (Global, C
                             leftSection={<IconRefresh size={12} />} 
                             onClick={(e) => { 
                                 e.stopPropagation(); 
-                                handleRefineCategory(category.id, category.name);
+                                handleOpenCategoryRefineModal({ id: category.id, name: category.name });
                             }}
                             disabled={refineCategoryMutation.isPending && refiningCategoryId === category.id}
                             loading={refineCategoryMutation.isPending && refiningCategoryId === category.id}
@@ -980,29 +1054,7 @@ Rewrite the 'Current Line Text' based on ALL applicable prompts above (Global, C
                     </Group>
                 </Accordion.Control>
                 <Accordion.Panel>
-                    <Paper withBorder p="sm" radius="sm" mb="md" bg="gray.0">
-                        <Group justify="space-between" mb="xs">
-                            <Title order={5}>Category Refinement Prompt</Title>
-                            <Button 
-                                size="xs" 
-                                variant="outline" 
-                                leftSection={<IconDeviceFloppy size={12}/>}
-                                onClick={() => category.id !== null && handleSaveCategoryPrompt(category.name, category.id)}
-                                disabled={!isCategoryPromptDirty[category.name] || updateCategoryPromptMutation.isPending || category.id === null || (refineCategoryMutation.isPending && refiningCategoryId === category.id)}
-                                loading={updateCategoryPromptMutation.isPending && updateCategoryPromptMutation.variables?.categoryId === category.id}
-                            >
-                                Save Category Prompt
-                            </Button>
-                        </Group>
-                        <Textarea
-                            placeholder={`Enter instructions specific to refining the '${category.name}' category... Click \"Refine Category\" above to apply.`}
-                            value={categoryRefinementPrompts[category.name] || ''}
-                            onChange={(e) => handleCategoryPromptChange(category.name, e.currentTarget.value)}
-                            minRows={2}
-                            autosize
-                            disabled={updateCategoryPromptMutation.isPending || (refineCategoryMutation.isPending && refiningCategoryId === category.id)}
-                            />
-                    </Paper>
+                    {/* Add Save Category button standalone */}
                     <Table striped highlightOnHover withTableBorder withColumnBorders mt="md">
                        <Table.Thead>
                             <Table.Tr>
@@ -1036,8 +1088,19 @@ Rewrite the 'Current Line Text' based on ALL applicable prompts above (Global, C
                                                 </Tooltip>
                                             </Table.Td>
                                             <Table.Td>
-                                                <Text size="sm" fw={500}>{line.line_key || `(ID: ${line.id})`}</Text>
-                                                {line.template_prompt_hint && <Text size="xs" c="dimmed">Hint: {line.template_prompt_hint}</Text>}
+                                                {/* Display Line Key and Status */}
+                                                <Group wrap="nowrap" gap="xs">
+                                                     <Text size="sm" fw={500}>{line.line_key || `(ID: ${line.id})`}</Text>
+                                                     <Badge 
+                                                        variant="light" 
+                                                        size="xs" 
+                                                        radius="sm"
+                                                        color={getStatusColorForLine(line.status)}
+                                                     >
+                                                         {line.status}
+                                                    </Badge>
+                                                 </Group>
+                                                {line.template_prompt_hint && <Text size="xs" c="dimmed" mt={2}>Hint: {line.template_prompt_hint}</Text>}
                                             </Table.Td>
                                             <Table.Td>
                                                 <Textarea
@@ -1055,6 +1118,22 @@ Rewrite the 'Current Line Text' based on ALL applicable prompts above (Global, C
                                             </Table.Td>
                                             <Table.Td>
                                                 <Group gap="xs" wrap="nowrap">
+                                                     {/* Add Accept Button Conditionally */} 
+                                                     {line.status === 'review' && (
+                                                        <Tooltip label="Accept Refined Text">
+                                                            <ActionIcon 
+                                                                size="sm" 
+                                                                variant="filled"
+                                                                color="teal" // Use a distinct color
+                                                                onClick={() => acceptLineMutation.mutate({ lineId: line.id })}
+                                                                disabled={isBeingModified} 
+                                                                loading={acceptLineMutation.isPending && acceptLineMutation.variables?.lineId === line.id}
+                                                            >
+                                                                <IconCheck size={14} />
+                                                            </ActionIcon>
+                                                         </Tooltip>
+                                                     )}
+                                                     {/* Refine Button */}
                                                      <Tooltip label={line.is_locked ? "Line is locked" : "Refine Line"}>
                                                         <ActionIcon 
                                                             size="sm" 
@@ -1067,6 +1146,7 @@ Rewrite the 'Current Line Text' based on ALL applicable prompts above (Global, C
                                                             <IconSparkles size={14} />
                                                         </ActionIcon>
                                                      </Tooltip>
+                                                     {/* Save Button */}
                                                      <Tooltip label="Save Manual Edit">
                                                         <ActionIcon 
                                                             size="sm" 
@@ -1079,6 +1159,7 @@ Rewrite the 'Current Line Text' based on ALL applicable prompts above (Global, C
                                                             <IconDeviceFloppy size={14} />
                                                         </ActionIcon>
                                                      </Tooltip>
+                                                     {/* History Button */}
                                                      <Tooltip label="View History">
                                                         <ActionIcon 
                                                             size="sm" 
@@ -1090,6 +1171,7 @@ Rewrite the 'Current Line Text' based on ALL applicable prompts above (Global, C
                                                             <IconHistory size={14} />
                                                         </ActionIcon>
                                                      </Tooltip>
+                                                     {/* Delete Button */}
                                                      <Tooltip label="Delete Line">
                                                         <ActionIcon 
                                                             size="sm" 
@@ -1259,13 +1341,16 @@ Rewrite the 'Current Line Text' based on ALL applicable prompts above (Global, C
                                         size="xs" 
                                         variant="outline"
                                         onClick={() => {
-                                            handleSaveLineText({ 
-                                                ...lineToViewHistory,
-                                                generated_text: entry.text 
+                                            // Directly trigger the update mutation with the historical text
+                                            updateLineTextMutation.mutate({
+                                                lineId: lineToViewHistory.id,
+                                                newText: entry.text
                                             });
-                                            closeHistoryModal();
+                                            closeHistoryModal(); // Close modal after initiating revert
                                         }}
                                         disabled={savingLineId === lineToViewHistory.id || deletingLineId === lineToViewHistory.id || refiningLineId === lineToViewHistory.id || togglingLockLineId === lineToViewHistory.id}
+                                        // Add loading state specific to this revert action?
+                                        // loading={updateLineTextMutation.isPending && savingLineId === lineToViewHistory.id} // Re-use saving state? 
                                     >
                                         Revert to this version
                                     </Button>
@@ -1280,6 +1365,76 @@ Rewrite the 'Current Line Text' based on ALL applicable prompts above (Global, C
                     Close
                 </Button>
             </Group>
+        </Modal>
+
+        {/* --- NEW: Category Refine Modal --- */}
+        <Modal
+            opened={categoryRefineModalOpened}
+            onClose={closeCategoryRefineModal}
+            title={`Refine Category: ${categoryToRefine?.name || ''}`}
+            centered
+            size="lg"
+            withinPortal={false}
+        >
+            <Stack>
+                 <Textarea 
+                    label="Category Refinement Prompt"
+                    placeholder={`Enter instructions to refine all lines in the '${categoryToRefine?.name || ''}' category...`}
+                    required
+                    minRows={4}
+                    autosize
+                    value={categoryRefinePromptInput}
+                    onChange={(e) => setCategoryRefinePromptInput(e.currentTarget.value)}
+                    disabled={refineCategoryMutation.isPending && refiningCategoryId === categoryToRefine?.id}
+                 />
+                 <Group justify="flex-end" mt="md">
+                    <Button variant="default" onClick={closeCategoryRefineModal} disabled={refineCategoryMutation.isPending && refiningCategoryId === categoryToRefine?.id}>
+                        Cancel
+                    </Button>
+                    <Button 
+                        onClick={handleRefineCategory} // Call updated handler
+                        loading={refineCategoryMutation.isPending && refiningCategoryId === categoryToRefine?.id}
+                        disabled={!categoryRefinePromptInput.trim()}
+                    >
+                        Refine This Category
+                    </Button>
+                </Group>
+            </Stack>
+        </Modal>
+        
+        {/* --- NEW: Script Refine Modal --- */}
+        <Modal
+            opened={scriptRefineModalOpened}
+            onClose={closeScriptRefineModal}
+            title={`Refine Entire Script`}
+            centered
+            size="lg"
+            withinPortal={false}
+        >
+             <Stack>
+                 <Textarea 
+                    label="Overall Script Refinement Prompt"
+                    placeholder={`Enter instructions to refine the entire script...`}
+                    required
+                    minRows={4}
+                    autosize
+                    value={scriptRefinePromptInput}
+                    onChange={(e) => setScriptRefinePromptInput(e.currentTarget.value)}
+                    disabled={isRefiningScript} // Disable if script refinement orchestration is running
+                 />
+                 <Group justify="flex-end" mt="md">
+                    <Button variant="default" onClick={closeScriptRefineModal} disabled={isRefiningScript}>
+                        Cancel
+                    </Button>
+                    <Button 
+                        onClick={handleRefineScript} // Call updated handler
+                        loading={isRefiningScript} // Use orchestration loading state
+                        disabled={!scriptRefinePromptInput.trim()}
+                    >
+                        Refine Entire Script
+                    </Button>
+                </Group>
+            </Stack>
         </Modal>
     </Stack>
   );

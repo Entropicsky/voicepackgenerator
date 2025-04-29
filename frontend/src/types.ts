@@ -349,7 +349,9 @@ export interface VoScriptLineData {
   generation_history?: any[]; 
   order_index?: number;
   template_prompt_hint?: string; 
-  is_locked?: boolean; // Add is_locked field
+  is_locked?: boolean; 
+  created_at?: string | null; // Add created_at
+  updated_at?: string | null; // Add updated_at
 }
 
 // Represents a category containing lines for the detail view

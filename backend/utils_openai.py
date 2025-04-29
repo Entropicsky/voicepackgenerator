@@ -6,6 +6,7 @@ import os
 import logging
 import openai
 from typing import Optional
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 # Load the OpenAI API key from environment variables
 # Note: Ensure OPENAI_API_KEY is set in your .env file or environment
@@ -15,7 +16,20 @@ DEFAULT_REFINEMENT_MODEL = "gpt-4o"
 DEFAULT_MAX_TOKENS = 4096 # Updated based on GPT-4o max output limit
 DEFAULT_TEMPERATURE = 0.7 # Default for creative tasks
 
-# TODO: Implement call_openai_responses_api function and unit tests
+# Define which OpenAI exceptions should trigger a retry
+RETRYABLE_EXCEPTIONS = (
+    openai.APITimeoutError,
+    openai.APIConnectionError,
+    openai.RateLimitError,
+    # Retry on 5xx errors as well, might be temporary server issues
+    lambda e: isinstance(e, openai.APIStatusError) and e.status_code >= 500 
+)
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10), # Wait 2s, 4s, ... up to 10s between retries
+    retry=retry_if_exception_type(RETRYABLE_EXCEPTIONS)
+)
 def call_openai_responses_api(
     prompt: str,
     model: str = DEFAULT_REFINEMENT_MODEL,
@@ -55,9 +69,13 @@ def call_openai_responses_api(
             logging.warning("OpenAI API call returned empty output_text.")
             return None
 
-    except openai.APIError as e:
-        logging.exception(f"OpenAI API error occurred: {e}")
+    except openai.APIStatusError as e:
+        # Log specific non-retried API errors (like 4xx)
+        logging.error(f"OpenAI APIStatusError: Status={e.status_code}, Message={e.message}")
         return None
     except Exception as e:
-        logging.exception(f"Unexpected error during OpenAI API call: {e}")
+        # Catch other unexpected errors during the API call 
+        logging.exception(f"Unexpected error calling OpenAI API: {e}")
+        # Ensure non-retried exceptions are re-raised if retry decorator doesn't handle them
+        # or return None if we want to treat all other errors as failures
         return None 

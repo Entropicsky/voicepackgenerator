@@ -42,6 +42,7 @@ import {
   RefineCategoryPayload, // NEW
   RefineMultipleLinesResponse, // NEW
   RefineScriptPayload, // NEW
+  AddVoScriptLinePayload, // Ensure this is imported
 } from './types';
 
 // Define options for filtering/sorting voices
@@ -694,16 +695,28 @@ export const api = {
     const url = `${API_BASE}/api/vo-scripts/${scriptId}/lines/${lineId}/refine`;
     console.log(`[API] Refining line ${lineId} for script ${scriptId}:`, payload);
     const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
     });
     // Expects { data: VoScriptLineData }
     return handleApiResponse<RefineLineResponse>(response);
   },
 
+  // NEW: Generate Single Line
+  generateVoScriptLine: async (scriptId: number, lineId: number): Promise<VoScriptLineData> => {
+    const url = `${API_BASE}/api/vo-scripts/${scriptId}/lines/${lineId}/generate`;
+    console.log(`[API] Generating line ${lineId} for script ${scriptId}...`);
+    const response = await fetch(url, {
+        method: 'POST',
+        // No body needed for basic generation
+    });
+    // Expects { data: VoScriptLineData }
+    return handleApiResponse<VoScriptLineData>(response);
+  },
+  
   refineVoScriptCategory: async (scriptId: number, payload: RefineCategoryPayload): Promise<RefineMultipleLinesResponse> => {
     const url = `${API_BASE}/api/vo-scripts/${scriptId}/categories/refine`;
     console.log(`[API] Refining category ${payload.category_name} for script ${scriptId}:`, payload);
@@ -816,6 +829,18 @@ export const api = {
         body: JSON.stringify(payload),
     });
     // Expects { data: VoScriptLineData } (for the created line)
+    return handleApiResponse<VoScriptLineData>(response);
+  },
+
+  // NEW: Accept Line Function
+  acceptVoScriptLine: async (scriptId: number, lineId: number): Promise<VoScriptLineData> => {
+    const url = `${API_BASE}/api/vo-scripts/${scriptId}/lines/${lineId}/accept`;
+    console.log(`[API] Accepting line ${lineId} for script ${scriptId}...`);
+    const response = await fetch(url, {
+        method: 'PATCH',
+        // No body needed
+    });
+    // Expects { data: VoScriptLineData }
     return handleApiResponse<VoScriptLineData>(response);
   },
 

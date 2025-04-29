@@ -3,6 +3,7 @@
 from flask import Blueprint, request, jsonify
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm.attributes import flag_modified # Import flag_modified
 import logging
 import json # Added import
 import os
@@ -163,37 +164,129 @@ def get_vo_script(script_id):
         else:
              template_categories = {}
             
-        # Organize lines by category, fetching category data from the loaded template_categories dict
         lines_by_category = {}
-        ordered_lines = sorted(script.lines, key=lambda l: l.template_line.order_index if l.template_line else float('inf'))
+        lines_with_sort_key = []
+        # --- Prepare lines for sorting --- #
+        for line in script.lines:
+            sort_key = float('inf') 
+            custom_order_index = getattr(line, 'order_index', None)
+            if custom_order_index is not None:
+                sort_key = custom_order_index
+            elif line.template_line and line.template_line.order_index is not None:
+                sort_key = line.template_line.order_index
+            lines_with_sort_key.append({"line_obj": line, "sort_order": sort_key})    
+            
+        ordered_lines_data = sorted(lines_with_sort_key, key=lambda item: item["sort_order"]) 
         
-        for line in ordered_lines:
-            line_dict = { 
-              **model_to_dict(line, [
-                  'id', 'generated_text', 'status', 'latest_feedback', 
-                  'generation_history', 'is_locked'
-              ]), 
-              'template_line_id': line.template_line_id, 
-              'line_key': line.template_line.line_key if line.template_line else None,
-              'order_index': line.template_line.order_index if line.template_line else None,
-              'template_prompt_hint': line.template_line.prompt_hint if line.template_line else None,
-              'category_id': line.template_line.category_id if line.template_line else None
+        # --- Process sorted lines --- #
+        for item in ordered_lines_data:
+            line = item["line_obj"] 
+            # Corrected: Pass include list as positional argument
+            line_dict_base = model_to_dict(line, [
+                'id', 'generated_text', 'status', 'latest_feedback', 
+                'generation_history', 'is_locked', 'template_line_id',
+                'created_at', 'updated_at'
+            ])
+
+            # Explicitly and safely get other attributes
+            db_category_id = getattr(line, 'category_id', None)
+            db_line_key = getattr(line, 'line_key', None)
+            db_order_index = getattr(line, 'order_index', None)
+            db_prompt_hint = getattr(line, 'prompt_hint', None)
+            
+            template_line_key = line.template_line.line_key if line.template_line else None
+            template_order_index = line.template_line.order_index if line.template_line and line.template_line.order_index is not None else None
+            template_line_category_id = line.template_line.category_id if line.template_line else None
+            template_prompt_hint = line.template_line.prompt_hint if line.template_line else None
+
+            # Final determination logic (Prioritize direct values)
+            final_line_key = db_line_key or template_line_key
+            final_order_index = db_order_index if db_order_index is not None else template_order_index
+            final_prompt_hint = db_prompt_hint # Direct hint is primary
+            final_template_prompt_hint = template_prompt_hint # Hint from template
+            final_category_id = db_category_id or template_line_category_id # Prioritize direct ID
+                
+            # Combine into the final dictionary
+            line_dict = {
+                **line_dict_base,
+                'line_key': final_line_key,
+                'order_index': final_order_index,
+                'prompt_hint': final_prompt_hint, 
+                'template_prompt_hint': final_template_prompt_hint, 
+                'category_id': final_category_id
             }
             
-            category_id = line.template_line.category_id if line.template_line else None
-            category_info = template_categories.get(category_id) if category_id else None
+            # Ensure datetimes are strings (if model_to_dict didn't already)
+            line_dict['created_at'] = line_dict['created_at'].isoformat() if line_dict['created_at'] and hasattr(line_dict['created_at'], 'isoformat') else line_dict['created_at']
+            line_dict['updated_at'] = line_dict['updated_at'].isoformat() if line_dict['updated_at'] and hasattr(line_dict['updated_at'], 'isoformat') else line_dict['updated_at']
+
+            # --- Determine grouping category (Revised Logic w/ Logging) --- #
+            category_id_for_grouping = line_dict.get('category_id')
+            logging.debug(f"Line ID {line.id} (Key: {line_dict.get('line_key')}): Category ID for grouping = {category_id_for_grouping}") # LOG 1
             
-            category_name = category_info['name'] if category_info else "Uncategorized"
-            
+            # --- SIMPLIFIED CATEGORY LOOKUP ---
+            category_name = "Uncategorized" # Default
+            category_data_id = None
+            category_instructions = None
+            category_refinement_prompt = None
+
+            if category_id_for_grouping:
+                # Attempt to find category info directly using the ID
+                # Check the preloaded dict first for efficiency (for template lines)
+                category_info = template_categories.get(category_id_for_grouping)
+                if category_info:
+                    category_name = category_info['name']
+                    category_data_id = category_info['id']
+                    category_instructions = category_info['instructions']
+                    category_refinement_prompt = category_info['refinement_prompt']
+                    logging.debug(f"Line ID {line.id}: Found category '{category_name}' (ID: {category_data_id}) in pre-loaded template_categories.") # LOG 2a
+                else:
+                    # If not in preloaded dict (likely a custom line), query DB directly
+                    logging.debug(f"Line ID {line.id}: category_id {category_id_for_grouping} not in template_categories. Querying DB directly...") # LOG 2b
+                    category_obj = db.query(
+                        models.VoScriptTemplateCategory.id, 
+                        models.VoScriptTemplateCategory.name, 
+                        models.VoScriptTemplateCategory.prompt_instructions, 
+                        models.VoScriptTemplateCategory.refinement_prompt
+                    ).filter(models.VoScriptTemplateCategory.id == category_id_for_grouping).first()
+                    
+                    if category_obj:
+                        category_name = category_obj.name
+                        category_data_id = category_obj.id
+                        category_instructions = category_obj.prompt_instructions
+                        category_refinement_prompt = category_obj.refinement_prompt
+                        logging.debug(f"Line ID {line.id}: Found category '{category_obj.name}' (ID: {category_data_id}) via direct DB query.") # LOG 2c
+                    else:
+                        logging.warning(f"Line ID {line.id}: Could not find category details via direct DB query for existing category ID: {category_id_for_grouping}. Falling back to Uncategorized.") # LOG 2d
+                        # category_name remains "Uncategorized"
+            else:
+                 logging.debug(f"Line ID {line.id}: No category ID found.") # LOG 3 (Renumbered)
+
+            # Grouping logic uses potentially corrected category_name/id
             if category_name not in lines_by_category:
+                 # Initialize category group if it doesn't exist
                  lines_by_category[category_name] = {
-                     "id": category_id,
+                     "id": category_data_id, # Use ID found via lookup or None
                      'name': category_name,
-                     'instructions': category_info['instructions'] if category_info else None,
-                     'refinement_prompt': category_info['refinement_prompt'] if category_info else None, # Add category prompt
+                     'instructions': category_instructions, # Use instructions found via lookup or None
+                     'refinement_prompt': category_refinement_prompt, # Use prompt found via lookup or None
                      'lines': []
                  }
+                 # Add category details if newly created (might be redundant if always querying?)
+                 if category_data_id and category_name != "Uncategorized":
+                     logging.debug(f"Initialized category group '{category_name}' (ID: {category_data_id})")
+                 else:
+                      logging.debug(f"Initialized category group '{category_name}'")
+            
+            # Ensure category details are present if we added the line to an existing group fetched via fallback
+            if category_data_id and lines_by_category[category_name].get('id') is None:
+                 lines_by_category[category_name]['id'] = category_data_id
+                 lines_by_category[category_name]['instructions'] = category_instructions
+                 lines_by_category[category_name]['refinement_prompt'] = category_refinement_prompt
+                 logging.debug(f"Updated existing group '{category_name}' with details (ID: {category_data_id}) found via direct query.")
+
             lines_by_category[category_name]['lines'].append(line_dict)
+            logging.debug(f"Line ID {line.id}: Appended to category '{category_name}'.") # LOG 4 (Renumbered)
 
         script_data['categories'] = list(lines_by_category.values())
             
@@ -813,25 +906,41 @@ def update_vo_script_line_text(script_id: int, line_id: int):
         if not line:
             return jsonify({"error": f"Line not found with ID {line_id} for script {script_id}"}), 404
         
+        original_text = line.generated_text # Capture original text
+        original_status = line.status # Capture original status
+        
+        # --- Add "Before" history entry --- #
+        current_history = line.generation_history if isinstance(line.generation_history, list) else []
+        pre_history_entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "type": "pre_manual_edit", # Indicate state before manual edit
+            "text": original_text,
+            "model": "user",
+            "status_before": original_status # Optional: store previous status
+        }
+        current_history.append(pre_history_entry)
+        # Don't set line.generation_history yet, do it after adding the 'after' entry
+
         # Update text and set status to 'manual'
         line.generated_text = new_text
         line.status = 'manual' 
         line.latest_feedback = None # Clear feedback on manual edit
         
-        # Add to history (optional but good practice)
-        current_history = line.generation_history if isinstance(line.generation_history, list) else []
-        history_entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+        # Add "After" history entry
+        post_history_entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(), # Use a slightly later timestamp potentially?
             "type": "manual_edit",
             "text": new_text,
             "model": "user"
         }
-        current_history.append(history_entry)
+        current_history.append(post_history_entry)
         line.generation_history = current_history
+        # Flag as modified
+        flag_modified(line, "generation_history")
         
         db.commit()
         db.refresh(line)
-        logging.info(f"Manually updated text for line {line_id} (script {script_id})")
+        logging.info(f"Manually updated text for line {line_id} (script {script_id}), logged pre/post history.")
         
         # Manually construct simpler response dict (avoiding potentially unloaded attrs)
         response_data = {
@@ -851,7 +960,7 @@ def update_vo_script_line_text(script_id: int, line_id: int):
             "updated_at": line.updated_at.isoformat() if line.updated_at else None
         }
         # Return the updated line data using the standard wrapper
-        return make_api_response(data=response_data), 200
+        return make_api_response(data=response_data)
 
     except Exception as e:
         db.rollback()
@@ -893,7 +1002,7 @@ def delete_vo_script_line(script_id: int, line_id: int):
 @vo_script_bp.route('/vo-scripts/<int:script_id>/lines', methods=['POST'])
 def add_vo_script_line(script_id: int):
     """Adds a new custom line to a VO script."""
-    from backend.app import model_to_dict # Import locally
+    # from backend.app import model_to_dict # Import locally - Not needed now
     data = request.get_json()
     if not data:
         return jsonify({"error": "Missing request body"}), 400
@@ -939,21 +1048,38 @@ def add_vo_script_line(script_id: int):
             template_line_id=None, 
             generated_text=initial_text, 
             status='manual' if initial_text else 'pending',
-            is_locked=False 
-            # Cannot set category_id, line_key, order_index, prompt_hint here
+            is_locked=False
         )
-        # Set attributes after creation
+        # Set attributes after creation (Necessary due to model constructor)
         new_line.category_id = category.id
         new_line.line_key = line_key
         new_line.order_index = order_index
         new_line.prompt_hint = prompt_hint
         
         db.add(new_line)
+        db.flush() # Explicitly flush to send INSERT to DB before commit
         db.commit()
         db.refresh(new_line)
         logging.info(f"Added new custom line (key: {line_key}) with ID {new_line.id} to script {script_id} under category {category_name} (ID: {category.id})")
         
-        return jsonify({"data": model_to_dict(new_line)}), 201
+        # Manually construct response including category_id
+        response_data = {
+            "id": new_line.id,
+            "vo_script_id": new_line.vo_script_id,
+            "template_line_id": new_line.template_line_id, # Will be null
+            "category_id": new_line.category_id, # Include this!
+            "generated_text": new_line.generated_text,
+            "status": new_line.status,
+            "latest_feedback": new_line.latest_feedback,
+            "generation_history": new_line.generation_history,
+            "line_key": new_line.line_key,
+            "order_index": new_line.order_index,
+            "prompt_hint": new_line.prompt_hint,
+            "is_locked": new_line.is_locked,
+            "created_at": new_line.created_at.isoformat() if new_line.created_at else None,
+            "updated_at": new_line.updated_at.isoformat() if new_line.updated_at else None
+        }
+        return jsonify({"data": response_data}), 201 # Use jsonify directly
 
     except IntegrityError as e:
         db.rollback()
@@ -964,6 +1090,122 @@ def add_vo_script_line(script_id: int):
         db.rollback()
         logging.exception(f"Error adding line to script {script_id}: {e}")
         return jsonify({"error": "Failed to add line."}), 500
+    finally:
+        if db:
+            db.close()
+
+# --- NEW: Single Line Generation Endpoint --- #
+@vo_script_bp.route('/vo-scripts/<int:script_id>/lines/<int:line_id>/generate', methods=['POST'])
+def generate_vo_script_line(script_id: int, line_id: int):
+    """Generates text for a single VO script line using OpenAI.
+       Typically used for lines in 'pending' status.
+    """
+    from backend.app import model_to_dict # Import locally
+    
+    # Optional: Get model override from request? Not strictly needed for generate draft.
+    # data = request.get_json() 
+    # target_model = data.get('model', utils_openai.DEFAULT_GENERATION_MODEL) if data else utils_openai.DEFAULT_GENERATION_MODEL
+    target_model = utils_openai.DEFAULT_REFINEMENT_MODEL # Use refinement model for now
+
+    db: Session = next(get_db())
+    try:
+        # 1. Get context for the line
+        line_context = utils_voscript.get_line_context(db, line_id)
+        if not line_context:
+            logging.warning(f"Generate line request: Context not found for script {script_id}, line {line_id}")
+            return make_api_response(error=f"Line context not found for line_id {line_id}", status_code=404)
+        
+        # TODO: Construct generation prompt (Simpler than refinement? Focus on hints/char desc)
+        openai_prompt = (
+            f"You are a creative writer for video game voiceovers.\n"
+            f"Character Description:\n{line_context.get('character_description', 'N/A')}\n\n"
+            f"Template Hint: {line_context.get('template_hint', 'N/A')}\n"
+            f"Category: {line_context.get('category_name', 'N/A')}\n"
+            f"Category Instructions: {line_context.get('category_instructions', 'N/A')}\n"
+            f"Line Key: {line_context.get('line_key', 'N/A')}\n"
+            f"Line Hint: {line_context.get('line_template_hint', 'N/A')}\n\n"
+            f"Write a single voiceover line based on the character description, category, line key, and hints provided. "
+            f"Only output the voiceover line text, with no extra explanation or preamble."
+        )
+        
+        logging.info(f"Sending generation prompt to OpenAI for line {line_id}. Prompt start: {openai_prompt[:200]}...")
+
+        # 3. Call OpenAI Responses API
+        generated_text = utils_openai.call_openai_responses_api(
+            prompt=openai_prompt,
+            model=target_model
+        )
+        
+        if generated_text is None:
+            logging.error(f"OpenAI generation failed for script {script_id}, line {line_id}")
+            # Update status to failed?
+            # updated_line = utils_voscript.update_line_in_db(db, line_id, "", "failed", target_model)
+            return make_api_response(error="OpenAI generation failed. Check logs.", status_code=500)
+            
+        logging.info(f"Generated text received for line {line_id}: '{generated_text[:100]}...'")
+
+        # 4. Update Database
+        new_status = "generated" # Set status after successful generation
+        updated_line = utils_voscript.update_line_in_db(
+            db, 
+            line_id, 
+            generated_text, 
+            new_status, 
+            target_model # Log which model did the generation
+        )
+        
+        if updated_line is None:
+            logging.error(f"Database update failed after generation for script {script_id}, line {line_id}")
+            return make_api_response(error="Database update failed after generation.", status_code=500)
+
+        # 5. Return updated line data - FIX RETURN STATEMENT
+        return make_api_response(data=model_to_dict(updated_line)) # REMOVE , 200
+
+    except Exception as e:
+        logging.exception(f"Unexpected error during line generation for script {script_id}, line {line_id}: {e}")
+        if db.is_active:
+             try: db.rollback()
+             except: pass
+        return make_api_response(error="An unexpected error occurred during generation.", status_code=500)
+    finally:
+        if db:
+            db.close()
+
+# --- NEW: Accept Line Endpoint --- #
+@vo_script_bp.route('/vo-scripts/<int:script_id>/lines/<int:line_id>/accept', methods=['PATCH'])
+def accept_vo_script_line(script_id: int, line_id: int):
+    """Marks a VO script line with status 'review' as 'generated'."""
+    from backend.app import model_to_dict # Import locally
+    db: Session = next(get_db())
+    try:
+        line = db.query(models.VoScriptLine).filter(
+            models.VoScriptLine.id == line_id,
+            models.VoScriptLine.vo_script_id == script_id
+        ).first()
+
+        if not line:
+            return make_api_response(error=f"Line not found with ID {line_id} for script {script_id}", status_code=404)
+            
+        if line.status != 'review':
+            # Optionally return an error or just return the current state if not in review
+            logging.warning(f"Attempted to accept line {line_id} which is not in 'review' status (current: {line.status}). Returning current state.")
+            return make_api_response(data=model_to_dict(line)) # Return current state
+            # OR return make_api_response(error="Line is not in 'review' status.", status_code=400)
+        
+        # Update status
+        line.status = 'generated' 
+        
+        db.commit()
+        db.refresh(line)
+        logging.info(f"Accepted line {line_id} (script {script_id}), status set to {line.status}.")
+        
+        # Return updated line data
+        return make_api_response(data=model_to_dict(line))
+
+    except Exception as e:
+        db.rollback()
+        logging.exception(f"Error accepting line {line_id}, script {script_id}: {e}")
+        return make_api_response(error="Failed to accept line.", status_code=500)
     finally:
         if db:
             db.close()

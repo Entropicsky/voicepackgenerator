@@ -40,7 +40,17 @@ load_dotenv()
 app = Flask(__name__, instance_relative_config=True)
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+# logging.basicConfig(level=logging.INFO) # Remove hardcoded level
+
+# Read log level from environment variable, default to INFO
+log_level_name = os.environ.get('LOG_LEVEL', 'INFO').upper()
+log_level = getattr(logging, log_level_name, logging.INFO)
+
+# Configure logging with the determined level
+# You can add more sophisticated configuration here (e.g., formatters, handlers)
+logging.basicConfig(level=log_level, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+logging.info(f"Logging configured with level: {logging.getLevelName(log_level)}")
 
 # Add ProxyFix middleware to handle X-Forwarded-* headers correctly
 # Trust 2 proxies (Heroku Router + Nginx Web Dyno)

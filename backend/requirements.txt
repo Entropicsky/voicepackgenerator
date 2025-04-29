@@ -46,4 +46,5 @@ itsdangerous>=2.1.2,<3.0.0
 pydub>=0.25.1,<0.26.0 # Added for audio cropping
 # Use specific compatible versions for Agents SDK
 openai==1.74.0 
-openai-agents==0.0.9 
+openai-agents==0.0.9
+tenacity # Add tenacity for retries 
