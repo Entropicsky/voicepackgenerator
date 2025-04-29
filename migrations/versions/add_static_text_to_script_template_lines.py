@@ -1,7 +1,7 @@
 """Add static_text to vo_script_template_lines
 
 Revision ID: 734db99a3f4e
-Revises: f5b7dd6cf89a 
+Revises: 3ab799233c3c 
 Create Date: 2024-04-29 16:30:00
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '734db99a3f4e'
-down_revision: Union[str, None] = 'f5b7dd6cf89a'  # Update this to your current HEAD revision
+down_revision: Union[str, None] = '3ab799233c3c'  # Update this to point to the migration that exists in prod
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
