@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { Container, Paper, Title, Loader, Alert, Button, Tabs, Space, Table, Group, ActionIcon, Text, ScrollArea, TextInput, Textarea, Stack, Modal, Select } from '@mantine/core';
+import { Container, Paper, Title, Loader, Alert, Button, Tabs, Space, Table, Group, ActionIcon, Text, ScrollArea, TextInput, Textarea, Stack, Modal, Select, Switch } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api'; // Adjust path as needed
@@ -46,7 +46,12 @@ const TemplateDetailView: React.FC<TemplateDetailViewProps> = ({ templateId, onB
   const [editLineCategoryId, setEditLineCategoryId] = useState<string | null>(null);
   const [editLineOrderIndex, setEditLineOrderIndex] = useState<number>(0);
   const [editLinePromptHint, setEditLinePromptHint] = useState('');
-  // --- END State for Line Modals --- 
+
+  // Add state for new static text fields
+  const [newLineStaticTextEnabled, setNewLineStaticTextEnabled] = useState(false);
+  const [newLineStaticText, setNewLineStaticText] = useState('');
+  const [editLineStaticTextEnabled, setEditLineStaticTextEnabled] = useState(false);
+  const [editLineStaticText, setEditLineStaticText] = useState('');
 
   const { data: template, isLoading, error, isError, refetch } = useQuery<VoScriptTemplate, Error>({
     queryKey: ['voScriptTemplateDetail', templateId],
@@ -267,12 +272,20 @@ const TemplateDetailView: React.FC<TemplateDetailViewProps> = ({ templateId, onB
       notifications.show({ title: 'Validation Error', message: 'Line Key, Category, and Order Index are required.', color: 'orange' });
       return;
     }
+    
+    // Add validation for static text if enabled
+    if (newLineStaticTextEnabled && !newLineStaticText.trim()) {
+      notifications.show({ title: 'Validation Error', message: 'Static Text cannot be empty when enabled.', color: 'orange' });
+      return;
+    }
+    
     createLineMutation.mutate({ 
         template_id: templateId,
         category_id: parseInt(newLineCategoryId, 10),
         line_key: newLineKey,
         order_index: newLineOrderIndex,
-        prompt_hint: newLinePromptHint
+        prompt_hint: newLinePromptHint,
+        static_text: newLineStaticTextEnabled ? newLineStaticText : undefined
     });
   };
 
@@ -282,6 +295,12 @@ const TemplateDetailView: React.FC<TemplateDetailViewProps> = ({ templateId, onB
     setEditLineCategoryId(String(line.category_id)); // Convert to string for Select
     setEditLineOrderIndex(line.order_index);
     setEditLinePromptHint(line.prompt_hint || '');
+    
+    // Set static text fields
+    const hasStaticText = !!line.static_text;
+    setEditLineStaticTextEnabled(hasStaticText);
+    setEditLineStaticText(line.static_text || '');
+    
     openEditLineModal();
   };
 
@@ -290,7 +309,21 @@ const TemplateDetailView: React.FC<TemplateDetailViewProps> = ({ templateId, onB
       notifications.show({ title: 'Validation Error', message: 'Line Key, Category, and Order Index are required.', color: 'orange' });
       return;
     }
-    const payload: { category_id?: number; line_key?: string; order_index?: number; prompt_hint?: string | null; } = {};
+    
+    // Add validation for static text if enabled
+    if (editLineStaticTextEnabled && !editLineStaticText.trim()) {
+      notifications.show({ title: 'Validation Error', message: 'Static Text cannot be empty when enabled.', color: 'orange' });
+      return;
+    }
+    
+    const payload: { 
+      category_id?: number; 
+      line_key?: string; 
+      order_index?: number; 
+      prompt_hint?: string | null;
+      static_text?: string | null;
+    } = {};
+    
     let changed = false;
     const newCatId = parseInt(editLineCategoryId, 10);
 
@@ -298,6 +331,15 @@ const TemplateDetailView: React.FC<TemplateDetailViewProps> = ({ templateId, onB
     if (newCatId !== editingLine.category_id) { payload.category_id = newCatId; changed = true; }
     if (editLineOrderIndex !== editingLine.order_index) { payload.order_index = editLineOrderIndex; changed = true; }
     if (editLinePromptHint !== (editingLine.prompt_hint || '')) { payload.prompt_hint = editLinePromptHint; changed = true; }
+    
+    // Handle static text changes
+    const currentStaticText = editingLine.static_text || null;
+    const newStaticText = editLineStaticTextEnabled ? editLineStaticText : null;
+    
+    if (newStaticText !== currentStaticText) {
+      payload.static_text = newStaticText;
+      changed = true;
+    }
 
     if (changed) {
         updateLineMutation.mutate({ lineId: editingLine.id, data: payload });
@@ -379,6 +421,13 @@ const TemplateDetailView: React.FC<TemplateDetailViewProps> = ({ templateId, onB
       <Table.Td>{line.order_index}</Table.Td>
       <Table.Td>
            <Text truncate="end" maw={300}>{line.prompt_hint || '-'}</Text>
+      </Table.Td>
+      <Table.Td>
+        {line.static_text ? (
+          <Text truncate="end" maw={300} fw={500} c="blue">{line.static_text}</Text>
+        ) : (
+          <Text c="dimmed" size="sm">Dynamic (LLM Generated)</Text>
+        )}
       </Table.Td>
       <Table.Td>
           <Group gap="xs">
@@ -503,11 +552,12 @@ const TemplateDetailView: React.FC<TemplateDetailViewProps> = ({ templateId, onB
                      <Table.Th>Category</Table.Th>
                      <Table.Th>Order</Table.Th>
                      <Table.Th>Hint</Table.Th>
+                     <Table.Th>Static Text</Table.Th>
                      <Table.Th>Actions</Table.Th>
                    </Table.Tr>
                  </Table.Thead>
                  <Table.Tbody>
-                     {lineRows && lineRows.length > 0 ? lineRows : <Table.Tr><Table.Td colSpan={6}>No lines defined for this template.</Table.Td></Table.Tr>}
+                     {lineRows && lineRows.length > 0 ? lineRows : <Table.Tr><Table.Td colSpan={7}>No lines defined for this template.</Table.Td></Table.Tr>}
                  </Table.Tbody>
                </Table>
              </ScrollArea>
@@ -613,9 +663,6 @@ const TemplateDetailView: React.FC<TemplateDetailViewProps> = ({ templateId, onB
             },
           }}
         >
-            {/* Minimal Content Test */}
-            {/* <Text>MODAL CONTENT SHOULD BE VISIBLE</Text> */}
-            
             <Stack>
                  <TextInput 
                     label="Line Key"
@@ -647,6 +694,22 @@ const TemplateDetailView: React.FC<TemplateDetailViewProps> = ({ templateId, onB
                     autosize
                     minRows={3}
                  />
+                 <Switch 
+                    label="Use Static Text (bypass LLM generation)"
+                    checked={newLineStaticTextEnabled}
+                    onChange={(event) => setNewLineStaticTextEnabled(event.currentTarget.checked)}
+                 />
+                 {newLineStaticTextEnabled && (
+                    <Textarea
+                        label="Static Text"
+                        required
+                        placeholder="Fixed text to use for this line"
+                        value={newLineStaticText}
+                        onChange={(event) => setNewLineStaticText(event.currentTarget.value)}
+                        autosize
+                        minRows={3}
+                    />
+                 )}
                  <Group justify="flex-end" mt="md">
                     <Button variant="default" onClick={closeLineModal}>Cancel</Button>
                     <Button onClick={handleCreateLineSubmit} loading={createLineMutation.isPending}>
@@ -704,6 +767,22 @@ const TemplateDetailView: React.FC<TemplateDetailViewProps> = ({ templateId, onB
                         autosize
                         minRows={3}
                     />
+                    <Switch 
+                        label="Use Static Text (bypass LLM generation)"
+                        checked={editLineStaticTextEnabled}
+                        onChange={(event) => setEditLineStaticTextEnabled(event.currentTarget.checked)}
+                    />
+                    {editLineStaticTextEnabled && (
+                      <Textarea
+                          label="Static Text"
+                          required
+                          placeholder="Fixed text to use for this line"
+                          value={editLineStaticText}
+                          onChange={(event) => setEditLineStaticText(event.currentTarget.value)}
+                          autosize
+                          minRows={3}
+                      />
+                    )}
                     <Group justify="flex-end" mt="md">
                         <Button variant="default" onClick={closeEditLineModal}>Cancel</Button>
                         <Button onClick={handleEditLineSubmit} loading={updateLineMutation.isPending}>

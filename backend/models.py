@@ -115,17 +115,18 @@ class VoScriptTemplateLine(Base):
     __tablename__ = "vo_script_template_lines"
     id = Column(Integer, primary_key=True)
     template_id = Column(Integer, ForeignKey("vo_script_templates.id"), nullable=False, index=True)
-    category_id = Column(Integer, ForeignKey("vo_script_template_categories.id"), nullable=False, index=True)
+    category_id = Column(Integer, ForeignKey("vo_script_template_categories.id"), nullable=True, index=True)
     line_key = Column(String(255), nullable=False)
-    prompt_hint = Column(Text, nullable=True)
     order_index = Column(Integer, nullable=False)
-    is_deleted = Column(Boolean, default=False, nullable=False, index=True)
-    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    prompt_hint = Column(Text, nullable=True)
+    static_text = Column(Text, nullable=True)  # NEW: Static text that bypasses LLM generation
+    is_deleted = Column(Boolean, nullable=False, default=False, server_default=sql.false())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
 
     template = relationship("VoScriptTemplate", back_populates="template_lines")
     category = relationship("VoScriptTemplateCategory", back_populates="template_lines")
-    vo_script_lines = relationship("VoScriptLine", back_populates="template_line") # Don't cascade delete generated lines
+    vo_script_lines = relationship("VoScriptLine", back_populates="template_line", cascade="all, delete-orphan")
 
     # Ensure line keys are unique within a template
     __table_args__ = (Index('uq_template_line_key', 'template_id', 'line_key', unique=True),)

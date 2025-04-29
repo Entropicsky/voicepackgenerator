@@ -296,13 +296,12 @@ export interface VoScriptTemplateLine {
   template_id: number;
   category_id: number;
   line_key: string;
-  prompt_hint: string | null;
   order_index: number;
+  prompt_hint?: string | null;
+  static_text?: string | null;  // NEW: Static text field that bypasses LLM generation
+  is_deleted: boolean;
   created_at: string;
   updated_at: string;
-  // is_deleted: boolean; // Add if needed by frontend logic
-  // Optionally include category name if backend joins it
-  category_name?: string; 
 }
 
 // Represents a full VO Script Template including categories and lines

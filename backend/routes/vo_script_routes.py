@@ -71,11 +71,17 @@ def create_vo_script():
         
         vo_script_lines_to_add = []
         for t_line in template_lines:
+            # Check if the template line has static_text content
+            has_static_text = t_line.static_text is not None and t_line.static_text.strip() != ""
+            
             # Create a new line with the template line's key copied over
             new_line = models.VoScriptLine(
                 vo_script=new_vo_script, # Associate with the script being created
                 template_line_id=t_line.id,
-                status='pending', # Initial status for generation
+                # If static_text exists, copy it to generated_text and mark as 'generated'
+                # Otherwise, leave as 'pending' for LLM generation
+                status='generated' if has_static_text else 'pending',
+                generated_text=t_line.static_text if has_static_text else None,
                 line_key=t_line.line_key  # Copy the line_key from the template line
             )
             vo_script_lines_to_add.append(new_line)
@@ -1623,6 +1629,26 @@ def _generate_lines_batch(db: Session, script_id: int, pending_lines: list, exis
         return []
         
     try:
+        # Filter out lines that already have text (e.g., from static templates)
+        lines_to_generate = []
+        for line in pending_lines:
+            if line.get('current_text'):
+                logging.info(f"Skipping line {line.get('line_id')} that already has text (possibly from static template)")
+                # Check if we should include it in updated_lines even though we're skipping generation
+                line_obj = db.query(models.VoScriptLine).get(line.get('line_id'))
+                if line_obj:
+                    updated_lines.append(model_to_dict(line_obj))
+            else:
+                lines_to_generate.append(line)
+                
+        # If all lines already have text, return what we have
+        if not lines_to_generate:
+            logging.info(f"All lines in batch already have text, skipping batch generation")
+            return updated_lines
+            
+        # Continue with generation for remaining lines
+        pending_lines = lines_to_generate
+        
         # 1. Get common context from first line (should be same for all lines in category)
         char_desc = pending_lines[0].get('character_description', 'N/A')
         template_hint = pending_lines[0].get('template_hint', 'N/A')

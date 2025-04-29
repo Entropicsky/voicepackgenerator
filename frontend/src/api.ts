@@ -563,37 +563,53 @@ export const api = {
     return handleApiResponse<any[]>(response); // Use specific type later
   },
 
-  createVoScriptTemplateLine: async (payload: { template_id: number; category_id: number; line_key: string; order_index: number; prompt_hint?: string | null; }): Promise<any> => {
-      const url = `${API_BASE}/api/vo-script-template-lines`;
-      console.log("[API] Creating VO Script Template Line:", payload);
-      const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-              'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload),
-      });
-      return handleApiResponse<any>(response);
+  createVoScriptTemplateLine: async (payload: {
+    template_id: number;
+    category_id: number;
+    line_key: string;
+    order_index: number;
+    prompt_hint?: string;
+    static_text?: string;
+  }): Promise<VoScriptTemplateLine> => {
+    const url = `${API_BASE}/api/vo-script-template-lines`;
+    console.log("[API] Creating VO Script Template Line:", payload);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    return handleApiResponse<VoScriptTemplateLine>(response);
   },
 
-  getVoScriptTemplateLine: async (lineId: number): Promise<any> => {
+  getVoScriptTemplateLine: async (lineId: number): Promise<VoScriptTemplateLine> => {
     const url = `${API_BASE}/api/vo-script-template-lines/${lineId}`;
     console.log(`[API] Getting VO Script Template Line ${lineId}...`);
     const response = await fetch(url);
-    return handleApiResponse<any>(response);
+    return handleApiResponse<VoScriptTemplateLine>(response);
   },
 
-  updateVoScriptTemplateLine: async (lineId: number, payload: { category_id?: number; line_key?: string; order_index?: number; prompt_hint?: string | null; }): Promise<any> => {
+  updateVoScriptTemplateLine: async (
+    lineId: number,
+    payload: {
+      category_id?: number;
+      line_key?: string;
+      order_index?: number;
+      prompt_hint?: string | null;
+      static_text?: string | null;
+    }
+  ): Promise<VoScriptTemplateLine> => {
     const url = `${API_BASE}/api/vo-script-template-lines/${lineId}`;
     console.log(`[API] Updating VO Script Template Line ${lineId}:`, payload);
     const response = await fetch(url, {
-        method: 'PUT',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
     });
-    return handleApiResponse<any>(response);
+    return handleApiResponse<VoScriptTemplateLine>(response);
   },
 
   deleteVoScriptTemplateLine: async (lineId: number): Promise<any> => {

@@ -471,112 +471,72 @@ def create_vo_script_template_line():
     template_id = data.get('template_id')
     category_id = data.get('category_id')
     line_key = data.get('line_key')
-    prompt_hint = data.get('prompt_hint')
     order_index = data.get('order_index')
-
-    if not all([template_id, category_id, line_key, order_index is not None]):
-        return make_api_response(error="Missing required fields: template_id, category_id, line_key, order_index", status_code=400)
-
+    prompt_hint = data.get('prompt_hint')
+    static_text = data.get('static_text')  # NEW: Get static_text field
+    
+    # Validate required fields
+    if not template_id or not line_key or order_index is None: # Allow 0 index
+        return make_api_response(error="Missing required fields: template_id, line_key, order_index", status_code=400)
+        
+    # Convert to expected types
     try:
         template_id = int(template_id)
-        category_id = int(category_id)
+        if category_id is not None:
+            category_id = int(category_id)
         order_index = int(order_index)
     except (ValueError, TypeError):
-        return make_api_response(error="template_id, category_id, and order_index must be integers.", status_code=400)
+        return make_api_response(error="template_id, category_id and order_index must be integers", status_code=400)
 
     db: Session = None
     try:
         db = next(get_db())
-        # Verify parent template and category exist and are linked
-        category = db.query(models.VoScriptTemplateCategory).filter(
-            models.VoScriptTemplateCategory.id == category_id,
-            models.VoScriptTemplateCategory.template_id == template_id,
-            models.VoScriptTemplateCategory.is_deleted == False # Ensure category is not deleted
-        ).first()
-        if not category:
-            # Check if template exists at all to give a better error
-            template = db.query(models.VoScriptTemplate).filter(
-                models.VoScriptTemplate.id == template_id,
-                models.VoScriptTemplate.is_deleted == False # Ensure template is not deleted
-            ).first()
-            if not template:
-                return make_api_response(error=f"Template with ID {template_id} not found or is deleted", status_code=404)
-            # Check if category exists but is deleted
-            deleted_category = db.query(models.VoScriptTemplateCategory.id).filter(models.VoScriptTemplateCategory.id == category_id, models.VoScriptTemplateCategory.is_deleted == True).first()
-            if deleted_category:
-                 return make_api_response(error=f"Category with ID {category_id} has been deleted.", status_code=404)
-            else:
-                 return make_api_response(error=f"Category with ID {category_id} not found or does not belong to template ID {template_id}", status_code=404)
-
-        # --- MODIFIED: Check for existing lines (active or deleted) --- #
-        existing_line = db.query(models.VoScriptTemplateLine).filter(
+        # Verify template exists
+        template = db.query(models.VoScriptTemplate).get(template_id)
+        if not template:
+            return make_api_response(error=f"Template with ID {template_id} not found", status_code=404)
+            
+        # Verify category exists if provided
+        if category_id:
+            category = db.query(models.VoScriptTemplateCategory).get(category_id)
+            if not category:
+                 return make_api_response(error=f"Category with ID {category_id} not found", status_code=404)
+            if category.template_id != template_id:
+                 return make_api_response(error=f"Category with ID {category_id} does not belong to template {template_id}", status_code=400)
+        
+        # Check for duplicate line key in this template
+        existing = db.query(models.VoScriptTemplateLine).filter(
             models.VoScriptTemplateLine.template_id == template_id,
-            models.VoScriptTemplateLine.line_key == line_key
+            models.VoScriptTemplateLine.line_key == line_key,
+            models.VoScriptTemplateLine.is_deleted == False
         ).first()
-
-        if existing_line:
-            if not existing_line.is_deleted:
-                # Active line exists - return conflict
-                logging.warning(f"Attempted to create line with duplicate active key '{line_key}' for template ID {template_id}")
-                return make_api_response(error=f"An active line key '{line_key}' already exists for this template.", status_code=409)
-            else:
-                # Deleted line exists - undelete and update it
-                logging.info(f"Found soft-deleted line ID {existing_line.id} with key '{line_key}'. Undeleting and updating.")
-                existing_line.is_deleted = False
-                existing_line.category_id = category_id # Update category
-                existing_line.prompt_hint = prompt_hint # Update hint
-                existing_line.order_index = order_index # Update order
-                existing_line.updated_at = datetime.now(timezone.utc)
-                db.commit()
-                db.refresh(existing_line)
-                logging.info(f"Undeleted and updated VO script line ID {existing_line.id} ('{line_key}') for template ID {template_id}")
-                return make_api_response(data=model_to_dict(existing_line), status_code=200) # Return 200 OK for update
-        else:
-            # No existing line found (active or deleted) - create a new one
-            new_line = models.VoScriptTemplateLine(
-                template_id=template_id,
-                category_id=category_id,
-                line_key=line_key,
-                prompt_hint=prompt_hint,
-                order_index=order_index
-            )
-            db.add(new_line)
-            db.commit()
-            db.refresh(new_line)
-            logging.info(f"Created VO script line ID {new_line.id} ('{line_key}') for template ID {template_id}")
-            return make_api_response(data=model_to_dict(new_line), status_code=201)
+        if existing:
+             return make_api_response(error=f"Line key '{line_key}' already exists in this template", status_code=409)
+             
+        # Create the new template line
+        new_line = models.VoScriptTemplateLine(
+            template_id=template_id,
+            category_id=category_id,
+            line_key=line_key,
+            order_index=order_index,
+            prompt_hint=prompt_hint,
+            static_text=static_text  # NEW: Save static_text field
+        )
+        db.add(new_line)
+        db.commit()
+        db.refresh(new_line)
+        logging.info(f"Created VO script template line ID {new_line.id} ('{line_key}') for template ID {template_id}")
+        
+        return make_api_response(data=model_to_dict(new_line), status_code=201)
         
     except IntegrityError as e:
         db.rollback()
-        # This except block might become less likely to hit for the unique key constraint
-        # but kept for handling FK constraints or potential race conditions.
-        err_str = str(e.orig).lower()
-        if "unique constraint" in err_str and ("uq_template_line_key" in err_str or "vo_script_template_lines.template_id" in err_str): # Adjusted for different DB messages
-             logging.error(f"Database integrity error hit unexpectedly for key '{line_key}' for template ID {template_id} despite checks: {e}")
-             # Generic message as the specific cases should be handled above
-             return make_api_response(error=f"Database conflict creating line key '{line_key}'.", status_code=409)
-        elif "foreign key constraint" in err_str:
-            # ... (existing foreign key handling remains the same) ...
-            logging.error(f"Foreign key violation creating line for template ID {template_id} / category ID {category_id}: {e}")
-            # Re-check existence for better error message
-            if not db.query(models.VoScriptTemplate.id).filter(models.VoScriptTemplate.id == template_id, models.VoScriptTemplate.is_deleted == False).first():
-                 return make_api_response(error=f"Template with ID {template_id} not found or deleted.", status_code=404)
-            if not db.query(models.VoScriptTemplateCategory.id).filter(models.VoScriptTemplateCategory.id == category_id, models.VoScriptTemplateCategory.is_deleted == False).first():
-                 # Check if it's deleted
-                 deleted_cat = db.query(models.VoScriptTemplateCategory.id).filter(models.VoScriptTemplateCategory.id == category_id, models.VoScriptTemplateCategory.is_deleted == True).first()
-                 if deleted_cat:
-                     return make_api_response(error=f"Category with ID {category_id} has been deleted.", status_code=404)
-                 else:
-                     return make_api_response(error=f"Category with ID {category_id} not found.", status_code=404)
-            # If both exist, the category likely doesn't belong to the template (checked before commit, but double-checking)
-            return make_api_response(error=f"Category ID {category_id} may not belong to Template ID {template_id}.", status_code=400)
-        else:
-             logging.exception(f"Database integrity error creating line: {e}")
-             return make_api_response(error="Database error creating line.", status_code=500)
+        logging.exception(f"Database integrity error creating template line: {e}")
+        return make_api_response(error="Database error creating template line.", status_code=500)
     except Exception as e:
         db.rollback()
         logging.exception(f"Error creating VO script template line: {e}")
-        return make_api_response(error="Failed to create VO script template line", status_code=500)
+        return make_api_response(error="Failed to create template line", status_code=500)
     finally:
         if db and db.is_active: db.close()
 
@@ -610,29 +570,30 @@ def update_vo_script_template_line(line_id):
     try:
         db = next(get_db())
         line = db.query(models.VoScriptTemplateLine).get(line_id)
-        if line is None:
+        if not line:
             return make_api_response(error=f"Template line with ID {line_id} not found", status_code=404)
-
-        updated = False
-        original_line_key = line.line_key
-        original_category_id = line.category_id
         
-        # Validate and update fields if present in request
+        updated = False
+        
+        # Handle category_id update
         if 'category_id' in data:
-            try:
-                new_category_id = int(data['category_id'])
-                # Verify category exists and belongs to the same template
-                category = db.query(models.VoScriptTemplateCategory).filter(
-                    models.VoScriptTemplateCategory.id == new_category_id,
-                    models.VoScriptTemplateCategory.template_id == line.template_id
-                ).first()
-                if not category:
-                    return make_api_response(error=f"Category ID {new_category_id} not found or does not belong to template ID {line.template_id}", status_code=400)
-                if new_category_id != line.category_id:
-                    line.category_id = new_category_id
-                    updated = True
-            except (ValueError, TypeError):
-                 return make_api_response(error="Invalid category_id format, must be an integer.", status_code=400)
+            new_category_id = data['category_id']
+            # Allow null category
+            if new_category_id is not None:
+                try:
+                    new_category_id = int(new_category_id)
+                    # Verify category exists and belongs to the same template
+                    category = db.query(models.VoScriptTemplateCategory).get(new_category_id)
+                    if not category:
+                        return make_api_response(error=f"Category with ID {new_category_id} not found", status_code=404)
+                    if category.template_id != line.template_id:
+                        return make_api_response(error=f"Category with ID {new_category_id} does not belong to the template", status_code=400)
+                except (ValueError, TypeError):
+                    return make_api_response(error="category_id must be an integer if provided", status_code=400)
+                
+            if new_category_id != line.category_id:
+                line.category_id = new_category_id
+                updated = True
                  
         if 'line_key' in data:
             new_line_key = data['line_key']
@@ -645,6 +606,12 @@ def update_vo_script_template_line(line_id):
         if 'prompt_hint' in data:
             if data['prompt_hint'] != line.prompt_hint:
                 line.prompt_hint = data['prompt_hint']
+                updated = True
+                
+        # NEW: Handle static_text update
+        if 'static_text' in data:
+            if data['static_text'] != line.static_text:
+                line.static_text = data['static_text']
                 updated = True
                 
         if 'order_index' in data:
@@ -668,11 +635,11 @@ def update_vo_script_template_line(line_id):
         db.rollback()
         err_str = str(e.orig).lower()
         if "unique constraint" in err_str and "uq_template_line_key" in err_str:
-             failed_key = data.get('line_key', original_line_key)
+             failed_key = data.get('line_key', line.line_key)
              logging.warning(f"Attempted to update line {line_id} with duplicate key '{failed_key}' for template ID {line.template_id}")
              return make_api_response(error=f"Line key '{failed_key}' already exists for this template.", status_code=409)
         elif "foreign key constraint" in err_str:
-             failed_category_id = data.get('category_id', original_category_id)
+             failed_category_id = data.get('category_id', line.category_id)
              logging.error(f"Foreign key violation updating line {line_id} with category ID {failed_category_id}: {e}")
              # Should have been caught by checks above, but handle defensively
              return make_api_response(error=f"Invalid Category ID {failed_category_id}.", status_code=400)
