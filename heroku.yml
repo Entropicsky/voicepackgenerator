@@ -20,6 +20,11 @@ build:
 #   command:
 #     - python run_migrations.py
 #   image: release
+# Explicitly define a no-op release command to prevent default behavior
+release:
+  command:
+    - true
+  image: release # Use the same image as the build/web usually
 
 run:
   # Run the consolidated start script for web
