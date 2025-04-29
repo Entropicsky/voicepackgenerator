@@ -12,6 +12,7 @@ import io # For in-memory file handling
 from openpyxl import Workbook # For creating Excel file
 from openpyxl.styles import Font, Alignment, PatternFill # For formatting
 from openpyxl.utils import get_column_letter # For setting column width
+import re # Import regex for natural sort
 
 # Assuming models and helpers are accessible, adjust imports as necessary
 from backend import models, tasks # Added tasks import
@@ -23,6 +24,15 @@ from backend import utils_voscript # Import for DB utils
 from backend.utils_prompts import _get_elevenlabs_rules # NEW IMPORT
 
 vo_script_bp = Blueprint('vo_script_bp', __name__, url_prefix='/api')
+
+# --- Helper function for natural sorting ---
+def natural_sort_key(s):
+    """Return a key for natural sorting (handles text and numbers)."""
+    if not isinstance(s, str):
+        return [s] # Handle non-strings gracefully
+    # Split string into text and number parts
+    return [int(text) if text.isdigit() else text.lower() 
+            for text in re.split('([0-9]+)', s)]
 
 @vo_script_bp.route('/vo-scripts', methods=['POST'])
 def create_vo_script():
@@ -179,22 +189,14 @@ def get_vo_script(script_id):
              template_categories = {}
             
         lines_by_category = {}
-        lines_with_sort_key = []
-        # --- Prepare lines for sorting --- #
-        for line in script.lines:
-            sort_key = float('inf') 
-            custom_order_index = getattr(line, 'order_index', None)
-            if custom_order_index is not None:
-                sort_key = custom_order_index
-            elif line.template_line and line.template_line.order_index is not None:
-                sort_key = line.template_line.order_index
-            lines_with_sort_key.append({"line_obj": line, "sort_order": sort_key})    
-            
-        ordered_lines_data = sorted(lines_with_sort_key, key=lambda item: item["sort_order"]) 
+        # REMOVED: Initial sorting by order_index. We process all lines and group first.
+        # lines_with_sort_key = [] 
+        # ... (code to prepare lines_with_sort_key) ...
+        # ordered_lines_data = sorted(lines_with_sort_key, key=lambda item: item["sort_order"])
         
-        # --- Process sorted lines --- #
-        for item in ordered_lines_data:
-            line = item["line_obj"] 
+        # --- Process ALL lines --- #
+        # MODIFIED: Iterate directly through script.lines
+        for line in script.lines: 
             # Corrected: Pass include list as positional argument
             line_dict_base = model_to_dict(line, [
                 'id', 'generated_text', 'status', 'latest_feedback', 
@@ -214,7 +216,8 @@ def get_vo_script(script_id):
             template_prompt_hint = line.template_line.prompt_hint if line.template_line else None
 
             # Final determination logic (Prioritize direct values)
-            final_line_key = db_line_key or template_line_key
+            # Use a fallback key if none is found
+            final_line_key = db_line_key or template_line_key or f'line_{line.id}'
             final_order_index = db_order_index if db_order_index is not None else template_order_index
             final_prompt_hint = db_prompt_hint # Direct hint is primary
             final_template_prompt_hint = template_prompt_hint # Hint from template
@@ -223,18 +226,18 @@ def get_vo_script(script_id):
             # Combine into the final dictionary
             line_dict = {
                 **line_dict_base,
-                'line_key': final_line_key,
+                'line_key': final_line_key, 
                 'order_index': final_order_index,
                 'prompt_hint': final_prompt_hint, 
                 'template_prompt_hint': final_template_prompt_hint, 
                 'category_id': final_category_id
             }
             
-            # Ensure datetimes are strings (if model_to_dict didn't already)
+            # Ensure datetimes are strings 
             line_dict['created_at'] = line_dict['created_at'].isoformat() if line_dict['created_at'] and hasattr(line_dict['created_at'], 'isoformat') else line_dict['created_at']
             line_dict['updated_at'] = line_dict['updated_at'].isoformat() if line_dict['updated_at'] and hasattr(line_dict['updated_at'], 'isoformat') else line_dict['updated_at']
 
-            # --- Determine grouping category (Revised Logic w/ Logging) --- #
+            # --- Determine grouping category --- 
             category_id_for_grouping = line_dict.get('category_id')
             logging.debug(f"Line ID {line.id} (Key: {line_dict.get('line_key')}): Category ID for grouping = {category_id_for_grouping}") # LOG 1
             
@@ -276,14 +279,13 @@ def get_vo_script(script_id):
             else:
                  logging.debug(f"Line ID {line.id}: No category ID found.") # LOG 3 (Renumbered)
 
-            # Grouping logic uses potentially corrected category_name/id
+            # Grouping logic - Initialize category if new
             if category_name not in lines_by_category:
-                 # Initialize category group if it doesn't exist
                  lines_by_category[category_name] = {
-                     "id": category_data_id, # Use ID found via lookup or None
+                     "id": category_data_id, 
                      'name': category_name,
-                     'instructions': category_instructions, # Use instructions found via lookup or None
-                     'refinement_prompt': category_refinement_prompt, # Use prompt found via lookup or None
+                     'instructions': category_instructions, 
+                     'refinement_prompt': category_refinement_prompt, 
                      'lines': []
                  }
                  # Add category details if newly created (might be redundant if always querying?)
@@ -292,17 +294,26 @@ def get_vo_script(script_id):
                  else:
                       logging.debug(f"Initialized category group '{category_name}'")
             
-            # Ensure category details are present if we added the line to an existing group fetched via fallback
+            # Update existing group if needed
             if category_data_id and lines_by_category[category_name].get('id') is None:
-                 lines_by_category[category_name]['id'] = category_data_id
-                 lines_by_category[category_name]['instructions'] = category_instructions
-                 lines_by_category[category_name]['refinement_prompt'] = category_refinement_prompt
-                 logging.debug(f"Updated existing group '{category_name}' with details (ID: {category_data_id}) found via direct query.")
+                lines_by_category[category_name]['id'] = category_data_id
+                lines_by_category[category_name]['instructions'] = category_instructions
+                lines_by_category[category_name]['refinement_prompt'] = category_refinement_prompt
+                logging.debug(f"Updated existing group '{category_name}' with details (ID: {category_data_id}) found via direct query.")
 
             lines_by_category[category_name]['lines'].append(line_dict)
             logging.debug(f"Line ID {line.id}: Appended to category '{category_name}'.") # LOG 4 (Renumbered)
 
-        script_data['categories'] = list(lines_by_category.values())
+        # --- NEW: Post-processing Sort --- #
+        # 1. Sort lines within each category by natural sort of line_key
+        for category_name in lines_by_category:
+            lines_by_category[category_name]['lines'].sort(key=lambda line: natural_sort_key(line.get('line_key')))
+        
+        # 2. Sort the categories themselves alphabetically by name
+        sorted_categories = sorted(lines_by_category.values(), key=lambda cat: cat['name'])
+
+        # Assign the fully sorted structure to the response
+        script_data['categories'] = sorted_categories
             
         return make_api_response(data=script_data)
     except Exception as e:
