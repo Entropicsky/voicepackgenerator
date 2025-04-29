@@ -2,7 +2,6 @@
 import os
 import sys
 from flask import Flask
-from flask_migrate import Migrate
 
 def run_migrations():
     """
@@ -14,23 +13,24 @@ def run_migrations():
     try:
         # Import the required modules from our app
         print("Initializing Flask app...")
-        from backend.models import Base, engine
         from backend.app import app
         
-        # Set up migration
-        print("Setting up migrations...")
-        migrate = Migrate(app, Base)
+        # Create application context
+        print("Creating application context...")
+        with app.app_context():
+            print("Running migrations in app context...")
+            from flask_migrate import upgrade as db_upgrade
+            
+            # Get migrations directory path
+            migrations_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "migrations")
+            print(f"Using migrations directory: {migrations_dir}")
+            
+            # Run migrations
+            print("Running database upgrade...")
+            db_upgrade(directory=migrations_dir)
+            
+            print("Migrations completed successfully!")
         
-        # Get migrations directory path
-        migrations_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "migrations")
-        print(f"Using migrations directory: {migrations_dir}")
-        
-        # Run migrations
-        print("Running database upgrade...")
-        from flask_migrate import upgrade as db_upgrade
-        db_upgrade(directory=migrations_dir)
-        
-        print("Migrations completed successfully!")
         return 0
             
     except Exception as e:
