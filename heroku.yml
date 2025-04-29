@@ -15,10 +15,10 @@ build:
     # api process removed
     worker: Dockerfile.worker
 
-# NEW: Release phase to run migrations
+# UPDATED: Release phase to use custom migration script
 release:
   command:
-    - flask --app backend.app:app db upgrade
+    - python run_migrations.py
   image: release
 
 run:
