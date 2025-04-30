@@ -232,12 +232,14 @@ const VoScriptDetailView: React.FC = () => {
         setRefiningCategoryId(variables.categoryId); // Use category ID for state
     },
     onSuccess: (response, variables) => {
-        // Update all returned lines in the React Query cache
+        // FIX: Treat 'response' directly as the array of updated lines
         queryClient.setQueryData<VoScript>(['voScriptDetail', numericScriptId], (oldData) => {
-            if (!oldData || !response.data) return oldData;
+            // FIX: Check if response itself is valid (it's the array now)
+            if (!oldData || !Array.isArray(response)) return oldData;
             
             // Create a map of updated lines for quick lookup
-            const updatedLinesMap = new Map(response.data.map(line => [line.id, line]));
+            // FIX: Use 'response' directly as the array
+            const updatedLinesMap = new Map(response.map(line => [line.id, line]));
             
             return {
               ...oldData,
@@ -250,7 +252,8 @@ const VoScriptDetailView: React.FC = () => {
         });
         notifications.show({
           title: 'Category Refined',
-          message: response.message || `Category '${variables.payload.category_name}' refined successfully. (${response.data.length} lines updated).`,
+          // FIX: Construct message using the array length directly 
+          message: `Category '${variables.payload.category_name}' refined successfully. (${Array.isArray(response) ? response.length : 0} lines updated).`,
           color: 'blue',
         });
     },

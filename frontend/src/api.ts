@@ -6,7 +6,8 @@ import {
     VoScript, VoScriptLineData, RunAgentPayload, UpdateVoScriptPayload, RefineLinePayload,
     RefineLineResponse, UpdateVoScriptTemplateCategoryPayload, RefineCategoryPayload,
     RefineMultipleLinesResponse, RefineScriptPayload, DeleteResponse, AddVoScriptLinePayload,
-    JobSubmissionResponse
+    JobSubmissionResponse,
+    VoScriptTemplateLine
 } from './types'; // Ensure all necessary types are imported
 
 // Define these types if they don't exist in types.ts
@@ -72,12 +73,12 @@ const getModels = async (options?: GetModelsOptions): Promise<ModelOption[]> => 
 
 // Generation Jobs
 const listGenerationJobs = async (): Promise<GenerationJob[]> => {
-    const response = await apiClient.get<{ data: GenerationJob[] }>('/generation-jobs');
+    const response = await apiClient.get<{ data: GenerationJob[] }>('/jobs');
     return handleApiResponse(response);
 };
 
 const getGenerationJob = async (jobId: number): Promise<GenerationJob> => {
-    const response = await apiClient.get<{ data: GenerationJob }>(`/generation-jobs/${jobId}`);
+    const response = await apiClient.get<{ data: GenerationJob }>(`/jobs/${jobId}`);
     return handleApiResponse(response);
 };
 
@@ -107,6 +108,34 @@ const deleteScript = async (scriptId: number): Promise<any> => {
     return handleApiResponse(response);
 };
 
+// Add missing listScripts function
+// Define necessary types inline if not in types.ts
+interface ScriptMetadata { // TODO: Replace with more specific type if available
+    id: number;
+    name: string;
+    description?: string;
+    is_archived: boolean;
+    created_at: string;
+    updated_at: string;
+    line_count?: number; // May not be present in all contexts
+}
+const listScripts = async (includeArchived: boolean = false): Promise<ScriptMetadata[]> => {
+    const response = await apiClient.get<{ data: ScriptMetadata[] }>('/scripts', { params: { include_archived: includeArchived } });
+    return handleApiResponse(response);
+};
+
+// Add missing updateScript function
+// Define necessary types inline if not in types.ts
+interface UpdateScriptPayload { 
+    name?: string;
+    description?: string;
+    // Add other potential fields based on legacy script structure
+}
+const updateScript = async (scriptId: number, payload: UpdateScriptPayload): Promise<ScriptMetadata> => {
+    const response = await apiClient.put<{ data: ScriptMetadata }>(`/scripts/${scriptId}`, payload);
+    return handleApiResponse(response);
+};
+
 // --- VO Script Template Functions --- //
 const fetchVoScriptTemplates = async (): Promise<VoScriptTemplate[]> => {
   const response = await apiClient.get<{ data: VoScriptTemplate[] }>('/vo-script-templates');
@@ -131,9 +160,41 @@ const deleteVoScriptTemplate = async (templateId: number): Promise<{ message: st
     return handleApiResponse(response);
 };
 
+// Add the missing update template function
+const updateVoScriptTemplate = async (templateId: number, payload: { name?: string; description?: string | null; prompt_hint?: string | null; }): Promise<VoScriptTemplate> => {
+    const response = await apiClient.put<{ data: VoScriptTemplate }>(`/vo-script-templates/${templateId}`, payload);
+    return handleApiResponse(response);
+};
+
 // Add the missing function
 const updateVoScriptTemplateLine = async (lineId: number, payload: any): Promise<any> => { // TODO: Replace 'any' with specific VoScriptTemplateLine type if available
     const response = await apiClient.put<{ data: any }>(`/vo-script-template-lines/${lineId}`, payload); // Assuming PUT /api/vo-script-template-lines/<line_id>
+    return handleApiResponse(response);
+};
+
+// Add missing Category and Line CRUD functions
+const createVoScriptTemplateCategory = async (payload: { template_id: number; name: string; prompt_instructions?: string | null; }): Promise<any> => { // TODO: Define Category type
+    const response = await apiClient.post<{ data: any }>(`/vo-script-template-categories`, payload);
+    return handleApiResponse(response);
+};
+
+const updateVoScriptTemplateCategory = async (categoryId: number, payload: { name?: string; prompt_instructions?: string | null; }): Promise<any> => { // TODO: Define Category type
+    const response = await apiClient.put<{ data: any }>(`/vo-script-template-categories/${categoryId}`, payload);
+    return handleApiResponse(response);
+};
+
+const deleteVoScriptTemplateCategory = async (categoryId: number): Promise<{ message: string }> => {
+    const response = await apiClient.delete<{ data: { message: string } }>(`/vo-script-template-categories/${categoryId}`);
+    return handleApiResponse(response);
+};
+
+const createVoScriptTemplateLine = async (payload: { template_id: number; category_id: number; line_key: string; order_index: number; prompt_hint?: string | null; static_text?: string | null }): Promise<any> => { // TODO: Define Line type
+    const response = await apiClient.post<{ data: any }>(`/vo-script-template-lines`, payload);
+    return handleApiResponse(response);
+};
+
+const deleteVoScriptTemplateLine = async (lineId: number): Promise<{ message: string }> => {
+    const response = await apiClient.delete<{ data: { message: string } }>(`/vo-script-template-lines/${lineId}`);
     return handleApiResponse(response);
 };
 
@@ -229,9 +290,249 @@ const instantiateTargetLines = async (scriptId: number, payload: any): Promise<{
 const generateCategoryBatch = async (scriptId: number, categoryName: string, model?: string): Promise<RefineMultipleLinesResponse> => {
     const payload = model ? { model } : {};
     const response = await apiClient.post<{ data: RefineMultipleLinesResponse }>(
-        `/vo-scripts/${scriptId}/categories/${encodeURIComponent(categoryName)}/generate-batch`, 
+        `/vo-scripts/${scriptId}/categories/${encodeURIComponent(categoryName)}/generate-batch-task`, 
         payload
     );
+    return handleApiResponse(response);
+};
+
+// --- Voice Design --- //
+// Define necessary types inline if not in types.ts
+interface CreateVoicePreviewPayload { 
+    text: string; 
+    voice_id?: string; 
+    voice_settings?: object; 
+    generation_config?: object; 
+}
+interface CreateVoicePreviewResponse { previews: any[], text: string } // TODO: Define specific preview type
+
+const createVoicePreviews = async (payload: CreateVoicePreviewPayload): Promise<CreateVoicePreviewResponse> => {
+    const response = await apiClient.post<{ data: CreateVoicePreviewResponse }>('/voice-design/previews', payload);
+    return handleApiResponse(response);
+};
+
+interface SaveVoicePayload { 
+    preview_id: string; // Assuming preview ID is used to link to saved settings/audio
+    name: string;
+    description?: string;
+    labels?: { [key: string]: string };
+}
+
+const saveVoiceFromPreview = async (payload: SaveVoicePayload): Promise<VoiceOption> => {
+    const response = await apiClient.post<{ data: any }>('/voice-design/save', payload);
+    // Assuming backend returns full voice details, map to VoiceOption
+    const fullVoiceDetails = handleApiResponse<any>(response); 
+     return {
+          voice_id: fullVoiceDetails.voice_id,
+          name: fullVoiceDetails.name,
+          category: fullVoiceDetails.category,
+          labels: fullVoiceDetails.labels 
+      };
+};
+
+// --- Generation --- //
+// Define necessary types inline if not in types.ts
+interface GenerationConfig { 
+    // TODO: Define specific properties based on backend expectation
+    [key: string]: any; 
+}
+interface GenerationStartResponse { taskId: string; jobId: number } // TODO: Verify response structure
+
+const startGeneration = async (config: GenerationConfig): Promise<GenerationStartResponse> => {
+    const response = await apiClient.post<{ data: GenerationStartResponse }>('/generate', config);
+    return handleApiResponse(response);
+};
+
+// Add missing toggleScriptArchive function
+const toggleScriptArchive = async (scriptId: number, archive: boolean): Promise<ScriptMetadata> => {
+    const response = await apiClient.patch<{ data: ScriptMetadata }>(`/scripts/${scriptId}/archive`, { archive });
+    return handleApiResponse(response);
+};
+
+// --- Batches --- //
+// Define necessary types inline if not in types.ts
+interface BatchListInfo { // TODO: Define specific properties based on backend
+    prefix: string;
+    created_at: string;
+    // ... other potential fields
+}
+
+const listBatches = async (): Promise<BatchListInfo[]> => {
+    const response = await apiClient.get<{ data: BatchListInfo[] }>('/batches');
+    return handleApiResponse(response);
+};
+
+// Add missing getBatchMetadata function
+// Define necessary types inline if not in types.ts
+interface Take { /* ... properties ... */ id: number; line: string; /* ... */ }
+interface BatchMetadata { 
+    batch_prefix: string; 
+    script_name?: string; 
+    character_description?: string;
+    voice_name?: string;
+    takes: Take[]; // Define Take type more accurately if possible
+    // ... other potential fields
+}
+const getBatchMetadata = async (batchPrefix: string): Promise<BatchMetadata> => {
+    // Ensure batchPrefix is properly encoded for the URL path
+    const encodedPrefix = batchPrefix.split('/').map(encodeURIComponent).join('/');
+    const response = await apiClient.get<{ data: BatchMetadata }>(`/batch/${encodedPrefix}`);
+    return handleApiResponse(response);
+};
+
+// Add missing updateTakeRank function
+const updateTakeRank = async (batchPrefix: string, filename: string, rank: number | null): Promise<void> => {
+    // Ensure batchPrefix and filename are properly encoded for the URL path
+    const encodedPrefix = batchPrefix.split('/').map(encodeURIComponent).join('/');
+    const encodedFilename = encodeURIComponent(filename);
+    const response = await apiClient.patch(`/batch/${encodedPrefix}/take/${encodedFilename}`, { rank });
+    // We don't expect specific data back, just handle potential errors
+    handleApiResponse<any>(response); // Use generic type for response handling
+};
+
+// Add missing getLineTakes function
+const getLineTakes = async (batchPrefix: string, lineKey: string): Promise<Take[]> => {
+    // Ensure batchPrefix and lineKey are properly encoded for the URL path
+    const encodedPrefix = batchPrefix.split('/').map(encodeURIComponent).join('/');
+    const encodedLineKey = encodeURIComponent(lineKey);
+    // NOTE: Endpoint path needs confirmation from backend route definition
+    const response = await apiClient.get<{ data: Take[] }>(`/batch/${encodedPrefix}/line/${encodedLineKey}/takes`); 
+    return handleApiResponse(response);
+};
+
+// Add missing regenerateLineTakes function
+// Define necessary types inline if not in types.ts
+interface RegenerateLinePayload {
+    line_key: string;
+    line_text: string;
+    num_new_takes: number;
+    settings: any; // Define more specific type? e.g., VoiceSettingRanges
+    replace_existing: boolean;
+    update_script?: boolean;
+}
+const regenerateLineTakes = async (batchPrefix: string, payload: RegenerateLinePayload): Promise<GenerationStartResponse> => {
+    const encodedPrefix = batchPrefix.split('/').map(encodeURIComponent).join('/');
+    const response = await apiClient.post<{ data: GenerationStartResponse }>(`/batch/${encodedPrefix}/regenerate_line`, payload);
+    return handleApiResponse(response);
+};
+
+// --- Audio Cropping --- //
+// Define necessary types inline if not in types.ts
+interface CropTakePayload { startTime: number; endTime: number }
+interface CropTakeResponse { task_id: string; message: string }
+
+const cropTake = async (batchPrefix: string, filename: string, startTime: number, endTime: number): Promise<CropTakeResponse> => {
+    const encodedPrefix = batchPrefix.split('/').map(encodeURIComponent).join('/');
+    const encodedFilename = encodeURIComponent(filename);
+    const response = await apiClient.post<{ data: CropTakeResponse }>(`/batch/${encodedPrefix}/takes/${encodedFilename}/crop`, { startTime, endTime });
+    return handleApiResponse(response);
+};
+
+// --- Task Status --- //
+// Define necessary types inline if not in types.ts
+interface TaskStatus {
+    task_id: string;
+    status: 'PENDING' | 'STARTED' | 'SUCCESS' | 'FAILURE' | 'RETRY' | 'REVOKED' | string; // Allow other statuses
+    info?: any; // Or define more specifically if possible
+}
+const getTaskStatus = async (taskId: string): Promise<TaskStatus> => {
+    // Use a generic task status endpoint
+    const response = await apiClient.get<{ data: TaskStatus }>(`/task/${taskId}/status`);
+    return handleApiResponse(response);
+};
+
+// --- Audio URL Helper --- //
+const getAudioUrl = (relpath: string): string => {
+    // Construct the URL for the audio endpoint
+    // Ensure relpath doesn't start with / if API_BASE is involved
+    const cleanRelPath = relpath.startsWith('/') ? relpath.substring(1) : relpath;
+    return `${API_BASE}/audio/${cleanRelPath}`;
+};
+
+// Add missing startSpeechToSpeech function
+// Define necessary types inline if not in types.ts
+interface SpeechToSpeechPayload {
+    line_key: string;
+    source_audio_data: string; // Assuming base64 string
+    num_new_takes: number;
+    target_voice_id: string;
+    model_id: string;
+    settings: any; // Define more specific type? e.g., VoiceSettings
+    replace_existing: boolean;
+}
+const startSpeechToSpeech = async (batchPrefix: string, payload: SpeechToSpeechPayload): Promise<GenerationStartResponse> => {
+    const encodedPrefix = batchPrefix.split('/').map(encodeURIComponent).join('/');
+    const response = await apiClient.post<{ data: GenerationStartResponse }>(`/batch/${encodedPrefix}/speech_to_speech`, payload);
+    return handleApiResponse(response);
+};
+
+// Add missing getVoicePreview function
+interface VoicePreviewSettings {
+    stability?: number;
+    similarity?: number;
+    style?: number;
+    speed?: number;
+}
+const getVoicePreview = async (voiceId: string, settings?: VoicePreviewSettings): Promise<Blob> => {
+    // Use apiClient.get with responseType: 'blob' and handle potential errors
+    try {
+        const response = await apiClient.get(`/voices/${voiceId}/preview`, {
+            params: settings,
+            responseType: 'blob', // Important for file/blob responses
+        });
+        return response.data; // Axios wraps blob in data
+    } catch (error: any) {
+        // Attempt to extract error message if it's a structured error
+        let errorMsg = `Failed to fetch preview for ${voiceId}`; 
+        if (error.response && error.response.data) {
+             // If the response was JSON error from backend (less likely for blob endpoint but possible)
+             try {
+                 const errorData = JSON.parse(await (error.response.data as Blob).text());
+                 errorMsg = errorData.error || errorMsg;
+             } catch (parseError) { 
+                 // If reading blob as text fails, stick to generic axios error
+                 errorMsg = error.message || errorMsg;
+             }
+        } else {
+            errorMsg = error.message || errorMsg;
+        }
+        console.error(`[API] Error fetching preview for ${voiceId}: ${errorMsg}`);
+        throw new Error(errorMsg);
+    }
+};
+
+// Add missing optimizeLineText function
+// Define necessary types inline if not in types.ts
+interface OptimizeLineTextPayload { line_text: string }
+interface OptimizeLineTextResponse { optimized_text: string }
+const optimizeLineText = async (lineText: string): Promise<OptimizeLineTextResponse> => {
+    const response = await apiClient.post<{ data: OptimizeLineTextResponse }>('/optimize-line-text', { line_text: lineText });
+    return handleApiResponse(response);
+};
+
+// --- Lower Priority Template Functions (May be redundant) --- //
+
+// List Categories (Potentially redundant if always fetched with template)
+const listVoScriptTemplateCategories = async (templateId?: number): Promise<VoScriptTemplateCategory[]> => {
+    const response = await apiClient.get<{ data: VoScriptTemplateCategory[] }>('/vo-script-template-categories', { params: { template_id: templateId } });
+    return handleApiResponse(response);
+};
+
+// Get Single Category (Potentially redundant if always fetched with template)
+const getVoScriptTemplateCategory = async (categoryId: number): Promise<VoScriptTemplateCategory> => {
+    const response = await apiClient.get<{ data: VoScriptTemplateCategory }>(`/vo-script-template-categories/${categoryId}`);
+    return handleApiResponse(response);
+};
+
+// List Lines (Potentially redundant if always fetched with template)
+const listVoScriptTemplateLines = async (params?: { templateId?: number; categoryId?: number }): Promise<VoScriptTemplateLine[]> => {
+    const response = await apiClient.get<{ data: VoScriptTemplateLine[] }>('/vo-script-template-lines', { params });
+    return handleApiResponse(response);
+};
+
+// Get Single Line (Potentially redundant if always fetched with template)
+const getVoScriptTemplateLine = async (lineId: number): Promise<VoScriptTemplateLine> => {
+    const response = await apiClient.get<{ data: VoScriptTemplateLine }>(`/vo-script-template-lines/${lineId}`);
     return handleApiResponse(response);
 };
 
@@ -241,23 +542,44 @@ export const api = {
     // Generic
     getVoices,
     getModels,
+    // --- Add Generation functions --- //
+    startGeneration,
     // Jobs
     listGenerationJobs,
     getGenerationJob,
+    // Add Task Status endpoint
+    getTaskStatus,
     // Legacy Scripts
     getScript,
     submitScriptFeedback,
     runScriptAgent,
     createScript,
     deleteScript,
+    // Add missing listScripts export
+    listScripts,
+    // Add missing updateScript export
+    updateScript,
     // VO Script Templates
     fetchVoScriptTemplates,
     listVoScriptTemplates,
     getVoScriptTemplate,
     createVoScriptTemplate,
     deleteVoScriptTemplate,
+    // Add the missing update template function to exports
+    updateVoScriptTemplate,
     // Add the new function to exports
     updateVoScriptTemplateLine,
+    // Add missing category/line CRUD functions to exports
+    createVoScriptTemplateCategory,
+    updateVoScriptTemplateCategory,
+    deleteVoScriptTemplateCategory,
+    // Add potentially redundant list/get exports for categories/lines
+    listVoScriptTemplateCategories,
+    getVoScriptTemplateCategory,
+    createVoScriptTemplateLine,
+    listVoScriptTemplateLines,
+    getVoScriptTemplateLine,
+    deleteVoScriptTemplateLine,
     // VO Scripts (CRUD)
     createVoScript,
     listVoScripts,
@@ -279,4 +601,29 @@ export const api = {
     instantiateTargetLines,
     // Add the new function
     generateCategoryBatch,
+    // --- Add Voice Design functions --- //
+    createVoicePreviews,
+    saveVoiceFromPreview,
+    // Add missing toggleScriptArchive export
+    toggleScriptArchive,
+    // Add missing listBatches export
+    listBatches,
+    // Add missing getBatchMetadata export
+    getBatchMetadata,
+    // Add missing updateTakeRank export
+    updateTakeRank,
+    // Add missing getLineTakes export
+    getLineTakes,
+    // Add missing regenerateLineTakes export
+    regenerateLineTakes,
+    // Add missing startSpeechToSpeech export
+    startSpeechToSpeech,
+    // Add missing cropTake export
+    cropTake,
+    // Add Audio URL Helper
+    getAudioUrl,
+    // Add missing getVoicePreview export
+    getVoicePreview,
+    // Add missing optimizeLineText export
+    optimizeLineText,
 };

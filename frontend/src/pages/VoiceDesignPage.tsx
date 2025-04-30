@@ -68,23 +68,35 @@ const VoiceDesignPage: React.FC = () => {
     const descriptionForThisBatch = voiceDescription;
 
     setIsGenerating(true);
+    
+    // Determine the text to send based on the checkbox
+    const gettysburgStart = "Four score and seven years ago our fathers brought forth on this continent, a new nation, conceived in Liberty, and dedicated to the proposition that all men are created equal.";
+    const textToSend = autoGenerateText ? gettysburgStart : textToPreview;
+    
     const payload: CreateVoicePreviewPayload = {
       voice_description: descriptionForThisBatch, // Use stored description
       auto_generate_text: autoGenerateText,
       loudness: loudness,
       quality: quality,
       guidance_scale: guidanceScale,
+      text: textToSend || "" // Ensure text is always a string, fallback to empty if needed
     };
-    if (!autoGenerateText) {
-      payload.text = textToPreview;
-    }
     const seedNum = parseInt(seed, 10);
     if (!isNaN(seedNum) && seedNum >= 0) {
       payload.seed = seedNum;
     }
 
     try {
-      console.log("Sending payload:", payload);
+      // ADD DETAILED LOGGING HERE
+      console.log("--- Sending to api.createVoicePreviews ---");
+      console.log("Payload:", JSON.stringify(payload, null, 2));
+      console.log(`Payload contains 'text' field: ${payload.hasOwnProperty('text')}`);
+      console.log(`Value of 'text' field: ${payload.text}`);
+      console.log(`Value of 'auto_generate_text' field: ${payload.auto_generate_text}`);
+      console.log("-------------------------------------------");
+      // END DETAILED LOGGING
+      
+      console.log("Sending payload:", payload); // Keep original log too
       const response = await api.createVoicePreviews(payload);
       
       // --- Augment previews with original description --- 
@@ -241,7 +253,17 @@ const VoiceDesignPage: React.FC = () => {
                 type="checkbox" 
                 id="autoGenText" 
                 checked={autoGenerateText} 
-                onChange={e => setAutoGenerateText(e.target.checked)} 
+                onChange={e => {
+                  const isChecked = e.target.checked;
+                  setAutoGenerateText(isChecked);
+                  // If checked, fill the text area; if unchecked, clear it
+                  if (isChecked) {
+                    const gettysburgStart = "Four score and seven years ago our fathers brought forth on this continent, a new nation, conceived in Liberty, and dedicated to the proposition that all men are created equal.";
+                    setTextToPreview(gettysburgStart);
+                  } else {
+                    setTextToPreview(''); // Clear text when unchecked
+                  }
+                }} 
               />
               <label htmlFor="autoGenText"> Auto-generate suitable text</label>
             </div>

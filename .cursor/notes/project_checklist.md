@@ -85,6 +85,33 @@
 *   [ ] **TODO:** Final testing pass (Blocked by Phase 3).
 *   [ ] **TODO:** Update README with R2/DB/OpenAI env var details.
 
+## Phase 6.5: API Client Cleanup (Post-Refactor Issues)
+
+*   [ ] **TODO: Frontend - API Client (`api.ts`)**
+    *   [x] Add missing `api.updateVoScriptTemplate` function definition & export.
+    *   [x] Add missing `api.createVoicePreviews` function definition & export.
+    *   [x] Add missing `api.saveVoiceFromPreview` function definition & export.
+    *   [x] Add missing `api.startGeneration` function definition & export.
+    *   [x] Add missing `api.listScripts` function definition & export.
+    *   [x] Add missing `api.toggleScriptArchive` function definition & export.
+    *   [x] Add missing `api.getJobs` function definition & export (or rename call to `listGenerationJobs`).
+    *   [x] Add missing `api.listBatches` function definition & export.
+    *   [x] Add missing `api.updateTakeRank` function definition & export.
+    *   [ ] Add missing `api.getLineTakes` function definition & export (or confirm client-side filtering is sufficient).
+    *   [ ] Add missing `api.cropTake` function definition & export.
+    *   [ ] Add missing `api.getTaskStatus` function definition & export.
+    *   [ ] Add missing `api.regenerateLineTakes` function definition & export.
+    *   [ ] Add missing `api.startSpeechToSpeech` function definition & export.
+    *   [ ] Add missing `api.getVoicePreview` function definition & export.
+    *   [ ] Add missing `api.optimizeLineText` function definition & export.
+    *   [ ] Add missing `api.updateScript` function definition & export (for legacy scripts).
+    *   [ ] Add missing `api.listVoScriptTemplateCategories` function definition & export (maybe lower priority).
+    *   [ ] Add missing `api.getVoScriptTemplateCategory` function definition & export (maybe lower priority).
+    *   [ ] Add missing `api.listVoScriptTemplateLines` function definition & export (maybe lower priority).
+    *   [ ] Add missing `api.getVoScriptTemplateLine` function definition & export (maybe lower priority).
+*   [ ] **TODO: Testing**
+    *   [ ] Verify functionality of pages/components using the above API calls after fixes.
+
 ## Phase 7: New Feature - Create Script from Scratch
 
 *   [x] Create Technical Specification ([scriptcreator_tech_spec.md](mdc:.cursor/docs/scriptcreator_tech_spec.md)).
@@ -375,72 +402,4 @@
     *   [x] Modify `POST /api/vo-script-template-lines` endpoint in `vo_template_routes.py` to handle static_text field.
     *   [x] Modify `PUT /api/vo-script-template-lines/<line_id>` endpoint to handle static_text updates.
     *   [x] Update `create_vo_script` endpoint in `vo_script_routes.py` to copy static_text to generated_text for new lines.
-    *   [x] Update `_generate_lines_batch` in `vo_script_routes.py` to skip lines that already have text from static templates.
-    *   [ ] Write unit tests for all modified endpoints.
-*   [x] **TODO: Frontend - Template Editor**
-    *   [x] Update `TemplateLineRow` component (or equivalent) to add "Static Text" toggle.
-    *   [x] Implement conditional text input field shown when toggle is on.
-    *   [x] Update form state management to handle the new field.
-    *   [x] Update API call payload to include static_text when provided.
-    *   [x] Add visual styling to distinguish static lines in the UI.
-*   [x] **TODO: Frontend - Script Detail View**
-    *   [x] Update line display in `VoScriptDetailView.tsx` to visually distinguish static template lines.
-    *   [x] Disable regenerate/refine buttons for lines from static templates.
-*   [ ] **TODO: Testing**
-    *   [ ] Manually test creating template lines with static text.
-    *   [ ] Manually test updating template lines to add/modify/remove static text.
-    *   [ ] Manually test creating a new script from a template with static lines.
-    *   [ ] Verify static lines appear with correct text and 'generated' status.
-    *   [ ] Verify batch generation skips lines with static text.
-
-## Phase AA: Instantiate Target Lines Feature
-
-*   [x] **TODO: Backend - New Endpoint and Functionality**
-    *   [x] Create a new endpoint `/vo-scripts/<script_id>/instantiate-lines` in `vo_script_routes.py`.
-    *   [x] Implement logic to accept a target category ID and list of target names.
-    *   [x] Add support for optional line key prefix and prompt hint template.
-    *   [x] Process target names and create new lines with appropriate keys and prompts.
-    *   [x] Return a success response with count of lines added.
-
-*   [x] **TODO: Backend - Batch Generation Improvements**
-    *   [x] Enhance `get_category_lines_context` in `utils_voscript.py` to handle direct category_id.
-    *   [x] Modify the function to combine results from both direct and template-based queries.
-    *   [x] Fix sorting to handle lines with and without template_line associations.
-    *   [x] Add special handling for directed taunt lines in `_generate_lines_batch`.
-    *   [x] Improve logging throughout the process for better debugging.
-
-*   [x] **TODO: Frontend - User Interface**
-    *   [x] Add "Instantiate Target Lines" button to `VoScriptDetailView.tsx` action bar.
-    *   [x] Create a modal component for entering target configuration.
-    *   [x] Implement form with category selector, targets textarea, and optional fields.
-    *   [x] Add state management for the instantiation process.
-    *   [x] Create API client function `instantiateTargetLines` in `api.ts`.
-
-*   [x] **TODO: Frontend - Auto-Generation**
-    *   [x] Implement automatic content generation after line creation.
-    *   [x] Add `generateCategoryBatch` function to `api.ts`.
-    *   [x] Update the instantiation success handler to trigger generation.
-    *   [x] Add appropriate loading states and notifications.
-    *   [x] Fix error handling for the generation process.
-
-*   [x] **TODO: Documentation**
-    *   [x] Create feature usage guide in `.cursor/docs/instantiate_target_lines_guide.md`.
-    *   [x] Update README.md to include information about the feature.
-    *   [x] Add documentation to `.cursor/notes/agentnotes.md`.
-    *   [x] Update project checklist.
-
-*   [x] **TODO: Testing and Fixes**
-    *   [x] Test the line creation process manually.
-    *   [x] Debug and fix issues with finding newly created lines.
-    *   [x] Test automatic generation after line creation.
-    *   [x] Fix problems with batch generation excluding target lines.
-    *   [x] Ensure proper line status and content display in UI.
-
-*   [x] **TODO: Excel Export Feature**
-    *   [x] Create a "Download Excel" button in the script detail view.
-    *   [x] Implement backend endpoint for Excel generation using openpyxl.
-    *   [x] Structure Excel with script name, character description, and categorized lines.
-    *   [x] Fix filename sanitization issues.
-    *   [x] Test export functionality.
-
-## [...] Subsequent Sections [...]
+    *   [x] Update `

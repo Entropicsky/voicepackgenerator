@@ -21,7 +21,7 @@ const JobsPage: React.FC = () => {
     // setError(null); // Reset error on fetch
     try {
       console.log("Fetching job list from DB...");
-      const fetchedJobs = await api.getJobs();
+      const fetchedJobs = await api.listGenerationJobs();
       setJobs(fetchedJobs);
       // REMOVE logic related to activeJobTaskIds and fetchLiveStatuses
     } catch (err: any) {

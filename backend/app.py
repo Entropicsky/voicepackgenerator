@@ -1188,8 +1188,8 @@ def create_voice_design_previews():
     
     # Extract parameters from request data
     voice_description = data.get('voice_description')
-    text = data.get('text')
-    auto_generate_text = data.get('auto_generate_text', False)
+    text = data.get('text') # Get the text (guaranteed by frontend now)
+    # auto_generate_text = data.get('auto_generate_text', False) # No longer needed from frontend
     loudness = data.get('loudness')
     quality = data.get('quality')
     seed = data.get('seed')
@@ -1198,19 +1198,25 @@ def create_voice_design_previews():
 
     if not voice_description:
          return make_api_response(error="Missing required field: voice_description", status_code=400)
+    # Add a check for the text field coming from the frontend
+    if not text:
+         return make_api_response(error="Missing required field: text", status_code=400)
 
     try:
+        # Always call the util with auto_generate_text=False
         previews, generated_text = utils_elevenlabs.create_voice_previews(
             voice_description=voice_description,
             text=text,
-            auto_generate_text=auto_generate_text,
+            auto_generate_text=False, # Always set to False now
             loudness=loudness,
             quality=quality,
             seed=seed,
             guidance_scale=guidance_scale,
             output_format=output_format
         )
-        return make_api_response(data={"previews": previews, "text": generated_text})
+        # generated_text from the util might be different if it *used* to auto-generate,
+        # but now we mostly care about the previews based on the input text.
+        return make_api_response(data={"previews": previews, "text": text}) # Return the input text
     except ValueError as ve:
         # Catch validation errors from the utility function
         print(f"Validation error creating voice previews: {ve}")

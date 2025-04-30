@@ -319,10 +319,9 @@ def create_voice_previews(
     params = {'output_format': output_format}
     payload: Dict[str, Any] = {
         'voice_description': voice_description,
-        'auto_generate_text': auto_generate_text
     }
-    if not auto_generate_text and text:
-        payload['text'] = text
+    payload['text'] = text
+    
     if loudness is not None:
         payload['loudness'] = loudness
     if quality is not None:
@@ -333,10 +332,6 @@ def create_voice_previews(
         payload['guidance_scale'] = guidance_scale
         
     # Basic validation (could be more thorough)
-    if auto_generate_text and text:
-        print("Warning: 'text' provided but 'auto_generate_text' is True. Text will be ignored.")
-    if not auto_generate_text and not text:
-        raise ValueError("Either 'text' must be provided or 'auto_generate_text' must be True.")
     if text and not (100 <= len(text) <= 1000):
         raise ValueError("Preview text must be between 100 and 1000 characters.")
     if not (20 <= len(voice_description) <= 1000):
