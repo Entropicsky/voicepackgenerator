@@ -1074,7 +1074,7 @@ const VoScriptDetailView: React.FC = () => {
     setTargetCategoryId(null);
     setTargetNamesInput('');
     setTargetLineKeyPrefix('DIRECTED_TAUNT_'); // Reset to default
-    setTargetPromptHintTemplate('Directed taunt towards {TargetName}.'); // Reset to default
+    setTargetPromptHintTemplate('Directed taunt towards {TargetName}. Directly tie in the taunt to {TargetName} and their role or lore or characteristics.'); // Reset to default
     openInstantiateModal();
   };
 

@@ -219,9 +219,11 @@ def get_category_lines_context(db: Session, script_id: int, category_name: str) 
         
         # Sort the combined results (can't rely on SQL ORDER BY anymore)
         all_lines.sort(key=lambda line: (
-            # Sort first by template line order index if available, otherwise use a high number
-            line.template_line.order_index if line.template_line else 999999,
-            # Then by the line ID for ties or lines without template
+            # FIX: Prioritize direct order_index if it exists
+            line.order_index if line.order_index is not None else 
+            # Fallback to template line order index if direct one is missing
+            (line.template_line.order_index if line.template_line and line.template_line.order_index is not None else 999999),
+            # Then by the line ID for ties or lines without template/direct order index
             line.id
         ))
 
