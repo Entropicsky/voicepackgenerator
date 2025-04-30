@@ -52,8 +52,13 @@ def call_openai_responses_api(
         otherwise None.
     """
     try:
-        # FIX: Log the model value *after* the default has been applied
-        actual_model_to_use = model # Model arg already has default applied by function signature
+        # FIX: Explicitly check for None and apply default INSIDE the function
+        actual_model_to_use = model if model is not None else DEFAULT_REFINEMENT_MODEL
+        # Ensure we didn't somehow still end up with None or empty string
+        if not actual_model_to_use:
+             actual_model_to_use = "gpt-4o" # Final fallback
+             logging.warning(f"Model was None or empty even after default logic, falling back to gpt-4o")
+             
         logging.info(f"Calling OpenAI Responses API with model: {actual_model_to_use}, max_tokens: {max_tokens}, temp: {temperature}")
         # Use the client initialized at the module level
         response = client.responses.create(
