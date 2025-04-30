@@ -131,6 +131,12 @@ const deleteVoScriptTemplate = async (templateId: number): Promise<{ message: st
     return handleApiResponse(response);
 };
 
+// Add the missing function
+const updateVoScriptTemplateLine = async (lineId: number, payload: any): Promise<any> => { // TODO: Replace 'any' with specific VoScriptTemplateLine type if available
+    const response = await apiClient.put<{ data: any }>(`/vo-script-template-lines/${lineId}`, payload); // Assuming PUT /api/vo-script-template-lines/<line_id>
+    return handleApiResponse(response);
+};
+
 // --- VO Script Functions --- //
 const createVoScript = async (payload: { name: string; template_id: number; character_description: string }): Promise<VoScript> => {
   const response = await apiClient.post<{ data: VoScript }>('/vo-scripts', payload);
@@ -250,6 +256,8 @@ export const api = {
     getVoScriptTemplate,
     createVoScriptTemplate,
     deleteVoScriptTemplate,
+    // Add the new function to exports
+    updateVoScriptTemplateLine,
     // VO Scripts (CRUD)
     createVoScript,
     listVoScripts,
