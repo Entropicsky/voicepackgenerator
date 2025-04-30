@@ -52,10 +52,12 @@ def call_openai_responses_api(
         otherwise None.
     """
     try:
-        logging.info(f"Calling OpenAI Responses API with model: {model}, max_tokens: {max_tokens}, temp: {temperature}")
+        # FIX: Log the model value *after* the default has been applied
+        actual_model_to_use = model # Model arg already has default applied by function signature
+        logging.info(f"Calling OpenAI Responses API with model: {actual_model_to_use}, max_tokens: {max_tokens}, temp: {temperature}")
         # Use the client initialized at the module level
         response = client.responses.create(
-            model=model,
+            model=actual_model_to_use,
             input=prompt, # Direct string input
             max_output_tokens=max_tokens,
             temperature=temperature,
