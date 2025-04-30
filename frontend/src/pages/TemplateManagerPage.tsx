@@ -36,7 +36,7 @@ function TemplateManagerPage() {
   // Fetch templates using react-query
   const { data: templates, isLoading, error, isError } = useQuery<VoScriptTemplateMetadata[], Error>({
     queryKey: ['voScriptTemplates'],
-    queryFn: api.listVoScriptTemplates,
+    queryFn: api.fetchVoScriptTemplates,
   });
 
   // Mutation for creating templates

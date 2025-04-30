@@ -13,6 +13,7 @@ from openpyxl import Workbook # For creating Excel file
 from openpyxl.styles import Font, Alignment, PatternFill # For formatting
 from openpyxl.utils import get_column_letter # For setting column width
 import re # Import regex for natural sort
+import sqlalchemy as sa # Added import
 
 # Assuming models and helpers are accessible, adjust imports as necessary
 from backend import models, tasks # Added tasks import
@@ -1578,16 +1579,36 @@ def generate_category_lines_batch(script_id: int, category_name: str):
             logging.info(f"No lines found for category '{category_name}' in script {script_id}. Nothing to generate.")
             return make_api_response(data={"message": "No lines found to generate", "data": []})
             
-        # Filter to only include pending lines
-        pending_lines = [line for line in lines_to_process if line.get('status') == 'pending']
+        # DEBUG: Log each line's status, id, and key to see what we have
+        for line in lines_to_process:
+            logging.info(f"Found line: ID={line.get('line_id')}, key={line.get('line_key')}, status={line.get('status')}, has_text={line.get('current_text') is not None}")
+        
+        # Filter to only include pending lines or empty lines
+        pending_lines = []
+        for line in lines_to_process:
+            # Check for explicitly 'pending' status
+            if line.get('status') == 'pending':
+                pending_lines.append(line)
+                logging.info(f"Added pending line ID {line.get('line_id')} with key {line.get('line_key')} to generation queue")
+            # Also check for any empty lines regardless of status
+            elif not line.get('current_text') and not line.get('is_locked', False):
+                pending_lines.append(line)
+                logging.info(f"Added empty line ID {line.get('line_id')} with key {line.get('line_key')} to generation queue")
+            # Special check for DIRECTED_TAUNT lines
+            elif line.get('line_key', '').startswith('DIRECTED_TAUNT_') and not line.get('is_locked', False):
+                pending_lines.append(line)
+                logging.info(f"Added directed taunt line ID {line.get('line_id')} with key {line.get('line_key')} to generation queue")
+        
         if not pending_lines:
             logging.info(f"No pending lines found for category '{category_name}' in script {script_id}. Nothing to generate.")
             return make_api_response(data={"message": "No pending lines found to generate", "data": []})
             
         logging.info(f"Found {len(pending_lines)} pending lines to generate for category '{category_name}' in script {script_id}.")
-        
+
         # 2. Find any existing generated lines in the same category (for context and variety)
-        existing_lines = [line for line in lines_to_process if line.get('status') != 'pending' and line.get('current_text')]
+        existing_lines = [line for line in lines_to_process if line.get('status') not in ['pending', None] and 
+                           line.get('current_text') and
+                           line.get('line_id') not in [pl.get('line_id') for pl in pending_lines]]
         
         # 3. If we have 10 or fewer pending lines, use batch generation approach
         if len(pending_lines) <= 10:
@@ -1662,16 +1683,28 @@ def _generate_lines_batch(db: Session, script_id: int, pending_lines: list, exis
         return []
         
     try:
-        # Filter out lines that already have text (e.g., from static templates)
+        # Skip lines already with text but include special handling for directed taunt lines
         lines_to_generate = []
         for line in pending_lines:
-            if line.get('current_text'):
-                logging.info(f"Skipping line {line.get('line_id')} that already has text (possibly from static template)")
-                # Check if we should include it in updated_lines even though we're skipping generation
-                line_obj = db.query(models.VoScriptLine).get(line.get('line_id'))
+            line_id = line.get('line_id')
+            line_key = line.get('line_key', '')
+            current_text = line.get('current_text', '')
+            
+            # Special handling for directed taunt lines
+            if line_key.startswith('DIRECTED_TAUNT_') and not line.get('is_locked', False):
+                logging.info(f"Including directed taunt line {line_id} (key: {line_key}) for generation")
+                lines_to_generate.append(line)
+                continue
+                
+            # Skip if already has text (except for directed taunts)
+            if current_text:
+                logging.info(f"Skipping line {line_id} (key: {line_key}) that already has text: '{current_text[:50]}'")
+                # Include in updated_lines anyway
+                line_obj = db.query(models.VoScriptLine).get(line_id)
                 if line_obj:
                     updated_lines.append(model_to_dict(line_obj))
             else:
+                logging.info(f"Including line {line_id} (key: {line_key}) for generation (empty text)")
                 lines_to_generate.append(line)
                 
         # If all lines already have text, return what we have
@@ -1722,8 +1755,16 @@ def _generate_lines_batch(db: Session, script_id: int, pending_lines: list, exis
         prompt_parts.append("\n--- LINES TO GENERATE ---")
         for i, line in enumerate(pending_lines):
             key = line.get('line_key') or f"line_{line.get('line_id')}"
-            hint = line.get('line_template_hint', '')
-            prompt_parts.append(f"{i+1}. {key}: \"{hint}\"")
+            
+            # Special handling for directed taunt lines
+            if key.startswith('DIRECTED_TAUNT_'):
+                # Extract the target name from the key
+                target_name = key.replace('DIRECTED_TAUNT_', '')
+                hint = line.get('prompt_hint') or f"Write a taunt directed at {target_name}"
+                prompt_parts.append(f"{i+1}. {key}: \"{hint}\"")
+            else:
+                hint = line.get('line_template_hint', '')
+                prompt_parts.append(f"{i+1}. {key}: \"{hint}\"")
         
         # Final generation instructions
         prompt_parts.append("\n--- GENERATION TASK ---")
@@ -1784,17 +1825,7 @@ def _generate_lines_batch(db: Session, script_id: int, pending_lines: list, exis
             
             logging.info(f"Updating line {line_id} with generated text: '{generated_text[:50]}...'")
             
-            # Before updating in DB, make sure to fetch the line with template_line to copy line_key
-            line = db.query(models.VoScriptLine).options(
-                joinedload(models.VoScriptLine.template_line)
-            ).get(line_id)
-            
-            if line and line.line_key is None and line.template_line and line.template_line.line_key:
-                line.line_key = line.template_line.line_key
-                logging.info(f"Setting line_key '{line.template_line.line_key}' for line {line_id} during batch generation")
-                db.flush()  # Send this update to DB but don't commit yet
-                
-            # Continue with normal update through utility function
+            # Update with generated text
             updated_line = utils_voscript.update_line_in_db(
                 db, 
                 line_id, 
@@ -1805,6 +1836,9 @@ def _generate_lines_batch(db: Session, script_id: int, pending_lines: list, exis
             
             if updated_line:
                 updated_lines.append(model_to_dict(updated_line))
+                logging.info(f"Successfully updated line {line_id}")
+            else:
+                logging.error(f"Failed to update line {line_id}")
         
         return updated_lines
         
@@ -2079,6 +2113,131 @@ def download_vo_script_excel(script_id: int):
             try: db.rollback() 
             except: pass
         return make_api_response(error="Failed to generate Excel file", status_code=500)
+    finally:
+        if db and db.is_active:
+            db.close()
+
+# --- NEW: Instantiate Target Lines Endpoint --- #
+@vo_script_bp.route('/vo-scripts/<int:script_id>/instantiate-lines', methods=['POST'])
+def instantiate_target_lines(script_id: int):
+    """Creates multiple new 'pending' VO script lines based on a list of targets
+       and associates them with a specific category.
+    """
+    data = request.get_json()
+    if not data:
+        return make_api_response(error="Missing request body", status_code=400)
+
+    # --- Get Required Inputs --- #
+    template_category_id = data.get('template_category_id')
+    target_names = data.get('target_names') # Expected to be a list of strings
+
+    # --- Get Optional Inputs --- #
+    line_key_prefix = data.get('line_key_prefix', 'TARGETED_LINE_') # Default prefix
+    prompt_hint_template = data.get('prompt_hint_template', 'Line targeting {TargetName}') # Default hint template
+    # Placeholder for target name in the template
+    target_placeholder = data.get('target_placeholder', '{TargetName}') 
+
+    # --- Validate Inputs --- #
+    if not template_category_id or not isinstance(template_category_id, int):
+        return make_api_response(error="Missing or invalid 'template_category_id' (must be integer)", status_code=400)
+    if not target_names or not isinstance(target_names, list) or not all(isinstance(t, str) for t in target_names):
+        return make_api_response(error="Missing or invalid 'target_names' (must be a list of strings)", status_code=400)
+    if not isinstance(line_key_prefix, str):
+        return make_api_response(error="Invalid 'line_key_prefix' (must be string)", status_code=400)
+    if not isinstance(prompt_hint_template, str):
+        return make_api_response(error="Invalid 'prompt_hint_template' (must be string)", status_code=400)
+    if target_placeholder not in prompt_hint_template:
+         logging.warning(f"Target placeholder '{target_placeholder}' not found in prompt hint template: '{prompt_hint_template}'")
+         # Proceed anyway, but the hint won't be dynamic
+
+    db: Session = None
+    new_lines_added = []
+    try:
+        db = next(get_db())
+
+        # 1. Verify Script and Template Category exist
+        script = db.query(models.VoScript).get(script_id)
+        if not script:
+            return make_api_response(error=f"Script {script_id} not found", status_code=404)
+        
+        category = db.query(models.VoScriptTemplateCategory).filter(
+            # Ensure category belongs to the script's template
+            models.VoScriptTemplateCategory.template_id == script.template_id, 
+            models.VoScriptTemplateCategory.id == template_category_id,
+            models.VoScriptTemplateCategory.is_deleted == False
+        ).first()
+        if not category:
+            return make_api_response(error=f"Template Category {template_category_id} not found or does not belong to script's template", status_code=404)
+
+        # 2. Determine starting order index for new lines within the category
+        max_order_result = db.query(sa.func.max(models.VoScriptLine.order_index)).filter(
+            models.VoScriptLine.vo_script_id == script_id,
+            models.VoScriptLine.category_id == category.id
+        ).scalar()
+        start_order_index = (max_order_result or -1) + 1
+        
+        logging.info(f"Instantiating lines for category '{category.name}' (ID: {category.id}) in script {script_id}, starting order index: {start_order_index}")
+
+        # 3. Loop through targets and create lines
+        for i, target_name in enumerate(target_names):
+            if not target_name or not target_name.strip():
+                logging.warning(f"Skipping empty target name at index {i}.")
+                continue
+                
+            target_name_clean = target_name.strip()
+            
+            # Sanitize target name for key (simple version)
+            sanitized_target = "".join(c if c.isalnum() else '_' for c in target_name_clean).upper()
+            
+            # Generate line key and prompt hint
+            final_line_key = f"{line_key_prefix}{sanitized_target}"
+            final_prompt_hint = prompt_hint_template.replace(target_placeholder, target_name_clean)
+            current_order_index = start_order_index + i
+
+            # Check for duplicate key *within this script* before adding
+            existing_line = db.query(models.VoScriptLine.id).filter(
+                models.VoScriptLine.vo_script_id == script_id,
+                models.VoScriptLine.line_key == final_line_key
+            ).first()
+            
+            if existing_line:
+                logging.warning(f"Skipping target '{target_name_clean}' - Line key '{final_line_key}' already exists in script {script_id}.")
+                continue # Skip this target
+
+            # Create the new line object
+            new_line = models.VoScriptLine(
+                vo_script_id=script_id,
+                template_line_id=None, # Not linked to a specific template line
+                category_id=category.id, # Link to the target category
+                generated_text=None, # Starts empty
+                status='pending', # Ready for generation
+                is_locked=False, # Not locked by default
+                line_key=final_line_key, 
+                order_index=current_order_index,
+                prompt_hint=final_prompt_hint
+            )
+            # Make sure status is set to pending (for debugging)
+            logging.info(f"Creating line with key '{final_line_key}' and status='pending'")
+            db.add(new_line)
+            new_lines_added.append(new_line) # Keep track for response
+
+        # 4. Commit all new lines if any were generated
+        if not new_lines_added:
+             return make_api_response(data={"message": "No new lines were added. Targets might be empty or keys already existed.", "lines_added_count": 0}, status_code=200)
+        
+        db.commit()
+        logging.info(f"Successfully added {len(new_lines_added)} new lines for script {script_id} to category '{category.name}'.")
+
+        # Optional: Return details of added lines?
+        # For now, just return count
+        return make_api_response(data={"message": f"Successfully added {len(new_lines_added)} lines.", "lines_added_count": len(new_lines_added)}, status_code=201)
+
+    except Exception as e:
+        if db and db.is_active: 
+            try: db.rollback() 
+            except: pass
+        logging.exception(f"Error instantiating target lines for script {script_id}: {e}")
+        return make_api_response(error="Failed to instantiate target lines.", status_code=500)
     finally:
         if db and db.is_active:
             db.close()

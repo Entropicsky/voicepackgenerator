@@ -20,7 +20,7 @@ const VoScriptCreateView: React.FC = () => {
   // 2. Fetch available VO Script Templates for the dropdown
   const { data: templates, isLoading: isLoadingTemplates, error: templatesError } = useQuery<VoScriptTemplateMetadata[], Error>({
     queryKey: ['voScriptTemplatesMetadata'], 
-    queryFn: api.listVoScriptTemplates, // Use actual API function
+    queryFn: api.fetchVoScriptTemplates, // Use actual API function
   });
 
   // 3. Setup Mutation for Creating the Script

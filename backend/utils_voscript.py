@@ -171,35 +171,66 @@ def get_category_lines_context(db: Session, script_id: int, category_name: str) 
         # MODIFIED: Don't use stored refinement_prompt
         script_refinement_prompt = None  # Set to None regardless of what's stored in DB
 
-        # Now query the lines
-        query = db.query(models.VoScriptLine).options(
-            # Eager load needed relationships (vo_script relationship is already loaded implicitly 
-            # via filter, but joinedload here ensures access via line.vo_script is efficient if needed,
-            # although we primarily use parent_script now)
-            joinedload(models.VoScriptLine.vo_script).joinedload(models.VoScript.template),
-            joinedload(models.VoScriptLine.template_line).joinedload(models.VoScriptTemplateLine.category),
-            joinedload(models.VoScriptLine.template_line).joinedload(models.VoScriptTemplateLine.template)
+        # First, find the category ID for this category name
+        category = db.query(models.VoScriptTemplateCategory).filter(
+            models.VoScriptTemplateCategory.template_id == parent_script.template_id,
+            models.VoScriptTemplateCategory.name == category_name,
+            models.VoScriptTemplateCategory.is_deleted == False
+        ).first()
+        
+        if not category:
+            logging.warning(f"get_category_lines_context: Category '{category_name}' not found for template {parent_script.template_id}.")
+            return []
+        
+        category_id = category.id
+        
+        # MODIFIED QUERY: Two-part approach that combines lines from both queries
+        
+        # 1. Get lines directly associated with this category_id (including custom lines without template_line)
+        lines_with_direct_category = db.query(models.VoScriptLine).options(
+            joinedload(models.VoScriptLine.template_line)
         ).filter(
-            models.VoScriptLine.vo_script_id == script_id
+            models.VoScriptLine.vo_script_id == script_id,
+            models.VoScriptLine.category_id == category_id
+        ).all()
+        
+        # 2. Get lines with template_line.category matching our category - this catches older data
+        lines_with_template_category = db.query(models.VoScriptLine).options(
+            joinedload(models.VoScriptLine.template_line).joinedload(models.VoScriptTemplateLine.category)
+        ).filter(
+            models.VoScriptLine.vo_script_id == script_id,
+            models.VoScriptLine.template_line_id != None  # Must have template line
         ).join(
-            models.VoScriptLine.template_line 
+            models.VoScriptLine.template_line
         ).join(
             models.VoScriptTemplateLine.category
         ).filter(
             models.VoScriptTemplateCategory.name == category_name
-        ).order_by(
-            asc(models.VoScriptTemplateLine.order_index),
-            asc(models.VoScriptLine.id)
-        )
+        ).all()
+        
+        # Combine results, ensuring no duplicates by checking IDs
+        all_lines = lines_with_direct_category.copy()
+        template_line_ids = {line.id for line in all_lines}
+        
+        for line in lines_with_template_category:
+            if line.id not in template_line_ids:
+                all_lines.append(line)
+                template_line_ids.add(line.id)
+        
+        # Sort the combined results (can't rely on SQL ORDER BY anymore)
+        all_lines.sort(key=lambda line: (
+            # Sort first by template line order index if available, otherwise use a high number
+            line.template_line.order_index if line.template_line else 999999,
+            # Then by the line ID for ties or lines without template
+            line.id
+        ))
 
-        lines = query.all()
-
-        if not lines:
+        if not all_lines:
             logging.info(f"get_category_lines_context: No lines found for script {script_id}, category '{category_name}'.")
             return []
 
         # Process each line found
-        for line in lines:
+        for line in all_lines:
             # Reuse get_line_context logic or replicate - replicating for clarity here
             context = {
                 "line_id": line.id,
@@ -207,22 +238,24 @@ def get_category_lines_context(db: Session, script_id: int, category_name: str) 
                 "current_text": line.generated_text,
                 "status": line.status,
                 "latest_feedback": line.latest_feedback,
-                "line_key": None,
+                "line_key": line.line_key,  # Take line_key directly from the line
                 "line_template_hint": None,
-                "category_name": None,
-                "category_instructions": None,
+                "category_name": category_name,  # We already know the category name
+                "category_instructions": category.prompt_instructions,  # Take from the category we found
                 "script_name": parent_script.name,
                 "character_description": parent_script.character_description,
                 "template_name": parent_script.template.name if parent_script.template else None,
                 "template_hint": parent_script.template.prompt_hint if parent_script.template else None,
-                "script_refinement_prompt": script_refinement_prompt 
+                "script_refinement_prompt": script_refinement_prompt,
+                "prompt_hint": line.prompt_hint  # Include direct prompt_hint
             }
+            
+            # Add template line specific fields if available
             if line.template_line:
-                context["line_key"] = line.template_line.line_key
+                # Only override these if they're not already set or are None
+                if not context["line_key"]:
+                    context["line_key"] = line.template_line.line_key
                 context["line_template_hint"] = line.template_line.prompt_hint
-                if line.template_line.category:
-                    context["category_name"] = line.template_line.category.name
-                    context["category_instructions"] = line.template_line.category.prompt_instructions
             
             lines_context.append(context)
 

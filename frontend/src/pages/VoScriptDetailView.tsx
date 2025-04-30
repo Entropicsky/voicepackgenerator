@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
     Title, Text, Paper, Stack, Group, Button, LoadingOverlay, Alert, 
     Accordion, Textarea, ActionIcon, Tooltip, Badge, Table, Modal, TextInput, Progress, ScrollArea,
-    Checkbox
+    Checkbox, Select
 } from '@mantine/core';
 import { IconPlayerPlay, IconSend, IconRefresh, IconDeviceFloppy, IconSparkles, IconLock, IconLockOpen, IconTrash, IconPlus, IconHistory, IconCheck } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
@@ -15,7 +15,7 @@ import axios from 'axios';
 // Import API functions
 import { api } from '../api';
 // Import types
-import { VoScript, VoScriptLineData, JobSubmissionResponse, SubmitFeedbackPayload, RunAgentPayload, UpdateVoScriptPayload, UpdateVoScriptTemplateCategoryPayload, VoScriptCategoryData, RefineLinePayload, RefineLineResponse, RefineCategoryPayload, RefineMultipleLinesResponse, RefineScriptPayload, DeleteResponse, AddVoScriptLinePayload } from '../types';
+import { VoScript, VoScriptLineData, JobSubmissionResponse, SubmitFeedbackPayload, RunAgentPayload, UpdateVoScriptPayload, UpdateVoScriptTemplateCategoryPayload, VoScriptCategoryData, RefineLinePayload, RefineLineResponse, RefineCategoryPayload, RefineMultipleLinesResponse, RefineScriptPayload, DeleteResponse, AddVoScriptLinePayload, VoScriptTemplate, VoScriptTemplateCategory } from '../types';
 
 const VoScriptDetailView: React.FC = () => {
   const { scriptId } = useParams<{ scriptId: string }>();
@@ -78,6 +78,13 @@ const VoScriptDetailView: React.FC = () => {
   const [applyRulesToLine, setApplyRulesToLine] = useState<boolean>(false);
   const [applyRulesToCategory, setApplyRulesToCategory] = useState<boolean>(false);
   const [applyRulesToScript, setApplyRulesToScript] = useState<boolean>(false);
+  // NEW State for Instantiate Lines Modal
+  const [instantiateModalOpened, { open: openInstantiateModal, close: closeInstantiateModal }] = useDisclosure(false);
+  const [targetCategoryId, setTargetCategoryId] = useState<string | null>(null); // Use string for Select input
+  const [targetNamesInput, setTargetNamesInput] = useState<string>(''); // Textarea for names
+  const [targetLineKeyPrefix, setTargetLineKeyPrefix] = useState<string>('DIRECTED_TAUNT_'); // Default prefix
+  const [targetPromptHintTemplate, setTargetPromptHintTemplate] = useState<string>('Directed taunt towards {TargetName}.'); // Default template
+  const [instantiateLinesLoading, setInstantiateLinesLoading] = useState<boolean>(false);
 
   // --- 1. Fetch VO Script Details --- //
   const { 
@@ -90,6 +97,24 @@ const VoScriptDetailView: React.FC = () => {
     queryKey: ['voScriptDetail', numericScriptId],
     queryFn: () => api.getVoScript(numericScriptId!),
     enabled: !!numericScriptId, 
+  });
+
+  // Fetch template categories for the dropdown (only if scriptData and template_id exist)
+  const { data: templateCategoriesData, isLoading: isLoadingTemplateCategories } = useQuery<
+      VoScriptTemplateCategory[], 
+      Error,
+      VoScriptTemplateCategory[], // select returns this type
+      ['templateCategories', number | undefined] // Query key type
+    >({
+    queryKey: ['templateCategories', voScript?.template_id],
+    queryFn: async () => {
+        if (!voScript?.template_id) return []; // Return empty if no template ID
+        // Assuming api.getVoScriptTemplate exists and returns the template with categories
+        const template = await api.getVoScriptTemplate(voScript.template_id);
+        return template?.categories || [];
+    },
+    enabled: !!voScript?.template_id, // Only run if template_id exists
+    staleTime: 60 * 1000 * 5, // Cache for 5 minutes
   });
 
   // --- Initialize state based on fetched data --- //
@@ -926,7 +951,7 @@ const VoScriptDetailView: React.FC = () => {
       }
       
       // Create a temporary link element
-      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const url = window.URL.createObjectURL(new Blob([response.data as BlobPart]));
       const link = document.createElement('a');
       link.href = url;
       link.setAttribute('download', filename);
@@ -949,15 +974,134 @@ const VoScriptDetailView: React.FC = () => {
         message: 'Failed to download Excel file.',
         color: 'red',
       });
-      // Potentially show more specific error from backend if available
-      // if (axios.isAxiosError(error) && error.response?.data?.error) {
-      //   notifications.show({
-      //     title: 'Excel Download Error',
-      //     message: `Failed to download: ${error.response.data.error}`,
-      //     color: 'red',
-      //   });
-      // }
     }
+  };
+
+  // --- NEW: Instantiate Lines Mutation --- //
+  const instantiateLinesMutation = useMutation<
+    { message: string; lines_added_count: number }, 
+    Error, 
+    { template_category_id: number; target_names: string[]; line_key_prefix?: string; prompt_hint_template?: string }
+  >({
+      mutationFn: (payload) => api.instantiateTargetLines(numericScriptId!, payload),
+      onMutate: () => {
+          setInstantiateLinesLoading(true);
+      },
+      onSuccess: (response) => {
+          notifications.show({
+              title: 'Lines Instantiated',
+              message: response.message || `${response.lines_added_count} lines added successfully. Starting content generation...`,
+              color: 'green'
+          });
+          
+          // Get the category ID from our form state (the one we just added lines to)
+          const categoryIdNum = targetCategoryId ? parseInt(targetCategoryId, 10) : null;
+          
+          // Find the category name from the ID (needed for the generation API)
+          let categoryName = '';
+          if (categoryIdNum && templateCategoriesData) {
+              const category = templateCategoriesData.find(cat => cat.id === categoryIdNum);
+              if (category) {
+                  categoryName = category.name;
+                  
+                  // Close the modal immediately 
+                  closeInstantiateModal();
+                  
+                  // Invalidate to refresh and show the new lines
+                  queryClient.invalidateQueries({ queryKey: ['voScriptDetail', numericScriptId] });
+                  
+                  // Auto-trigger generation for the category
+                  if (response.lines_added_count > 0 && categoryName) {
+                      // Show notification about starting generation
+                      notifications.show({
+                          title: 'Starting Generation',
+                          message: `Generating content for ${response.lines_added_count} new lines in category "${categoryName}"...`,
+                          color: 'blue',
+                          loading: true
+                      });
+                      
+                      // Trigger category batch generation
+                      console.log(`Attempting to generate lines for category '${categoryName}'...`);
+                      api.generateCategoryBatch(numericScriptId!, categoryName)
+                          .then((result) => {
+                              console.log('Generation completed successfully:', result);
+                              // Reload the script data after generation completes
+                              queryClient.invalidateQueries({ queryKey: ['voScriptDetail', numericScriptId] });
+                              notifications.show({
+                                  title: 'Generation Complete',
+                                  message: `Successfully generated content for lines in category "${categoryName}"`,
+                                  color: 'green'
+                              });
+                          })
+                          .catch(error => {
+                              console.error('Error during generation:', error);
+                              // Add more detailed errors to help diagnose the issue
+                              const errorMessage = error?.response?.data?.error || error.message || 'Failed to generate content for the new lines';
+                              notifications.show({
+                                  title: 'Generation Error',
+                                  message: errorMessage,
+                                  color: 'red'
+                              });
+                          });
+                  }
+              }
+          }
+          
+          // Reset modal form state
+          setTargetCategoryId(null);
+          setTargetNamesInput('');
+      },
+      onError: (error) => {
+          notifications.show({
+              title: 'Error Instantiating Lines',
+              message: error.message || 'Failed to create target lines.',
+              color: 'red'
+          });
+      },
+      onSettled: () => {
+          setInstantiateLinesLoading(false);
+      },
+  });
+
+  // --- NEW: Handler to open Instantiate Lines Modal --- //
+  const handleOpenInstantiateModal = () => {
+    // Reset state when opening
+    setTargetCategoryId(null);
+    setTargetNamesInput('');
+    setTargetLineKeyPrefix('DIRECTED_TAUNT_'); // Reset to default
+    setTargetPromptHintTemplate('Directed taunt towards {TargetName}.'); // Reset to default
+    openInstantiateModal();
+  };
+
+  // --- NEW: Handler to submit Instantiate Lines form --- //
+  const handleSubmitInstantiateLines = () => {
+    if (!targetCategoryId || !targetNamesInput.trim()) {
+        notifications.show({ message: 'Please select a category and enter at least one target name.', color: 'orange' });
+        return;
+    }
+    const categoryIdNum = parseInt(targetCategoryId, 10);
+    if (isNaN(categoryIdNum)) {
+         notifications.show({ message: 'Invalid category selected.', color: 'red' });
+         return;
+    }
+    
+    // Split names by newline, trim whitespace, filter empty lines
+    const targetNamesList = targetNamesInput.split('\n').map(name => name.trim()).filter(name => name !== '');
+    
+    if (targetNamesList.length === 0) {
+        notifications.show({ message: 'Please enter valid target names, one per line.', color: 'orange' });
+        return;
+    }
+
+    const payload = {
+        template_category_id: categoryIdNum,
+        target_names: targetNamesList,
+        line_key_prefix: targetLineKeyPrefix,
+        prompt_hint_template: targetPromptHintTemplate,
+        target_placeholder: '{TargetName}' // Hardcoding placeholder for now
+    };
+    
+    instantiateLinesMutation.mutate(payload);
   };
 
   // --- 4. Render View --- //
@@ -1051,6 +1195,15 @@ const VoScriptDetailView: React.FC = () => {
                     onClick={handleDownloadExcel}
                 >
                     Download Excel
+                </Button>
+                <Button 
+                    leftSection={<IconPlus size={14} />} 
+                    onClick={handleOpenInstantiateModal}
+                    variant="light"
+                    color="violet"
+                    disabled={isRefiningScript || isLoadingTemplateCategories} // Disable if loading categories
+                >
+                    Instantiate Target Lines
                 </Button>
             </Group>
         </Group>
@@ -1522,6 +1675,65 @@ const VoScriptDetailView: React.FC = () => {
                         disabled={!scriptRefinePromptInput.trim() && !applyRulesToScript} // Disable if both empty/false
                     >
                         Refine Entire Script
+                    </Button>
+                </Group>
+            </Stack>
+        </Modal>
+
+        {/* --- NEW: Instantiate Lines Modal --- */} 
+        <Modal
+            opened={instantiateModalOpened}
+            onClose={closeInstantiateModal}
+            title="Instantiate Target Lines"
+            size="lg"
+            centered
+            withinPortal={false} // Keep this
+        >
+            <Stack>
+                <Select
+                    label="Target Category"
+                    placeholder="Select the category to add lines to"
+                    data={templateCategoriesData?.map(cat => ({ value: String(cat.id), label: cat.name })) || []}
+                    value={targetCategoryId}
+                    onChange={setTargetCategoryId}
+                    searchable
+                    required
+                    disabled={isLoadingTemplateCategories || instantiateLinesLoading}
+                />
+                <Textarea
+                    label="Target Names (one per line)"
+                    placeholder="Enter target names, e.g.\nAgni\nZeus\nNeith"
+                    value={targetNamesInput}
+                    onChange={(event) => setTargetNamesInput(event.currentTarget.value)}
+                    required
+                    minRows={4}
+                    autosize
+                    disabled={instantiateLinesLoading}
+                />
+                <TextInput
+                    label="Line Key Prefix (Optional)"
+                    description="This prefix will be followed by the sanitized target name (e.g., TAUNT_VS_AGNI)"
+                    value={targetLineKeyPrefix}
+                    onChange={(event) => setTargetLineKeyPrefix(event.currentTarget.value)}
+                    disabled={instantiateLinesLoading}
+                />
+                <TextInput
+                    label="Prompt Hint Template (Optional)"
+                    description={`Use {TargetName} as the placeholder for the target's name.`}
+                    value={targetPromptHintTemplate}
+                    onChange={(event) => setTargetPromptHintTemplate(event.currentTarget.value)}
+                    disabled={instantiateLinesLoading}
+                />
+                <Group justify="flex-end" mt="md">
+                    <Button variant="default" onClick={closeInstantiateModal} disabled={instantiateLinesLoading}>
+                        Cancel
+                    </Button>
+                    <Button 
+                        onClick={handleSubmitInstantiateLines} 
+                        loading={instantiateLinesLoading}
+                        disabled={!targetCategoryId || !targetNamesInput.trim()} // Basic validation
+                    >
+                        Generate Pending Lines
                     </Button>
                 </Group>
             </Stack>
