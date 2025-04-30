@@ -534,7 +534,131 @@ const VoScriptDetailView: React.FC = () => {
     submitFeedbackMutation.mutate({ line_id: lineId, feedback_text: feedbackText });
   };
   
-  // REFACTORED: Generate Draft orchestrates on frontend
+  // --- NEW: Combined Line Modification Mutation (Refine/Generate) ---
+  // This helps simplify the orchestration logic
+  const modifyLineMutation = useMutation<
+      VoScriptLineData, 
+      Error, 
+      { lineId: number; action: 'refine' | 'generate'; payload?: RefineLinePayload }
+    >({
+    mutationFn: ({ lineId, action, payload }) => {
+        if (action === 'refine' && payload) {
+            // Call existing refine endpoint
+            return api.refineVoScriptLine(numericScriptId!, lineId, payload);
+        } else if (action === 'generate') {
+            // Call existing generate endpoint
+            return api.generateVoScriptLine(numericScriptId!, lineId);
+        } else {
+            return Promise.reject(new Error('Invalid action or missing payload for line modification.'));
+        }
+    },
+    onSuccess: (updatedLine) => {
+        // Update cache - This runs after *each* successful line modification
+        queryClient.setQueryData<VoScript>(['voScriptDetail', numericScriptId], (oldData) => {
+            if (!oldData) return oldData;
+            return {
+              ...oldData,
+              categories: oldData.categories?.map(cat => ({
+                 ...cat,
+                 lines: cat.lines.map(l => l.id === updatedLine.id ? { ...l, ...updatedLine } : l)
+              }))
+            };
+        });
+        // NOTE: Success notification is handled by the orchestrating function (handleRefineScript)
+    },
+    onError: (err, variables) => {
+        // Error is caught and logged by the orchestrating function
+        console.error(`Error performing '${variables.action}' on line ${variables.lineId} via mutation:`, err);
+    },
+  });
+  // --- END: Combined Line Modification Mutation ---
+  
+  // --- REFACTORED: Script Refinement Handler (uses progress) --- //
+  const handleRefineScript = async () => {
+      // Validate: require either a prompt OR the checkbox to be checked
+      const globalPromptText = scriptRefinePromptInput;
+      if ((!globalPromptText?.trim()) && !applyRulesToScript) {
+          notifications.show({ message: `Overall script refinement prompt cannot be empty unless "Apply ElevenLabs Best Practices" is checked.`, color: 'orange' });
+          return;
+      }
+      if (numericScriptId === undefined || !voScript) return;
+      
+      closeScriptRefineModal(); // Close modal immediately
+      setIsRefiningScript(true); // Use the global loading flag
+
+      // 1. Identify lines to process (all non-locked lines)
+      const linesToProcess: VoScriptLineData[] = [];
+      voScript.categories?.forEach(cat => {
+          cat.lines.forEach(line => {
+              if (!line.is_locked) { 
+                  linesToProcess.push(line);
+              }
+          });
+      });
+
+      if (linesToProcess.length === 0) {
+          notifications.show({ message: 'No unlocked lines found to refine.', color: 'blue' });
+          setIsRefiningScript(false); // Clear loading state
+          return;
+      }
+
+      // 2. Initialize Progress State
+      setRefinementProgress({
+          total: linesToProcess.length,
+          completed: 0,
+          currentKey: null,
+          errors: [],
+          running: true 
+      });
+
+      // 3. Process lines sequentially using the combined mutation
+      const errorMessages: string[] = [];
+      for (const line of linesToProcess) {
+          setRefinementProgress(prev => ({ ...prev, currentKey: line.line_key || `ID: ${line.id}` }));
+          
+          try {
+              // Prepare payload for refinement
+              const payload: RefineLinePayload = {
+                  line_prompt: globalPromptText, // Use the global prompt from the modal
+                  apply_best_practices: applyRulesToScript // Use the global checkbox state
+              };
+              // Use the combined mutation with 'refine' action
+              await modifyLineMutation.mutateAsync({ 
+                  lineId: line.id, 
+                  action: 'refine', 
+                  payload: payload // Include the refinement payload
+              }); 
+          } catch (error: any) { 
+              console.error(`Error refining line ${line.id}:`, error);
+              // Attempt to extract a meaningful error message
+              const message = error?.response?.data?.error || error?.message || 'Unknown API error';
+              errorMessages.push(`Line ${line.line_key || line.id}: ${message}`); 
+          }
+          
+          // Update progress regardless of success/error for this line
+          setRefinementProgress(prev => ({ 
+                ...prev, 
+                completed: prev.completed + 1, 
+                currentKey: null, // Clear current key after processing
+                errors: errorMessages // Update error list
+            }));
+      }
+
+      // 4. Finalize
+      setIsRefiningScript(false); 
+      setRefinementProgress(prev => ({ ...prev, running: false, currentKey: null })); // Mark as not running
+      notifications.show({
+          title: 'Script Refinement Complete',
+          message: errorMessages.length > 0 
+              ? `Finished with ${errorMessages.length} error(s). See console/notifications for details.` 
+              : `All ${linesToProcess.length} unlocked lines processed successfully.`, // Updated success message
+          color: errorMessages.length > 0 ? 'orange' : 'green',
+          autoClose: errorMessages.length > 0 ? 10000 : 6000 // Longer duration if errors
+      });
+  };
+  // --- END: REFACTORED Script Refinement Handler --- //
+  
+  // --- REFACTORED: Generate Draft orchestrates on frontend --- //
   const handleGenerateDraft = async () => { 
       if (numericScriptId === undefined || !voScript) return;
 
@@ -546,14 +670,14 @@ const VoScriptDetailView: React.FC = () => {
       voScript.categories?.forEach(cat => {
           cat.lines.forEach(line => {
               // Target lines specifically in 'pending' status for initial generation
-              if (line.status === 'pending') { 
+              if (line.status === 'pending' && !line.is_locked) { // Also check lock status
                   linesToProcess.push(line);
               }
           });
       });
 
       if (linesToProcess.length === 0) {
-          notifications.show({ message: 'No pending lines found to generate.', color: 'blue' });
+          notifications.show({ message: 'No pending unlocked lines found to generate.', color: 'blue' });
           setIsRefiningScript(false); // Clear loading state
           return;
       }
@@ -573,18 +697,19 @@ const VoScriptDetailView: React.FC = () => {
           setRefinementProgress(prev => ({ ...prev, currentKey: line.line_key || `ID: ${line.id}` }));
           
           try {
-              // Call the NEW generate mutation for this line
-              await generateLineMutation.mutateAsync({ lineId: line.id }); 
+              // Call the COMBINED mutation with 'generate' action
+              await modifyLineMutation.mutateAsync({ lineId: line.id, action: 'generate' }); 
           } catch (error: any) { 
               console.error(`Error generating line ${line.id}:`, error);
-              errorMessages.push(`Line ${line.line_key || line.id}: ${error.message || 'Unknown API error'}`); // Use API error if possible
+              const message = error?.response?.data?.error || error?.message || 'Unknown API error';
+              errorMessages.push(`Line ${line.line_key || line.id}: ${message}`);
           }
           
           // Update progress
            setRefinementProgress(prev => ({ 
                 ...prev, 
                 completed: prev.completed + 1, 
-                currentKey: null, 
+                currentKey: null, // Clear current key
                 errors: errorMessages 
             }));
       }
@@ -596,9 +721,9 @@ const VoScriptDetailView: React.FC = () => {
           title: 'Draft Generation Complete',
           message: errorMessages.length > 0 
               ? `Finished with ${errorMessages.length} error(s). Check console/notifications for details.` 
-              : `All ${linesToProcess.length} pending lines generated successfully.`,
+              : `All ${linesToProcess.length} pending unlocked lines generated successfully.`,
           color: errorMessages.length > 0 ? 'orange' : 'green',
-          autoClose: 6000
+          autoClose: errorMessages.length > 0 ? 10000 : 6000
       });
   };
 
@@ -639,27 +764,6 @@ const VoScriptDetailView: React.FC = () => {
       openScriptRefineModal();
   };
   
-  // UPDATED: Handles submission from Script Refine Modal
-  const handleRefineScript = async () => {
-      // Validate: require either a prompt OR the checkbox to be checked
-      const globalPromptText = scriptRefinePromptInput;
-      if ((!globalPromptText?.trim()) && !applyRulesToScript) {
-          notifications.show({ message: `Overall script refinement prompt cannot be empty unless "Apply ElevenLabs Best Practices" is checked.`, color: 'orange' });
-          return;
-      }
-      if (numericScriptId === undefined || !voScript) return;
-      
-      closeScriptRefineModal();
-      
-      // Use the mutation instead of direct API call
-      refineScriptMutation.mutate({
-          payload: {
-              global_prompt: globalPromptText,
-              apply_best_practices: applyRulesToScript
-          }
-      });
-  };
-
   // NEW: Handler for description change
   const handleDescriptionChange = (value: string) => {
       setEditedCharacterDescription(value);
@@ -889,7 +993,7 @@ const VoScriptDetailView: React.FC = () => {
         {/* <LoadingOverlay visible={isRefiningScript} overlayProps={{ radius: "sm", blur: 2 }} /> */}
         {refinementProgress.running && (
             <Paper withBorder p="sm" radius="sm" mb="md" bg="gray.0">
-                <Text size="sm" fw={500}>Script Refinement Progress:</Text>
+                <Text size="sm" fw={500}>Script Processing Progress:</Text> 
                 <Progress 
                     value={(refinementProgress.completed / (refinementProgress.total || 1)) * 100}
                     mt={5} 
@@ -900,15 +1004,15 @@ const VoScriptDetailView: React.FC = () => {
                     <Text size="xs" c="dimmed">
                         {refinementProgress.currentKey 
                             ? `Processing: ${refinementProgress.currentKey}` 
-                            : 'Preparing...'}
+                            : (refinementProgress.completed < refinementProgress.total ? 'Preparing next...' : 'Finalizing...')}
                     </Text>
                     <Text size="xs" c="dimmed">
-                        {refinementProgress.completed} / {refinementProgress.total} lines completed
+                        {refinementProgress.completed} / {refinementProgress.total} lines processed
                     </Text>
                 </Group>
                 {refinementProgress.errors.length > 0 && (
-                    <Alert title="Refinement Errors" color="orange" mt="sm" radius="xs" p="xs">
-                        <Text size="xs">Encountered {refinementProgress.errors.length} error(s). See console/notifications for details.</Text>
+                    <Alert title="Processing Errors" color="orange" mt="sm" radius="xs" p="xs">
+                        <Text size="xs">Encountered {refinementProgress.errors.length} error(s) during processing. Check console for details.</Text>
                     </Alert>
                 )}
             </Paper>
