@@ -90,13 +90,14 @@ def create_vo_script():
             
             # Create a new line with the template line's key copied over
             new_line = models.VoScriptLine(
-                vo_script=new_vo_script, # Associate with the script being created
+                vo_script=new_vo_script, 
                 template_line_id=t_line.id,
-                # If static_text exists, copy it to generated_text and mark as 'generated'
-                # Otherwise, leave as 'pending' for LLM generation
+                # If static_text exists, copy it, mark as 'generated', and LOCK it
+                # Otherwise, leave as 'pending' and unlocked for LLM generation
                 status='generated' if has_static_text else 'pending',
                 generated_text=t_line.static_text if has_static_text else None,
-                line_key=t_line.line_key  # Copy the line_key from the template line
+                line_key=t_line.line_key,  # Copy the line_key from the template line
+                is_locked=has_static_text # NEW: Lock the line if it has static text
             )
             vo_script_lines_to_add.append(new_line)
             
@@ -687,11 +688,28 @@ def refine_vo_script_line(script_id: int, line_id: int):
 
     db: Session = next(get_db())
     try:
-        # 1. Get context for the line
-        line_context = utils_voscript.get_line_context(db, line_id)
-        if not line_context:
-            logging.warning(f"Refine line request: Context not found for script {script_id}, line {line_id}")
-            return jsonify({"error": f"Line context not found for line_id {line_id}"}), 404
+        # --- ADD LOCK CHECK --- #
+        line = db.query(models.VoScriptLine).filter(
+            models.VoScriptLine.id == line_id,
+            models.VoScriptLine.vo_script_id == script_id
+        ).first()
+        
+        if not line:
+            # Use standard response format
+            return make_api_response(error=f"Line context not found for line_id {line_id}", status_code=404)
+        
+        if line.is_locked:
+            logging.info(f"Skipping refinement for locked line {line_id} in script {script_id}.")
+            # Return current line data instead of error
+            return make_api_response(data=model_to_dict(line), status_code=200) 
+        # --- END LOCK CHECK --- #
+
+        # 1. Get context for the line (already fetched the line object)
+        # We still need the full context for the prompt
+        line_context = utils_voscript.get_line_context(db, line_id) 
+        if not line_context: # Should ideally not happen if line exists, but good safeguard
+            logging.warning(f"Refine line request: Context could not be built for script {script_id}, line {line_id}")
+            return make_api_response(error=f"Line context could not be built for line_id {line_id}", status_code=500)
 
         # --- 2. Construct prompt for OpenAI --- 
         prompt_parts = []
