@@ -202,8 +202,8 @@ def get_category_lines_context(db: Session, script_id: int, category_name: str) 
         for line in lines:
             # Reuse get_line_context logic or replicate - replicating for clarity here
             context = {
-                # ... basic line fields ...
                 "line_id": line.id,
+                "is_locked": line.is_locked,
                 "current_text": line.generated_text,
                 "status": line.status,
                 "latest_feedback": line.latest_feedback,
@@ -211,12 +211,10 @@ def get_category_lines_context(db: Session, script_id: int, category_name: str) 
                 "line_template_hint": None,
                 "category_name": None,
                 "category_instructions": None,
-                # Use parent_script object directly for script/template info
                 "script_name": parent_script.name,
                 "character_description": parent_script.character_description,
                 "template_name": parent_script.template.name if parent_script.template else None,
                 "template_hint": parent_script.template.prompt_hint if parent_script.template else None,
-                # ADD SCRIPT PROMPT
                 "script_refinement_prompt": script_refinement_prompt 
             }
             if line.template_line:
@@ -285,6 +283,7 @@ def get_script_lines_context(db: Session, script_id: int) -> List[Dict[str, Any]
         for line in lines:
             context = {
                 "line_id": line.id,
+                "is_locked": line.is_locked,
                 "current_text": line.generated_text,
                 "status": line.status,
                 "latest_feedback": line.latest_feedback,
