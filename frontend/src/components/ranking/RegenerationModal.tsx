@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GenerationConfig, Take, ModelOption } from '../../types';
 import { api } from '../../api';
 import Slider from 'rc-slider'; // Assuming rc-slider is installed
 import 'rc-slider/assets/index.css';
-import { Checkbox } from '@mantine/core'; // Import Checkbox
+import { Checkbox, Button, Textarea, TextInput, Text, Alert, Tabs } from '@mantine/core'; // Import Checkbox and other components
+import { IconAlertCircle } from '@tabler/icons-react';
+import AppModal from '../common/AppModal';
 
 interface RegenerationModalProps {
   batchId: string;
@@ -11,6 +13,7 @@ interface RegenerationModalProps {
   currentTakes: Take[]; // Pass current takes to get initial text
   onClose: () => void;
   onRegenJobStarted: (lineKey: string, taskId: string) => void; 
+  opened: boolean; // Add opened prop
 }
 
 // Defaults for the modal form
@@ -23,7 +26,7 @@ const DEFAULT_SPEAKER_BOOST = true;
 const DEFAULT_MODEL_ID = "eleven_multilingual_v2";
 
 const RegenerationModal: React.FC<RegenerationModalProps> = ({ 
-    batchId, lineKey, currentTakes, onClose, onRegenJobStarted 
+    batchId, lineKey, currentTakes, onClose, onRegenJobStarted, opened // Destructure opened prop
 }) => {
   const [lineText, setLineText] = useState<string>('');
   const [numTakes, setNumTakes] = useState<number>(DEFAULT_NUM_TAKES);
@@ -184,8 +187,8 @@ const RegenerationModal: React.FC<RegenerationModalProps> = ({
             replace_existing: replaceExisting,
             update_script: updateScript // <-- Pass the flag
         });
-        console.log(`Line regeneration job submitted: DB ID ${response.job_id}, Task ID ${response.task_id}`);
-        onRegenJobStarted(lineKey, response.task_id);
+        console.log(`Line regeneration job submitted: DB ID ${response.jobId}, Task ID ${response.taskId}`);
+        onRegenJobStarted(lineKey, response.taskId);
         onClose(); // Close modal on success
     } catch (err: any) {
         console.error("Failed to submit regeneration job:", err);
@@ -196,11 +199,6 @@ const RegenerationModal: React.FC<RegenerationModalProps> = ({
   };
 
   // --- Styles --- (Simplified for brevity)
-  const modalStyle: React.CSSProperties = {
-      position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-      backgroundColor: 'white', padding: '20px 40px', borderRadius: '8px', 
-      boxShadow: '0 4px 15px rgba(0,0,0,0.2)', zIndex: 1000, width: '600px', maxHeight: '90vh', overflowY: 'auto'
-  };
   const overlayStyle: React.CSSProperties = {
       position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, 
       backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 999
@@ -208,147 +206,152 @@ const RegenerationModal: React.FC<RegenerationModalProps> = ({
   const formatSliderValue = (value: number) => value.toFixed(2);
 
   return (
-    <div style={overlayStyle} onClick={onClose}> {/* Close on overlay click */} 
-      <div style={modalStyle} onClick={(e) => e.stopPropagation()}> {/* Prevent closing when clicking inside modal */} 
-        <h3>Regenerate Takes for Line: "{lineKey}"</h3>
+    <AppModal
+      opened={opened} // Use the passed prop
+      onClose={onClose}
+      title={`Regenerate Takes for Line: "${lineKey}"`} // Add title prop
+      size="lg" // Add size prop
+      centered // Add centered prop
+      withinPortal={false}
+    >
+        {/* The form is the direct child */}
         <form onSubmit={handleSubmit}>
-            {/* Line Text - MODIFIED */}
-            <div style={{ marginBottom: '5px' }}> 
-                {/* Use HStack for Label + Button */}
-                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}> 
-                  <label htmlFor="lineText">Line Text:</label>
-                  {/* Group the buttons together */}
-                  <div style={{ display: 'flex', gap: '5px' }}> 
-                    <button 
-                       type="button" 
-                       onClick={handleInsertPause} 
-                       style={{padding: '2px 5px', fontSize: '0.8em'}} 
-                       disabled={isOptimizing || isSubmitting} // Disable if optimizing or submitting
-                       title="Insert a 0.5 second pause tag at cursor position"
-                    >
-                      + 0.5s Pause
-                    </button>
-                    <button 
-                       type="button" 
-                       onClick={handleOptimizeText} 
-                       style={{padding: '2px 5px', fontSize: '0.8em'}}
-                       disabled={isOptimizing || isSubmitting} // Disable if optimizing or submitting
-                       title="Use AI to optimize this line for ElevenLabs based on scripthelp.md guidelines"
-                    >
-                      {isOptimizing ? '✨ Optimizing...' : '✨ AI Wizard'}
-                    </button>
-                  </div>
+          {/* Line Text - MODIFIED */} 
+          <div style={{ marginBottom: '5px' }}> 
+              {/* Use HStack for Label + Button */} 
+              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}> 
+                <label htmlFor="lineText">Line Text:</label>
+                {/* Group the buttons together */} 
+                <div style={{ display: 'flex', gap: '5px' }}> 
+                  <button 
+                     type="button" 
+                     onClick={handleInsertPause} 
+                     style={{padding: '2px 5px', fontSize: '0.8em'}} 
+                     disabled={isOptimizing || isSubmitting} // Disable if optimizing or submitting
+                     title="Insert a 0.5 second pause tag at cursor position"
+                  >
+                    + 0.5s Pause
+                  </button>
+                  <button 
+                     type="button" 
+                     onClick={handleOptimizeText} 
+                     style={{padding: '2px 5px', fontSize: '0.8em'}}
+                     disabled={isOptimizing || isSubmitting} // Disable if optimizing or submitting
+                     title="Use AI to optimize this line for ElevenLabs based on scripthelp.md guidelines"
+                  >
+                    {isOptimizing ? '✨ Optimizing...' : '✨ AI Wizard'}
+                  </button>
                 </div>
-                <textarea 
-                    id="lineText" 
-                    ref={textareaRef} // Add ref
-                    value={lineText} 
-                    onChange={e => setLineText(e.target.value)}
-                    rows={3} 
-                    style={{ width: '100%', boxSizing: 'border-box', marginTop: '5px' }}
-                    required
-                />
-            </div>
-
-            {/* NEW: Update Script Checkbox */}
-            <div style={{ marginBottom: '15px' }}>
-                <Checkbox
-                    id="updateScriptCheckbox"
-                    label="Update this line in the original script"
-                    checked={updateScript}
-                    onChange={(event) => setUpdateScript(event.currentTarget.checked)}
-                />
-            </div>
-
-            {/* Number of Takes */} 
-            <div style={{ marginBottom: '15px' }}>
-                <label htmlFor="numTakes">Number of New Takes: </label>
-                <input 
-                    type="number" id="numTakes" value={numTakes} 
-                    onChange={e => setNumTakes(parseInt(e.target.value, 10) || 1)} 
-                    min="1" style={{ width: '60px' }}
-                    required
-                />
-            </div>
-
-            {/* Replace/Add Option */} 
-            <div style={{ marginBottom: '15px' }}>
-                <input 
-                    type="checkbox" id="replaceExisting" 
-                    checked={replaceExisting} onChange={e => setReplaceExisting(e.target.checked)}
-                />
-                <label htmlFor="replaceExisting"> Replace existing takes for this line (archives old files)</label>
-            </div>
-
-            {/* TTS Settings */} 
-            <h5>Voice Setting Ranges (Randomized per Take):</h5>
-             {/* Stability */} 
-            <div style={{ marginBottom: '15px', padding: '0 5px' }}>
-                <label>Stability: [{formatSliderValue(stabilityRange[0])} - {formatSliderValue(stabilityRange[1])}]</label>
-                <Slider range min={0} max={1} step={0.01} value={stabilityRange} onChange={(v: number | number[]) => setStabilityRange(v as [number,number])} />
-                <div style={{display: 'flex', justifyContent: 'space-between'}}><small>Variable</small><small>Stable</small></div>
-            </div>
-             {/* Similarity */} 
-            <div style={{ marginBottom: '15px', padding: '0 5px' }}>
-                <label>Similarity: [{formatSliderValue(similarityRange[0])} - {formatSliderValue(similarityRange[1])}]</label>
-                <Slider range min={0} max={1} step={0.01} value={similarityRange} onChange={(v: number | number[]) => setSimilarityRange(v as [number,number])} />
-                <div style={{display: 'flex', justifyContent: 'space-between'}}><small>Low</small><small>High</small></div>
-            </div>
-            {/* Style */} 
-            <div style={{ marginBottom: '15px', padding: '0 5px' }}>
-                <label>Style Exag.: [{formatSliderValue(styleRange[0])} - {formatSliderValue(styleRange[1])}]</label>
-                <Slider range min={0} max={1} step={0.01} value={styleRange} onChange={(v: number | number[]) => setStyleRange(v as [number,number])} />
-                <div style={{display: 'flex', justifyContent: 'space-between'}}><small>None</small><small>Exaggerated</small></div>
-            </div>
-            {/* Speed */} 
-            <div style={{ marginBottom: '15px', padding: '0 5px' }}>
-                <label>Speed: [{formatSliderValue(speedRange[0])} - {formatSliderValue(speedRange[1])}]</label>
-                <Slider range min={0.5} max={2.0} step={0.05} value={speedRange} onChange={(v: number | number[]) => setSpeedRange(v as [number,number])} />
-                <div style={{display: 'flex', justifyContent: 'space-between'}}><small>Slower</small><small>Faster</small></div>
-            </div>
-            {/* Speaker Boost */} 
-            <div style={{ marginBottom: '15px' }}>
-                <input type="checkbox" id="modalSpeakerBoost" checked={speakerBoost} onChange={e => setSpeakerBoost(e.target.checked)} />
-                <label htmlFor="modalSpeakerBoost"> Speaker Boost</label>
-            </div>
-            {/* Model Selection */} 
-             <div style={{ marginBottom: '15px' }}>
-                <label htmlFor="modalModelSelect">Model: </label>
-                <select 
-                    id="modalModelSelect" 
-                    value={selectedModelId} 
-                    onChange={e => setSelectedModelId(e.target.value)} 
-                    disabled={modelsLoading || !!modelsError}
-                >
-                    {modelsLoading && <option>Loading...</option>}
-                    {modelsError && <option>Error</option>}
-                    {!modelsLoading && !modelsError && availableModels.map(model => (
-                        <option key={model.model_id} value={model.model_id}>
-                            {model.name}
-                        </option>
-                    ))}
-                </select>
-                {modelsError && <span style={{ color: 'red', marginLeft: '10px' }}>{modelsError}</span>}
-            </div>
+              </div>
+              <textarea 
+                  id="lineText" 
+                  ref={textareaRef} // Add ref
+                  value={lineText} 
+                  onChange={e => setLineText(e.target.value)}
+                  rows={3} 
+                  style={{ width: '100%', boxSizing: 'border-box', marginTop: '5px' }} 
+                  required 
+              /> 
+          </div>
             
-            {/* Error Display */}
-            {/* Display general submission error */}
-            {error && <p style={{ color: 'red', marginTop: '10px' }}>Error: {error}</p>}
-            {/* Display specific optimization error */}
-            {optimizeError && <p style={{ color: 'orange', marginTop: '5px' }}>Optimization Note: {optimizeError}</p>}
+          {/* NEW: Update Script Checkbox */} 
+          <div style={{ marginBottom: '15px' }}> 
+              <Checkbox
+                  id="updateScriptCheckbox"
+                  label="Update this line in the original script"
+                  checked={updateScript}
+                  onChange={(event) => setUpdateScript(event.currentTarget.checked)}
+              />
+          </div>
             
-            {/* Actions */}
-            <div style={{ marginTop: '20px', textAlign: 'right' }}>
-                <button type="button" onClick={onClose} style={{ marginRight: '10px' }} disabled={isSubmitting}>
-                    Cancel
-                </button>
-                <button type="submit" disabled={isSubmitting}>
-                    {isSubmitting ? 'Submitting...' : 'Regenerate Line Takes'}
-                </button>
-            </div>
+          {/* Number of Takes */} 
+          <div style={{ marginBottom: '15px' }}> 
+              <label htmlFor="numTakes">Number of New Takes: </label> 
+              <input 
+                  type="number" id="numTakes" value={numTakes} 
+                  onChange={e => setNumTakes(parseInt(e.target.value, 10) || 1)} 
+                  min="1" style={{ width: '60px' }} 
+                  required 
+              /> 
+          </div>
+            
+          {/* Replace/Add Option */} 
+          <div style={{ marginBottom: '15px' }}> 
+              <input 
+                  type="checkbox" id="replaceExisting" 
+                  checked={replaceExisting} onChange={e => setReplaceExisting(e.target.checked)}
+              />
+              <label htmlFor="replaceExisting"> Replace existing takes for this line (archives old files)</label>
+          </div>
+
+          {/* TTS Settings */} 
+          <h5>Voice Setting Ranges (Randomized per Take):</h5>
+           {/* Stability */} 
+          <div style={{ marginBottom: '15px', padding: '0 5px' }}> 
+              <label>Stability: [{formatSliderValue(stabilityRange[0])} - {formatSliderValue(stabilityRange[1])}]</label>
+              <Slider range min={0} max={1} step={0.01} value={stabilityRange} onChange={(v: number | number[]) => setStabilityRange(v as [number,number])} />
+              <div style={{display: 'flex', justifyContent: 'space-between'}}><small>Variable</small><small>Stable</small></div>
+          </div>
+           {/* Similarity */} 
+          <div style={{ marginBottom: '15px', padding: '0 5px' }}>
+              <label>Similarity: [{formatSliderValue(similarityRange[0])} - {formatSliderValue(similarityRange[1])}]</label>
+              <Slider range min={0} max={1} step={0.01} value={similarityRange} onChange={(v: number | number[]) => setSimilarityRange(v as [number,number])} />
+              <div style={{display: 'flex', justifyContent: 'space-between'}}><small>Low</small><small>High</small></div>
+          </div>
+          {/* Style */} 
+          <div style={{ marginBottom: '15px', padding: '0 5px' }}>
+              <label>Style Exag.: [{formatSliderValue(styleRange[0])} - {formatSliderValue(styleRange[1])}]</label>
+              <Slider range min={0} max={1} step={0.01} value={styleRange} onChange={(v: number | number[]) => setStyleRange(v as [number,number])} />
+              <div style={{display: 'flex', justifyContent: 'space-between'}}><small>None</small><small>Exaggerated</small></div>
+          </div>
+          {/* Speed */} 
+          <div style={{ marginBottom: '15px', padding: '0 5px' }}>
+              <label>Speed: [{formatSliderValue(speedRange[0])} - {formatSliderValue(speedRange[1])}]</label>
+              <Slider range min={0.5} max={2.0} step={0.05} value={speedRange} onChange={(v: number | number[]) => setSpeedRange(v as [number,number])} />
+              <div style={{display: 'flex', justifyContent: 'space-between'}}><small>Slower</small><small>Faster</small></div>
+          </div>
+          {/* Speaker Boost */} 
+          <div style={{ marginBottom: '15px' }}>
+              <input type="checkbox" id="modalSpeakerBoost" checked={speakerBoost} onChange={e => setSpeakerBoost(e.target.checked)} />
+              <label htmlFor="modalSpeakerBoost"> Speaker Boost</label>
+          </div>
+          {/* Model Selection */} 
+           <div style={{ marginBottom: '15px' }}>
+              <label htmlFor="modalModelSelect">Model: </label>
+              <select 
+                  id="modalModelSelect" 
+                  value={selectedModelId} 
+                  onChange={e => setSelectedModelId(e.target.value)} 
+                  disabled={modelsLoading || !!modelsError}
+              >
+                  {modelsLoading && <option>Loading...</option>}
+                  {modelsError && <option>Error</option>}
+                  {!modelsLoading && !modelsError && availableModels.map(model => (
+                      <option key={model.model_id} value={model.model_id}>
+                          {model.name}
+                      </option>
+                  ))}
+              </select>
+              {modelsError && <span style={{ color: 'red', marginLeft: '10px' }}>{modelsError}</span>}
+          </div>
+          
+          {/* Error Display */}
+          {/* Display general submission error */}
+          {error && <p style={{ color: 'red', marginTop: '10px' }}>Error: {error}</p>}
+          {/* Display specific optimization error */}
+          {optimizeError && <p style={{ color: 'orange', marginTop: '5px' }}>Optimization Note: {optimizeError}</p>}
+          
+          {/* Actions */}
+          <div style={{ marginTop: '20px', textAlign: 'right' }}>
+              <button type="button" onClick={onClose} style={{ marginRight: '10px' }} disabled={isSubmitting}>
+                  Cancel
+              </button>
+              <button type="submit" disabled={isSubmitting}>
+                  {isSubmitting ? 'Submitting...' : 'Regenerate Line Takes'}
+              </button>
+          </div>
         </form>
-      </div>
-    </div>
+    </AppModal>
   );
 };
 

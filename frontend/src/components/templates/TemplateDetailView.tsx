@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { Container, Paper, Title, Loader, Alert, Button, Tabs, Space, Table, Group, ActionIcon, Text, ScrollArea, TextInput, Textarea, Stack, Modal, Select, Switch } from '@mantine/core';
+import { Container, Paper, Title, Loader, Alert, Button, Tabs, Space, Table, Group, ActionIcon, Text, ScrollArea, TextInput, Textarea, Stack, Select, Switch } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api'; // Adjust path as needed
 import { VoScriptTemplate, VoScriptTemplateCategory, VoScriptTemplateLine } from '../../types'; // Adjust path as needed
 import { IconAlertCircle, IconArrowLeft, IconPencil, IconTrash, IconPlus, IconDeviceFloppy } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
+import AppModal from '../common/AppModal';
 
 interface TemplateDetailViewProps {
   templateId: number;
@@ -566,7 +567,7 @@ const TemplateDetailView: React.FC<TemplateDetailViewProps> = ({ templateId, onB
       </Paper>
       
       {/* --- NEW: Create Category Modal --- */}
-      <Modal 
+      <AppModal 
           opened={catModalOpened} 
           onClose={closeCatModal} 
           title="Add New Category" 
@@ -603,11 +604,11 @@ const TemplateDetailView: React.FC<TemplateDetailViewProps> = ({ templateId, onB
                     </Button>
                 </Group>
             </Stack>
-        </Modal>
+        </AppModal>
       {/* --- END: Create Category Modal --- */}
 
       {/* --- NEW: Edit Category Modal --- */}
-      <Modal 
+      <AppModal 
           opened={editCatModalOpened} 
           onClose={closeEditCatModal} 
           title={`Edit Category: ${editingCategory?.name || ''}`} 
@@ -645,11 +646,11 @@ const TemplateDetailView: React.FC<TemplateDetailViewProps> = ({ templateId, onB
                     </Group>
                 </Stack>
             )}
-        </Modal>
+        </AppModal>
       {/* --- END: Edit Category Modal --- */}
 
       {/* --- NEW: Create Line Modal --- */}
-       <Modal 
+       <AppModal 
           opened={lineModalOpened} 
           onClose={closeLineModal} 
           title="Add New Template Line" 
@@ -718,11 +719,11 @@ const TemplateDetailView: React.FC<TemplateDetailViewProps> = ({ templateId, onB
                  </Group>
             </Stack>
             
-        </Modal>
+        </AppModal>
       {/* --- END: Create Line Modal --- */}
 
       {/* --- NEW: Edit Line Modal --- */}
-      <Modal 
+      <AppModal 
           opened={editLineModalOpened} 
           onClose={closeEditLineModal} 
           title={`Edit Line: ${editingLine?.line_key || ''}`} 
@@ -791,7 +792,7 @@ const TemplateDetailView: React.FC<TemplateDetailViewProps> = ({ templateId, onB
                     </Group>
                 </Stack>
            )}
-        </Modal>
+        </AppModal>
       {/* --- END: Edit Line Modal --- */}
 
     </Container>

@@ -151,7 +151,7 @@ export interface BatchMetadata {
 // Payload for STS request
 export interface SpeechToSpeechPayload {
     line_key: string;
-    source_audio_b64: string; // Base64 encoded audio data URI
+    source_audio_data: string; // Base64 encoded audio data URI
     num_new_takes: number;
     target_voice_id: string;
     model_id: string;

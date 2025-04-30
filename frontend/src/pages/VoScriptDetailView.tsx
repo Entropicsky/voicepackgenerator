@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
     Title, Text, Paper, Stack, Group, Button, LoadingOverlay, Alert, 
-    Accordion, Textarea, ActionIcon, Tooltip, Badge, Table, Modal, TextInput, Progress, ScrollArea,
+    Accordion, Textarea, ActionIcon, Tooltip, Badge, Table, TextInput, Progress, ScrollArea,
     Checkbox, Select
 } from '@mantine/core';
 import { IconPlayerPlay, IconSend, IconRefresh, IconDeviceFloppy, IconSparkles, IconLock, IconLockOpen, IconTrash, IconPlus, IconHistory, IconCheck } from '@tabler/icons-react';
@@ -16,6 +16,8 @@ import axios from 'axios';
 import { api } from '../api';
 // Import types
 import { VoScript, VoScriptLineData, JobSubmissionResponse, SubmitFeedbackPayload, RunAgentPayload, UpdateVoScriptPayload, UpdateVoScriptTemplateCategoryPayload, VoScriptCategoryData, RefineLinePayload, RefineLineResponse, RefineCategoryPayload, RefineMultipleLinesResponse, RefineScriptPayload, DeleteResponse, AddVoScriptLinePayload, VoScriptTemplate, VoScriptTemplateCategory } from '../types';
+// Import custom AppModal
+import AppModal from '../components/common/AppModal'; // Adjust path relative to pages/
 
 const VoScriptDetailView: React.FC = () => {
   const { scriptId } = useParams<{ scriptId: string }>();
@@ -1437,7 +1439,7 @@ const VoScriptDetailView: React.FC = () => {
         </Accordion>
 
         {/* --- Refine Line Modal --- */}
-        <Modal 
+        <AppModal 
             opened={refineModalOpened}
             onClose={closeRefineModal}
             title={`Refine Line: ${lineToRefine?.line_key || ''}`}
@@ -1480,12 +1482,11 @@ const VoScriptDetailView: React.FC = () => {
                     </Button>
                 </Group> 
             </Stack>
-        </Modal>
+        </AppModal>
         {/* --- END: Refine Line Modal --- */}
         
-        {/* Uncomment Add Line Modal */}
-        
-        <Modal // Add Line Modal
+        {/* Use AppModal */}
+        <AppModal // Add Line Modal
            opened={addLineModalOpened}
            onClose={closeAddLineModal}
            title={`Add New Line to Category: ${categoryForNewLine?.name || ''}`}
@@ -1537,11 +1538,10 @@ const VoScriptDetailView: React.FC = () => {
                   </Button>
               </Group>
           </Stack>
-        </Modal>
+        </AppModal>
         
-        {/* Uncomment History Modal */}
-        
-        <Modal // History Modal
+        {/* Use AppModal */}
+        <AppModal // History Modal
            opened={historyModalOpened}
            onClose={closeHistoryModal}
            title={`History for Line: ${lineToViewHistory?.line_key || ''} (ID: ${lineToViewHistory?.id})`}
@@ -1597,10 +1597,10 @@ const VoScriptDetailView: React.FC = () => {
                     Close
                 </Button>
             </Group>
-        </Modal>
+        </AppModal>
 
         {/* --- NEW: Category Refine Modal --- */}
-        <Modal
+        <AppModal
             opened={categoryRefineModalOpened}
             onClose={closeCategoryRefineModal}
             title={`Refine Category: ${categoryToRefine?.name || ''}`}
@@ -1639,10 +1639,10 @@ const VoScriptDetailView: React.FC = () => {
                     </Button>
                 </Group>
             </Stack>
-        </Modal>
+        </AppModal>
         
         {/* --- NEW: Script Refine Modal --- */}
-        <Modal
+        <AppModal
             opened={scriptRefineModalOpened}
             onClose={closeScriptRefineModal}
             title={`Refine Entire Script`}
@@ -1681,10 +1681,10 @@ const VoScriptDetailView: React.FC = () => {
                     </Button>
                 </Group>
             </Stack>
-        </Modal>
+        </AppModal>
 
         {/* --- NEW: Instantiate Lines Modal --- */} 
-        <Modal
+        <AppModal
             opened={instantiateModalOpened}
             onClose={closeInstantiateModal}
             title="Instantiate Target Lines"
@@ -1740,7 +1740,7 @@ const VoScriptDetailView: React.FC = () => {
                     </Button>
                 </Group>
             </Stack>
-        </Modal>
+        </AppModal>
     </Stack>
   );
 };

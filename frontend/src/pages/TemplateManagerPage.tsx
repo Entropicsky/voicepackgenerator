@@ -7,7 +7,6 @@ import {
     Loader, 
     Alert, 
     Button, 
-    Modal, 
     TextInput, 
     Textarea,
     Stack,
@@ -22,6 +21,7 @@ import { api } from '../api'; // Import the api functions
 import { VoScriptTemplateMetadata } from '../types'; // Import the type
 import { notifications } from '@mantine/notifications'; // Import notifications
 import TemplateDetailView from '../components/templates/TemplateDetailView'; // <-- Import Detail View
+import AppModal from '../components/common/AppModal';
 
 function TemplateManagerPage() {
   const queryClient = useQueryClient();
@@ -184,21 +184,20 @@ function TemplateManagerPage() {
         )}
       </Paper>
       
-      {/* Create Template Modal - MOVED OUTSIDE Paper/Container */}
-       <Modal 
-         opened={openedCreateModal} 
-         onClose={closeCreateModal} 
-         title="Create New VO Script Template" 
-         size="lg" 
-         centered 
-         withinPortal={true}
-         styles={{
-           inner: {
-             left: 'calc(50% + 100px)',
-             transform: 'translateX(-50%)',
-           },
-         }}
-       >
+      <AppModal 
+        opened={openedCreateModal} 
+        onClose={closeCreateModal} 
+        title="Create New VO Script Template" 
+        size="lg" 
+        centered 
+        withinPortal={true}
+        styles={{
+          inner: {
+            left: 'calc(50% + 100px)',
+            transform: 'translateX(-50%)',
+          },
+        }}
+      >
             <Stack> 
                 <TextInput
                     label="Template Name"
@@ -227,7 +226,7 @@ function TemplateManagerPage() {
                     <Button onClick={handleCreateSubmit} loading={createMutation.isPending}>Create Template</Button>
                 </Group>
             </Stack>
-        </Modal>
+        </AppModal>
 
     </Container>
   );

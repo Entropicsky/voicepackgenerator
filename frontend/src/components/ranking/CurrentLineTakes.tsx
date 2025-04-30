@@ -167,6 +167,7 @@ const CurrentLineTakes: React.FC = () => {
       {/* Render Other Modals (Regen/STS) - These use portals by default */}
       {showRegenModal && selectedLineKey && batchId && (
           <RegenerationModal 
+              opened={showRegenModal}
               batchId={batchId}
               lineKey={selectedLineKey}
               currentTakes={takesByLine[selectedLineKey!] || []}
@@ -176,6 +177,7 @@ const CurrentLineTakes: React.FC = () => {
       )}
       {showStsModal && selectedLineKey && batchId && (
           <SpeechToSpeechModal 
+              opened={showStsModal}
               batchId={batchId}
               lineKey={selectedLineKey}
               onClose={handleCloseStsModal}

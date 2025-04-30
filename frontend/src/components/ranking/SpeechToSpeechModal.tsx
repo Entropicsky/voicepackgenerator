@@ -1,14 +1,19 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { VoiceOption, ModelOption, SpeechToSpeechPayload } from '../../types';
 import { api } from '../../api';
+import { Button, Select, TextInput, Checkbox, Text, Loader, Alert } from '@mantine/core';
+import { IconAlertCircle } from '@tabler/icons-react';
 import Slider from 'rc-slider';
 import 'rc-slider/assets/index.css';
+import AppModal from '../common/AppModal';
 
 interface SpeechToSpeechModalProps {
   batchId: string;
   lineKey: string;
   onClose: () => void;
   onRegenJobStarted: (lineKey: string, taskId: string) => void;
+  opened: boolean;
 }
 
 // Defaults
@@ -18,7 +23,7 @@ const DEFAULT_STABILITY = 0.5;
 const DEFAULT_SIMILARITY = 0.9;
 
 const SpeechToSpeechModal: React.FC<SpeechToSpeechModalProps> = ({ 
-    batchId, lineKey, onClose, onRegenJobStarted 
+    batchId, lineKey, onClose, onRegenJobStarted, opened 
 }) => {
   const [sourceAudioFile, setSourceAudioFile] = useState<File | null>(null);
   const [fileAudioB64, setFileAudioB64] = useState<string | null>(null);
@@ -213,7 +218,7 @@ const SpeechToSpeechModal: React.FC<SpeechToSpeechModalProps> = ({
     setIsSubmitting(true);
     const payload: SpeechToSpeechPayload = {
         line_key: lineKey,
-        source_audio_b64: audioToSubmitB64,
+        source_audio_data: audioToSubmitB64,
         num_new_takes: numTakes,
         target_voice_id: targetVoiceId,
         model_id: selectedModelId,
@@ -223,7 +228,7 @@ const SpeechToSpeechModal: React.FC<SpeechToSpeechModalProps> = ({
 
     try {
         const response = await api.startSpeechToSpeech(batchId, payload);
-        onRegenJobStarted(lineKey, response.task_id);
+        onRegenJobStarted(lineKey, response.taskId);
         onClose();
     } catch (err: any) {
         setSubmitError(`Submission failed: ${err.message}`);
@@ -233,111 +238,106 @@ const SpeechToSpeechModal: React.FC<SpeechToSpeechModalProps> = ({
   };
   
   // --- Styles --- 
-  const modalStyle: React.CSSProperties = {
-      position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-      backgroundColor: 'white', padding: '20px 40px', borderRadius: '8px', 
-      boxShadow: '0 4px 15px rgba(0,0,0,0.2)', zIndex: 1000, width: '600px', maxHeight: '90vh', overflowY: 'auto'
-  };
-  const overlayStyle: React.CSSProperties = {
-      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, 
-      backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 999
-  };
   const formatSliderValue = (v: number) => v.toFixed(2);
 
   return (
-    <div style={overlayStyle} onClick={onClose}> 
-      <div style={modalStyle} onClick={e => e.stopPropagation()}> 
-        <h3>Speech-to-Speech for Line: "{lineKey}"</h3>
+    <AppModal
+      opened={opened}
+      onClose={onClose}
+      title={`Speech-to-Speech for Line: "${lineKey}"`}
+      size="lg"
+      centered
+      withinPortal={false}
+    >
         <form onSubmit={handleSubmit}>
           {/* Source Audio Input - Choose File OR Record */} 
           <div style={{ marginBottom: '15px', border: '1px dashed grey', padding: '10px' }}>
-              <label>Source Audio:</label>
-              {/* File Input */}  
-              <div style={{marginTop: '5px'}}>
-                  <input 
-                      type="file" id="sourceAudio" accept="audio/*" 
-                      onChange={handleFileChange} 
-                      disabled={recordingState === 'recording'}
-                  />
-                  {sourceAudioFile && !recordedAudioB64 && <small> ({sourceAudioFile.name})</small>}
-              </div>
-              <div style={{textAlign: 'center', margin: '5px 0'}}>OR</div>
-              {/* Mic Recording */}  
-              <div>
-                  {recordingState === 'idle' && <button type="button" onClick={startRecording}>Start Recording</button>}
-                  {recordingState === 'recording' && <button type="button" onClick={stopRecording}>Stop Recording</button>}
-                  {recordingState === 'error' && <span style={{color:'red'}}>Mic Error</span>}
-                  {recordingState === 'recorded' && (
-                      <>
-                          <span>Recording available</span> 
-                          <button type="button" onClick={clearRecording} style={{marginLeft: '10px'}}>Clear Recording</button>
-                          {/* Optional: Add playback for recorded audio */}  
-                          {recordedAudioBlob && <audio controls src={URL.createObjectURL(recordedAudioBlob)} style={{verticalAlign: 'middle', marginLeft: '10px'}}></audio>}
-                      </>
-                  )}
-                  {recordingState === 'recording' && <span style={{marginLeft: '10px', fontStyle: 'italic', color: 'red'}}>🔴 Recording...</span>}
-              </div>
-          </div>
-          
-          {/* Target Voice */} 
-          <div style={{ marginBottom: '15px' }}>
-              <label htmlFor="targetVoice">Target Voice:</label><br/>
-              <select id="targetVoice" value={targetVoiceId} onChange={e => setTargetVoiceId(e.target.value)} disabled={voicesLoading || !!voicesError} required>
-                 {voicesLoading && <option>Loading voices...</option>}
-                 {voicesError && <option>Error loading voices</option>}
-                 {!voicesLoading && !voicesError && availableVoices.map(v => <option key={v.voice_id} value={v.voice_id}>{v.name}</option>)}
-              </select>
-              {voicesError && <small style={{color: 'red', marginLeft: '5px'}}>{voicesError}</small>}
-          </div>
-
-          {/* STS Model */} 
-          <div style={{ marginBottom: '15px' }}>
-              <label htmlFor="stsModel">STS Model:</label><br/>
-              <select id="stsModel" value={selectedModelId} onChange={e => setSelectedModelId(e.target.value)} disabled={modelsLoading || !!modelsError} required>
-                 {modelsLoading && <option>Loading models...</option>}
-                 {modelsError && <option>Error loading models</option>}
-                 {!modelsLoading && !modelsError && availableModels.map(m => <option key={m.model_id} value={m.model_id}>{m.name}</option>)}
-              </select>
-              {modelsError && <small style={{color: 'red', marginLeft: '5px'}}>{modelsError}</small>}
-          </div>
-
-          {/* Number of Takes */} 
-          <div style={{ marginBottom: '15px' }}>
-              <label htmlFor="numTakesSts">Number of Takes:</label> 
-              <input type="number" id="numTakesSts" value={numTakes} onChange={e => setNumTakes(parseInt(e.target.value, 10) || 1)} min="1" required style={{width: '60px'}}/>
-          </div>
-
-          {/* Replace Option */} 
-           <div style={{ marginBottom: '15px' }}>
-                <input type="checkbox" id="replaceExistingSts" checked={replaceExisting} onChange={e => setReplaceExisting(e.target.checked)} />
-                <label htmlFor="replaceExistingSts"> Replace existing takes for this line</label>
+                <label>Source Audio:</label>
+                {/* File Input */}  
+                <div style={{marginTop: '5px'}}>
+                    <input 
+                        type="file" id="sourceAudio" accept="audio/*" 
+                        onChange={handleFileChange} 
+                        disabled={recordingState === 'recording'}
+                    />
+                    {sourceAudioFile && !recordedAudioB64 && <small> ({sourceAudioFile.name})</small>}
+                </div>
+                <div style={{textAlign: 'center', margin: '5px 0'}}>OR</div>
+                {/* Mic Recording */}  
+                <div>
+                    {recordingState === 'idle' && <button type="button" onClick={startRecording}>Start Recording</button>}
+                    {recordingState === 'recording' && <button type="button" onClick={stopRecording}>Stop Recording</button>}
+                    {recordingState === 'error' && <span style={{color:'red'}}>Mic Error</span>}
+                    {recordingState === 'recorded' && (
+                        <>
+                            <span>Recording available</span> 
+                            <button type="button" onClick={clearRecording} style={{marginLeft: '10px'}}>Clear Recording</button>
+                            {/* Optional: Add playback for recorded audio */}  
+                            {recordedAudioBlob && <audio controls src={URL.createObjectURL(recordedAudioBlob)} style={{verticalAlign: 'middle', marginLeft: '10px'}}></audio>}
+                        </>
+                    )}
+                    {recordingState === 'recording' && <span style={{marginLeft: '10px', fontStyle: 'italic', color: 'red'}}>🔴 Recording...</span>}
+                </div>
+            </div>
+            
+            {/* Target Voice */} 
+            <div style={{ marginBottom: '15px' }}>
+                <label htmlFor="targetVoice">Target Voice:</label><br/>
+                <select id="targetVoice" value={targetVoiceId} onChange={e => setTargetVoiceId(e.target.value)} disabled={voicesLoading || !!voicesError} required>
+                   {voicesLoading && <option>Loading voices...</option>}
+                   {voicesError && <option>Error loading voices</option>}
+                   {!voicesLoading && !voicesError && availableVoices.map(v => <option key={v.voice_id} value={v.voice_id}>{v.name}</option>)}
+                </select>
+                {voicesError && <small style={{color: 'red', marginLeft: '5px'}}>{voicesError}</small>}
             </div>
 
-          {/* STS Settings */} 
-          <h5>Target Voice Settings:</h5>
-          <div style={{ marginBottom: '15px', padding: '0 5px' }}>
-              <label>Stability: [{formatSliderValue(stability)}]</label>
-              <Slider min={0} max={1} step={0.01} value={stability} onChange={(v: number | number[]) => setStability(v as number)} />
-              <div style={{display: 'flex', justifyContent: 'space-between'}}><small>More Variable</small><small>More Stable</small></div>
-          </div>
-          <div style={{ marginBottom: '15px', padding: '0 5px' }}>
-              <label>Similarity Boost: [{formatSliderValue(similarity)}]</label>
-              <Slider min={0} max={1} step={0.01} value={similarity} onChange={(v: number | number[]) => setSimilarity(v as number)} />
-              <div style={{display: 'flex', justifyContent: 'space-between'}}><small>Low</small><small>High</small></div>
-          </div>
-          
-          {submitError && <p style={{ color: 'red' }}>Error: {submitError}</p>}
+            {/* STS Model */} 
+            <div style={{ marginBottom: '15px' }}>
+                <label htmlFor="stsModel">STS Model:</label><br/>
+                <select id="stsModel" value={selectedModelId} onChange={e => setSelectedModelId(e.target.value)} disabled={modelsLoading || !!modelsError} required>
+                   {modelsLoading && <option>Loading models...</option>}
+                   {modelsError && <option>Error loading models</option>}
+                   {!modelsLoading && !modelsError && availableModels.map(m => <option key={m.model_id} value={m.model_id}>{m.name}</option>)}
+                </select>
+                {modelsError && <small style={{color: 'red', marginLeft: '5px'}}>{modelsError}</small>}
+            </div>
+
+            {/* Number of Takes */} 
+            <div style={{ marginBottom: '15px' }}>
+                <label htmlFor="numTakesSts">Number of Takes:</label> 
+                <input type="number" id="numTakesSts" value={numTakes} onChange={e => setNumTakes(parseInt(e.target.value, 10) || 1)} min="1" required style={{width: '60px'}}/>
+            </div>
+
+            {/* Replace Option */} 
+             <div style={{ marginBottom: '15px' }}>
+                  <input type="checkbox" id="replaceExistingSts" checked={replaceExisting} onChange={e => setReplaceExisting(e.target.checked)} />
+                  <label htmlFor="replaceExistingSts"> Replace existing takes for this line</label>
+              </div>
+
+            {/* STS Settings */} 
+            <h5>Target Voice Settings:</h5>
+            <div style={{ marginBottom: '15px', padding: '0 5px' }}>
+                <label>Stability: [{formatSliderValue(stability)}]</label>
+                <Slider min={0} max={1} step={0.01} value={stability} onChange={(v: number | number[]) => setStability(v as number)} />
+                <div style={{display: 'flex', justifyContent: 'space-between'}}><small>More Variable</small><small>More Stable</small></div>
+            </div>
+            <div style={{ marginBottom: '15px', padding: '0 5px' }}>
+                <label>Similarity Boost: [{formatSliderValue(similarity)}]</label>
+                <Slider min={0} max={1} step={0.01} value={similarity} onChange={(v: number | number[]) => setSimilarity(v as number)} />
+                <div style={{display: 'flex', justifyContent: 'space-between'}}><small>Low</small><small>High</small></div>
+            </div>
             
-          {/* Actions */} 
-          <div style={{ marginTop: '20px', textAlign: 'right' }}>
-              <button type="button" onClick={onClose} style={{ marginRight: '10px' }} disabled={isSubmitting}>Cancel</button>
-              <button type="submit" disabled={isSubmitting || !(recordedAudioB64 || fileAudioB64) || !targetVoiceId || !selectedModelId}>
-                  {isSubmitting ? 'Generating STS...' : 'Start STS Job'}
-              </button>
-          </div>
-        </form>
-      </div>
-    </div>
+            {submitError && <p style={{ color: 'red' }}>Error: {submitError}</p>}
+              
+            {/* Actions */} 
+            <div style={{ marginTop: '20px', textAlign: 'right' }}>
+                <button type="button" onClick={onClose} style={{ marginRight: '10px' }} disabled={isSubmitting}>Cancel</button>
+                <button type="submit" disabled={isSubmitting || !(recordedAudioB64 || fileAudioB64) || !targetVoiceId || !selectedModelId}>
+                    {isSubmitting ? 'Generating STS...' : 'Start STS Job'}
+                </button>
+            </div>
+          </form>
+    </AppModal>
   );
 };
 
