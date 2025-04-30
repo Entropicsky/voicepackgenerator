@@ -1719,7 +1719,30 @@ def _generate_lines_batch(db: Session, script_id: int, pending_lines: list, exis
         char_desc = pending_lines[0].get('character_description', 'N/A')
         template_hint = pending_lines[0].get('template_hint', 'N/A')
         category_name = pending_lines[0].get('category_name', 'N/A')
-        category_instructions = pending_lines[0].get('category_instructions', 'N/A')
+        
+        # --- FIX: Explicitly fetch category instructions --- 
+        category_instructions = "N/A" # Default
+        parent_script_template_id = None
+        # Get template ID from the script associated with the first line
+        first_line_id = pending_lines[0].get('line_id')
+        if first_line_id:
+             first_line_obj = db.query(models.VoScriptLine).options(joinedload(models.VoScriptLine.vo_script)).get(first_line_id)
+             if first_line_obj and first_line_obj.vo_script:
+                 parent_script_template_id = first_line_obj.vo_script.template_id
+        
+        if parent_script_template_id and category_name != "Uncategorized":
+             category = db.query(models.VoScriptTemplateCategory).filter(
+                 models.VoScriptTemplateCategory.template_id == parent_script_template_id,
+                 models.VoScriptTemplateCategory.name == category_name
+             ).first()
+             if category and category.prompt_instructions:
+                 category_instructions = category.prompt_instructions
+                 logging.info(f"Using category instructions for '{category_name}' from DB.")
+             else:
+                 logging.warning(f"Could not find category instructions for '{category_name}' in DB, using default.")
+        else:
+             logging.warning(f"Could not determine template ID or category name ('{category_name}') to fetch instructions, using default.")
+        # --- END FIX --- 
         
         # 2. Build the batch prompt
         prompt_parts = [
