@@ -1,0 +1,170 @@
+# Agent Notes for Voice Pack Generator
+
+## Project Overview
+
+This project generates voice packs. It consists of three main components orchestrated using Docker Compose for local development and potentially deployed to Heroku:
+
+1.  **Frontend:** A Vite/React application served via Nginx (local port 5173).
+2.  **Backend:** A Flask API (local port 5001) responsible for handling requests, managing job/script data (via PostgreSQL), and interfacing with ElevenLabs (`utils_elevenlabs.py`) and Cloudflare R2 (`utils_r2.py`).
+3.  **Worker:** A Celery worker process that handles background tasks (audio generation via `tasks.py`), using Redis as a message broker and result backend.
+
+## Key Technologies
+
+*   Frontend: Vite, React, TypeScript, Mantine, Nginx
+*   Backend: Python, Flask, Celery, SQLAlchemy, Alembic, Boto3 (for R2)
+*   Broker: Redis
+*   Database: PostgreSQL
+*   Storage: Cloudflare R2 (S3-compatible)
+*   Deployment: Docker Compose (local), Heroku (target)
+
+## Development & Deployment Notes
+
+*   **Local:** Runs via `docker-compose up`. Uses PostgreSQL and Redis containers. Uses a `.env` file for environment variables (API keys, R2 credentials, DB URL).
+*   **Heroku:** Target deployment platform. Requires specific configuration (`heroku.yml`). Uses Heroku Redis and Heroku Postgres addons. Requires R2 environment variables set as Config Vars.
+*   **Heroku Auto-Deploy:** **Active**. The Heroku app `voicepackgenerator-prod` is configured for automatic deployment from the GitHub `master` branch. Pushing to `master` triggers a deployment.
+*   **R2 Integration:** **Complete**. The application uses Cloudflare R2 for storing generated audio (`.mp3`) and batch metadata (`metadata.json`) in both development and production.
+    *   Uses `boto3` (via `utils_r2.py`).
+    *   Requires `R2_BUCKET_NAME`, `R2_ENDPOINT_URL`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` environment variables.
+    *   File prefixes: `<skin_name>/<voice_folder_name>/<batch_id>/takes/<file.mp3>` and `<skin_name>/<voice_folder_name>/<batch_id>/metadata.json`.
+    *   API endpoints (`/api/batches`, `/api/batch/...`) use the full R2 prefix.
+    *   Audio serving (`/audio/...`) uses redirects to presigned R2 URLs.
+    *   Batch downloads (`.../download`) generate zips from R2.
+    *   Local filesystem storage (`utils_fs.py`, `AUDIO_ROOT`) removed.
+*   **Frontend Prefix Handling:** Frontend uses `encodeURIComponent()` for `batch_prefix` in URLs.
+*   **Locking Removed:** Filesystem batch locking removed. R2 metadata updates are last-write-wins.
+*   **OpenAI API:** Uses the **Responses API** for features like AI text optimization (`/api/optimize-line-text`). Must refer to `.cursor/docs/responseapi.md` and **not** use the legacy Chat Completions API. Uses the **Agents SDK** for script generation (`ScriptWriterAgent`, `run_script_creation_agent` task), requiring the `OPENAI_AGENT_MODEL` environment variable (e.g., `gpt-4o`) set in `.env` and Heroku Config Vars.
+*   **Database:** Uses PostgreSQL (Heroku Postgres on production, local Postgres via Docker for dev). Schema managed by Alembic (`backend/models.py`, `migrations/`). See `.cursor/notes/db.md` for schema details.
+
+## Current Frontend Workflow
+
+1.  **Create Voices:** Design/select voices using ElevenLabs integration.
+2.  **Manage Scripts:** Import/edit existing scripts for voice recording.
+3.  **Generate Recordings:** Batch generate audio takes for script lines.
+4.  **Monitor Generations:** Track batch job status.
+5.  **Edit Recordings:** Rank/review generated takes, potentially crop audio.
+
+## Current Status & Issues
+
+*   **R2 Storage:** Implemented and tested locally. Deployed via auto-deploy.
+*   **PostgreSQL Migration:** Complete and deployed.
+*   **Frontend:** Updated for R2 prefixes and batch context. AI Wizard text optimization feature added (`RegenerationModal.tsx`). VO Script feature UI (List, Create, Detail) implemented.
+*   **Backend:** VO Script feature backend (Models, Migrations, API Endpoints, Agent Task) implemented, including category refinement and refinement prompts.
+*   **Testing:** Basic structure exists (`tests/` - confirmed non-existent), but requires test implementation for core features and VO Script feature.
+*   **Authentication:** Cloudflare Access setup deferred (requires custom domain).
+*   **Audio Cropping Feature:** Spec created, implementation backlogged.
+*   **AI Text Optimization:** Implemented backend/frontend, needs end-to-end testing and prompt refinement.
+
+## Next Steps / Current Focus (As of [Current Date])
+
+1.  **Documentation:** Update README, document new APIs, update agent notes.
+2.  **VO Script Feature Polish:** Address TODOs in `VoScriptDetailView` (metadata edit, status display, audio player, etc.).
+3.  **Template Manager UI:** Implement editing capabilities for VO Script Templates.
+4.  **Testing:** Implement comprehensive testing (Unit, Integration, Feature) for backend & frontend, especially the VO Script feature.
+5.  Test and refine the AI Wizard text optimization feature.
+6.  Implement Cloudflare Access (requires custom domain setup).
+7.  Address Audio Cropping feature from backlog.
+
+## Long Term Direction
+
+*   Evolve the application towards a multi-game SaaS product.
+
+## Pointers
+
+*   Project Checklist: `.cursor/notes/project_checklist.md`
+*   Notebook: `.cursor/notes/notebook.md`
+*   DB Schema: `.cursor/notes/db.md`
+*   R2 Spec: `.cursor/docs/cloudflare_integration.md`
+*   Crop Spec: `.cursor/docs/cropping_tech_spec.md`
+*   AI Wizard Prompt Rules: `.cursor/docs/scripthelp.md`
+*   OpenAI Responses API Doc: `.cursor/docs/responseapi.md`
+*   Docker Config: `docker-compose.yml`
+*   SQLAlchemy Models: `backend/models.py`
+*   Alembic Migrations: `migrations/`
+*   Celery Config: `backend/celery_app.py`
+*   Heroku Config: `heroku.yml`
+
+## Testing Notes & Procedures
+
+*   **Environment:** Backend Python tests **MUST** be run inside the `backend` Docker container as dependencies are isolated there. Do not run `pytest` or `unittest` directly from the host OS unless specifically targeting host-only scripts.
+*   **Command:** Use `docker exec <container_id> pytest <test_path>`.
+    *   Get container ID via `docker-compose ps -q backend`.
+    *   Example: `docker exec $(docker-compose ps -q backend) pytest backend/tests/test_utils_openai.py`
+*   **Test Runner:** `pytest` is installed and preferred for discovery and execution.
+*   **Imports in Tests:** Use absolute imports relative to the `/app` directory structure inside the container. The main backend code is the `backend` package (`/app/backend`). Therefore, within test files (`/app/backend/tests/*.py`), import application modules using `from backend import module` or `from backend.submodule import item`.
+*   **Module Resolution:** If `ImportError` occurs:
+    *   Verify the imported module/file actually exists (e.g., `utils_fs.py` was removed but tests still tried to import it).
+    *   Double-check the import path against the actual file location (`/app/backend/...`).
+*   **Mocking Assertions:** When using `mock.assert_called_once_with` (or similar), ensure the expected arguments exactly match the actual call, including arguments passed with default values from the function signature (e.g., default `temperature`).
+
+## Recent Project Updates
+
+### Instantiate Target Lines Feature (2024-04-30)
+
+Added capability to dynamically create multiple directed taunt lines (or similar) with automatic generation:
+
+1. Backend changes:
+   - Created new endpoint `/vo-scripts/<script_id>/instantiate-lines` that accepts target names
+   - Enhanced `get_category_lines_context` to properly handle lines with direct category_id
+   - Added special handling for directed taunt lines in batch generation
+   - Modified category batch generation to process newly created lines
+   - Improved logging throughout the process
+
+2. Frontend changes:
+   - Added "Instantiate Target Lines" button to VoScriptDetailView
+   - Created modal form for entering target names, category, and prompt template
+   - Implemented automatic content generation after line creation
+   - Fixed issue with template line finding
+   - Added natural sorting for lines within categories
+
+3. Excel Export Feature
+   - Added "Download Excel" button to export VO scripts for review
+   - Implemented backend endpoint using openpyxl to format script data with proper styling
+   - Fixed filename sanitization issues
+   - Structured Excel with script name in A1, character description in A2, and lines organized by category
+
+4. Bug Fixes for Locked Lines
+   - Fixed bugs where refinement operations (global and category-level) were modifying locked lines
+   - Added proper lock checking in all refinement endpoints
+   - Added missing is_locked field to context dictionaries
+   - Modified template creation logic to automatically lock static text lines
+
+5. Progress Visualization
+   - Implemented progress bar for global refinement operations
+   - Created frontend orchestration approach with sequential line processing
+   - Improved feedback during lengthy operations
+
+This feature allows users to create multiple directed taunts (or similar content) without needing to manually create each line or define every possible target in the template.
+
+### Static Template Lines Feature (2024-04-29)
+
+Added support for static template lines that bypass LLM generation:
+
+1. Database changes:
+   - Added `static_text` column to `vo_script_template_lines` table
+   - Updated database directly with SQL since Flask-Migrate was having issues
+
+2. Backend changes:
+   - Modified script creation logic to copy static text from template lines
+   - Updated batch generation logic to skip lines that already have text
+   - Updated template line endpoints to handle static_text field
+
+3. Frontend changes:
+   - Added static text toggle and input to template editor
+   - Added visual indicators for static lines in script detail view
+   - Disabled regenerate/refine buttons for static template lines
+
+This feature allows standard phrases (like VGS commands "Yes", "Thanks") to be defined once in the template and automatically populated in scripts without consuming LLM tokens.
+
+### Usage
+
+To create static template lines:
+1. Open the template editor
+2. When adding or editing a line, toggle "Use Static Text"
+3. Enter the exact text that should appear in scripts
+4. All scripts created from this template will have this text pre-populated
+
+When a script is created from a template with static lines, those lines will:
+- Be automatically populated with the static text
+- Have status set to 'generated'  
+- Be visually distinguished in the UI
+- Be protected from regeneration/refinement 

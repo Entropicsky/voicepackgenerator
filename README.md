@@ -3,9 +3,11 @@
 This project provides a web-based tool for:
 1.  Generating multiple takes of voice lines using the ElevenLabs API based on an input script.
 2.  Ranking the generated takes on a line-by-line basis to select the best options.
-3.  **(New!)** Designing new voices directly from text prompts using the ElevenLabs Voice Design API.
-4.  **(New!)** Managing scripts through a database with a full-featured editor and versioning.
-5.  **(New!)** Cropping audio takes directly within the ranking interface.
+3.  Designing new voices directly from text prompts using the ElevenLabs Voice Design API.
+4.  Managing scripts through a database with a full-featured editor and versioning.
+5.  **(New!)** Creating and editing advanced VO script templates with category-based organization.
+6.  **(New!)** Dynamic instantiation of templated lines (like "directed taunts") with automatic content generation.
+7.  Cropping audio takes directly within the ranking interface.
 
 Built with Flask (backend API), Celery (background tasks), Redis (task queue), React/TypeScript/Vite (frontend), **pydub** (audio processing), **WaveSurfer.js** (waveform display), and Docker Compose for environment management.
 
@@ -17,32 +19,49 @@ Built with Flask (backend API), Celery (background tasks), Redis (task queue), R
     *   Archive/unarchive scripts to keep your workspace organized.
     *   Generate voice takes directly from saved scripts.
     *   Update script text when regenerating takes for improved iteration.
+    
+*   **VO Script Management (New!):**
+    *   Create and manage templates with categorized lines (Intro, Jokes, Taunts, etc.).
+    *   Define static template lines that are copied directly to new scripts.
+    *   Instantiate dynamic target lines (e.g., directed taunts for specific characters).
+    *   Automatic content generation with GPT-4 for newly created lines.
+    *   Category-based batch generation to ensure content variety within sections.
+    *   Line locking to prevent accidental regeneration of approved content.
+    *   Category-level and script-level content refinement.
+    *   Individual line editing and refinement with custom prompts.
+    *   Natural sorting of lines within categories for better organization.
+    *   One-click Excel export for script review and voice recording sessions.
+    
 *   **Voice Design:**
     *   Create new ElevenLabs voices using text prompts and settings (loudness, quality, guidance).
     *   Generate multiple audio previews for a voice description.
     *   Iteratively "Hold" promising previews across generation batches.
     *   Save selected held previews directly to your ElevenLabs voice library.
+    
 *   **Batch Generation:**
     *   Select one or more ElevenLabs voices.
     *   Upload a CSV script or select from saved scripts.
     *   Configure number of takes per line and randomization ranges (Stability, Similarity, Style, Speed).
     *   Submit generation job to a background Celery worker.
+    
 *   **Job Tracking:**
     *   View history of submitted generation jobs.
     *   See live status updates polled from Celery/Database.
+    
 *   **Ranking & Editing:**
     *   View generated batches.
     *   Listen to takes line-by-line.
     *   Assign ranks (1-5) to takes within each line.
     *   Rank assignments automatically cascade within the line.
     *   Move ranked takes up/down or unrank/trash them directly from the ranked panel.
-    *   **(New!)** Edit takes using an inline waveform editor:
+    *   Edit takes using an inline waveform editor:
         *   Visualize the audio waveform.
         *   Select start/end points using draggable regions.
         *   Preview the selected audio region.
         *   Save the crop, overwriting the original audio file in R2 via a background task.
     *   Download ranked batch audio.
     *   Lock completed batches.
+    
 *   **Line Regeneration/STS:**
     *   Regenerate specific lines using new TTS settings.
     *   Generate new takes using Speech-to-Speech (STS) from uploaded audio or microphone input.
@@ -60,6 +79,11 @@ Built with Flask (backend API), Celery (background tasks), Redis (task queue), R
 │   ├── tasks.py          # Celery task definitions (generation, cropping, etc.)
 │   ├── utils_elevenlabs.py # ElevenLabs API interactions
 │   ├── utils_r2.py       # Cloudflare R2 interactions
+│   ├── utils_openai.py   # OpenAI API interactions
+│   ├── utils_voscript.py # VO Script utility functions
+│   ├── routes/           # API route modules
+│   │   ├── vo_script_routes.py  # VO Script endpoints
+│   │   └── ...
 │   ├── tests/            # Backend unit/integration tests
 │   ├── Dockerfile        # Dockerfile for backend (used locally)
 │   ├── requirements.txt  # Python dependencies
@@ -71,6 +95,8 @@ Built with Flask (backend API), Celery (background tasks), Redis (task queue), R
 │   │   ├── api.ts          # Frontend API client functions
 │   │   ├── types.ts        # TypeScript type definitions
 │   │   ├── pages/          # Page components (Generation, Ranking, Scripts, etc.)
+│   │   │   ├── VoScriptDetailView.tsx # VO Script editor page
+│   │   │   └── ...
 │   │   ├── components/     # Reusable UI components (Selectors, Forms, Modals, etc.)
 │   │   ├── contexts/       # React Context providers (Voice, Ranking)
 │   │   ├── hooks/          # Custom React hooks
@@ -115,7 +141,8 @@ This project uses Docker Compose for a consistent local development environment.
     *   Docker Desktop installed and running.
     *   Git
     *   An ElevenLabs API Key.
-    *   **(New!)** `ffmpeg` installed on your system (or ensure it's installed in the backend Docker image). `pydub` relies on it.
+    *   An OpenAI API Key (for VO Script generation and refinement).
+    *   `ffmpeg` installed on your system (or ensure it's installed in the backend Docker image). `pydub` relies on it.
 
 2.  **Clone the Repository:**
     ```bash
@@ -192,23 +219,29 @@ Deployment to Heroku is managed via `heroku.yml` and uses Docker container build
 *   **Worker Dyno (`worker`):** Builds using `Dockerfile.worker`. Runs the Celery worker directly.
 *   **Migrations:** The `release` phase in `heroku.yml` automatically runs `flask db upgrade` before new code is released, ensuring the Heroku Postgres database schema is up-to-date.
 *   **Environment Variables:** Required variables like `SECRET_KEY`, `ELEVENLABS_API_KEY`, `R2_BUCKET_NAME`, `R2_ENDPOINT_URL`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_AGENT_MODEL` must be set manually in the Heroku app's settings (Config Vars). `DATABASE_URL` and `REDIS_URL` are typically set automatically by the addons.
-*   **(New!)** Ensure `ffmpeg` is included in the backend Docker buildpack or build process for Heroku if not using the exact same Dockerfile base.
+*   Ensure `ffmpeg` is included in the backend Docker buildpack or build process for Heroku if not using the exact same Dockerfile base.
 
 **Deployment Steps:**
 
 1.  Ensure changes are committed to Git.
 2.  Run: `git push heroku master`
 
-## Development
+## Troubleshooting
 
-*   **Backend Changes:** Changes to Python files (`backend/`, `tasks.py`, etc.) should auto-reload the Flask dev server locally when using `docker compose up`. For the worker, restart it: `docker compose restart worker`.
-*   **Frontend Changes:** Requires rebuilding the frontend image: `docker compose build frontend`, then recreating the container: `docker compose up -d --force-recreate frontend`.
-*   **Database Schema Changes:** Modify models in `backend/models.py`, then generate and apply migrations using the `flask db` commands outlined in the local setup section.
+### Deployment Issues
 
-## Known Issues
+* **Stuck Heroku Deployment**: If a Heroku deployment gets stuck, use `heroku ps` to check the dynos' status and `heroku ps:stop` to stop any stuck release processes. Adding a simple release command like `echo "No-op release phase"` to `heroku.yml` can help prevent some release phase issues.
 
-*   The Vite development server (`
-*   **(New!)** Audio Editor rendering relies on `withinPortal={false}` workaround due to conflict between WaveSurfer and Mantine Modal portal. Styling is basic.
+* **Database Migration Issues**: If migrations fail to apply automatically, you can manually apply them with:
+  ```bash
+  heroku run python run_migrations.py
+  ```
+
+### Development Issues
+
+* **Vite Dev Server**: The Vite development server is configured to proxy backend API requests to port 5001 via `vite.config.ts` in dev mode.
+
+* **Audio Editor**: Audio Editor rendering relies on `withinPortal={false}` workaround due to conflict between WaveSurfer and Mantine Modal portal. Styling is basic.
 
 ## Backlog / Future Features
 
@@ -219,6 +252,12 @@ Deployment to Heroku is managed via `heroku.yml` and uses Docker container build
     *   Implement non-destructive cropping (save as new file + metadata update).
     *   Add Undo functionality.
     *   Add Volume Normalization/Fade options.
+*   VO Script Improvements:
+    *   Audio preview generation for VO script lines.
+    *   Batch audio export of final VO script.
+    *   Enhanced template management with import/export features.
+    *   More sophisticated line targeting and instantiation options.
+    *   Integration with audio recording for voice actors.
 *   Testing Framework implementation.
 *   Cloudflare Access Authentication (Requires Custom Domain).
 *   Batch action improvements (e.g., bulk delete/archive).
