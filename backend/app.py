@@ -430,8 +430,12 @@ def get_task_status(task_id):
         # Use the celery instance imported from the module
         task_result = AsyncResult(task_id, app=celery)
 
-        # Use .state which is safer than .status for just getting the status string
-        current_status = task_result.state 
+        # FIX: Try getting state directly from backend to potentially avoid result decoding
+        current_status = task_result.backend.get_state(task_id)
+        # If backend doesn't support it or fails, fallback (though unlikely needed)
+        if current_status is None:
+             logging.warning(f"backend.get_state failed for {task_id}, falling back to task_result.state")
+             current_status = task_result.state
 
         response_data = {
             'task_id': task_id,
