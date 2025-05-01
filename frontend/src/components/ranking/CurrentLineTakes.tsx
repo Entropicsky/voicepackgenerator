@@ -55,7 +55,16 @@ const CurrentLineTakes: React.FC = () => {
 
   // NEW handler passed to modals
   const handleRegenJobStarted = (lineKey: string, taskId: string) => {
+    console.log(`CurrentLineTakes: handleRegenJobStarted called with lineKey=${lineKey}, taskId=${taskId}`);
+    
+    if (!taskId || taskId === 'undefined') {
+      console.error(`CurrentLineTakes: handleRegenJobStarted received invalid taskId: ${taskId}`);
+      return;
+    }
+    
+    console.log(`CurrentLineTakes: Calling startLineRegeneration(${lineKey}, ${taskId})`);
     startLineRegeneration(lineKey, taskId);
+    
     // Close the modal after submission is initiated
     setShowRegenModal(false);
     setShowStsModal(false);

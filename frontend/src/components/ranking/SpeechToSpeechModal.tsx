@@ -227,10 +227,24 @@ const SpeechToSpeechModal: React.FC<SpeechToSpeechModalProps> = ({
     };
 
     try {
+        console.log("SpeechToSpeechModal: Starting STS job...");
         const response = await api.startSpeechToSpeech(batchId, payload);
+        console.log("SpeechToSpeechModal: Got API response:", response);
+        
+        if (!response.taskId) {
+            console.error("SpeechToSpeechModal: Received response without taskId!");
+            setSubmitError("Failed to start STS: Missing task ID in response");
+            setIsSubmitting(false);
+            return;
+        }
+        
+        console.log(`SpeechToSpeechModal: Calling onRegenJobStarted with lineKey=${lineKey}, taskId=${response.taskId}`);
         onRegenJobStarted(lineKey, response.taskId);
+        
+        console.log("SpeechToSpeechModal: Closing modal");
         onClose();
     } catch (err: any) {
+        console.error("SpeechToSpeechModal: Failed to submit STS job:", err);
         setSubmitError(`Submission failed: ${err.message}`);
     } finally {
         setIsSubmitting(false);

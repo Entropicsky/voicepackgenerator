@@ -128,38 +128,87 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
   const fetchTakesForLine = useCallback(async (lineKey: string) => {
       if (!batchId) return;
       console.log(`[RankingContext] Fetching updated takes for line: ${lineKey}`);
-      try {
-          const updatedTakes = await api.getLineTakes(batchId, lineKey);
-          // Update the takesByLine state
-          setTakesByLine(prevTakes => ({
-              ...prevTakes,
-              [lineKey]: updatedTakes.sort((a, b) => a.take_number - b.take_number)
-          }));
-          // Update the batchMetadata state
-          setBatchMetadata((prevMeta: BatchMetadata | null) => {
-              if (!prevMeta) return null;
-              // Filter out old takes for this line, then add new ones
-              const otherTakes = prevMeta.takes.filter((t: Take) => t.line !== lineKey);
-              return {
-                  ...prevMeta,
-                  takes: [...otherTakes, ...updatedTakes]
-              };
-          });
-          console.log(`[RankingContext] Successfully updated takes for line: ${lineKey}`);
-      } catch (err: any) {
-          console.error(`[RankingContext] Failed to fetch takes for line ${lineKey}:`, err);
-          // Optionally surface this error to the user?
-          setError(`Failed to refresh takes for line ${lineKey}: ${err.message}`); 
+      
+      // Add retry logic with exponential backoff
+      const maxRetries = 3;
+      let retryCount = 0;
+      let success = false;
+      
+      while (retryCount < maxRetries && !success) {
+          try {
+              // If this isn't the first attempt, wait with exponential backoff
+              if (retryCount > 0) {
+                  const delayMs = 1000 * Math.pow(2, retryCount - 1); // 1s, 2s, 4s
+                  console.log(`[RankingContext] Retry ${retryCount}/${maxRetries} for line ${lineKey}, waiting ${delayMs}ms`);
+                  await new Promise(resolve => setTimeout(resolve, delayMs));
+              }
+              
+              // Instead of trying to fetch only the line takes which may not exist as a separate file,
+              // fetch the entire batch metadata which we know exists and has been updated
+              console.log(`[RankingContext] Fetching full batch metadata to get takes for line: ${lineKey}`);
+              const updatedMetadata = await api.getBatchMetadata(batchId);
+              
+              // Filter to get only the takes for this line
+              const updatedTakes = updatedMetadata.takes.filter(take => take.line === lineKey);
+              console.log(`[RankingContext] Found ${updatedTakes.length} takes for line ${lineKey} in updated metadata`);
+              
+              if (updatedTakes.length === 0) {
+                  // This might mean the metadata file hasn't been updated yet - retry
+                  if (retryCount < maxRetries - 1) {
+                      retryCount++;
+                      console.log(`[RankingContext] No takes found for line ${lineKey}, will retry ${retryCount}/${maxRetries}`);
+                      continue;
+                  } else {
+                      throw new Error(`No takes found for line ${lineKey} after ${maxRetries} attempts`);
+                  }
+              }
+              
+              // Update the takesByLine state
+              setTakesByLine(prevTakes => ({
+                  ...prevTakes,
+                  [lineKey]: updatedTakes.sort((a, b) => a.take_number - b.take_number)
+              }));
+              
+              // Update the batchMetadata state
+              setBatchMetadata(updatedMetadata);
+              
+              console.log(`[RankingContext] Successfully updated takes for line: ${lineKey}`);
+              success = true;
+              
+              // Clear any previous error
+              setError(null);
+              
+          } catch (err: any) {
+              retryCount++;
+              console.error(`[RankingContext] Attempt ${retryCount}/${maxRetries} failed to fetch takes for line ${lineKey}:`, err);
+              
+              if (retryCount >= maxRetries) {
+                  console.error(`[RankingContext] All ${maxRetries} attempts failed for line ${lineKey}`);
+                  // Only show error on final failure
+                  setError(`Failed to refresh takes for line ${lineKey}: ${err.message}`);
+              }
+          }
       }
-  }, [batchId]);
+  }, [batchId, setError, setBatchMetadata, setTakesByLine]);
 
   // Function called by modals to start tracking a new regen job
   const startLineRegeneration = useCallback((lineKey: string, taskId: string) => {
-      console.log(`[RankingContext] Starting to track regeneration for line ${lineKey}, task ${taskId}`);
-      setLineRegenerationStatus(prev => ({
-          ...prev,
-          [lineKey]: { taskId, status: 'SUBMITTED', info: 'Job submitted', error: null }
-      }));
+      console.log(`[RankingContext] startLineRegeneration called with lineKey=${lineKey}, taskId=${taskId}`);
+      
+      if (!taskId || taskId === 'undefined') {
+        console.error(`[RankingContext] startLineRegeneration received invalid taskId: ${taskId}`);
+        return;
+      }
+      
+      console.log(`[RankingContext] Setting lineRegenerationStatus[${lineKey}].taskId = ${taskId}`);
+      setLineRegenerationStatus(prev => {
+        const newState = {
+            ...prev,
+            [lineKey]: { taskId, status: 'SUBMITTED', info: 'Job submitted', error: null }
+        };
+        console.log("[RankingContext] New lineRegenerationStatus state:", newState);
+        return newState;
+      });
       // Trigger polling immediately if not already running (or rely on useEffect dependency)
   }, []);
 
@@ -167,6 +216,14 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
   useEffect(() => {
     const activeRegens = Object.entries(lineRegenerationStatus)
         .filter(([_, job]) => job.status !== 'SUCCESS' && job.status !== 'FAILURE');
+
+    if (activeRegens.length > 0) {
+        console.log("[RankingContext Polling] Active regenerations:", activeRegens.map(([lineKey, job]) => ({ 
+            lineKey, 
+            taskId: job.taskId, 
+            status: job.status 
+        })));
+    }
 
     const pollStatuses = async () => {
         if (activeRegens.length === 0) {
@@ -181,13 +238,34 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
         console.log(`[RankingContext Polling] Checking status for ${activeRegens.length} active line regenerations...`);
 
         const statusPromises = activeRegens.map(async ([lineKey, job]) => {
+            if (!job.taskId || job.taskId === 'undefined') {
+                console.error(`[RankingContext Polling] Invalid taskId for line ${lineKey}: ${job.taskId}`);
+                return { 
+                    lineKey, 
+                    taskStatus: { 
+                        taskId: 'invalid',
+                        status: 'FAILURE', 
+                        info: { error: 'Invalid task ID' } 
+                    } 
+                };
+            }
+            
+            console.log(`[RankingContext Polling] Fetching status for line ${lineKey}, taskId=${job.taskId}`);
             try {
                 const taskStatus = await api.getTaskStatus(job.taskId);
+                console.log(`[RankingContext Polling] Received status for line ${lineKey}, taskId=${job.taskId}:`, taskStatus);
                 return { lineKey, taskStatus };
             } catch (err: any) {
                 console.error(`[RankingContext Polling] Error fetching status for task ${job.taskId} (line ${lineKey}):`, err);
-                // Create a synthetic FAILURE status on fetch error
-                return { lineKey, taskStatus: { task_id: job.taskId, status: 'FAILURE', info: { error: `Failed to fetch status: ${err.message}` } } as TaskStatus };
+                // Create a synthetic FAILURE status on fetch error with the correct property name
+                return { 
+                    lineKey, 
+                    taskStatus: { 
+                        taskId: job.taskId, 
+                        status: 'FAILURE', 
+                        info: { error: `Failed to fetch status: ${err.message}` } 
+                    } 
+                };
             }
         });
 
@@ -201,9 +279,9 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
             const currentStatus = lineRegenerationStatus[lineKey];
             // Only update if status actually changed
             if (currentStatus && currentStatus.status !== taskStatus.status) {
-                console.log(`[RankingContext Polling] Status update for line ${lineKey} (Task ${taskStatus.task_id}): ${currentStatus.status} -> ${taskStatus.status}`);
+                console.log(`[RankingContext Polling] Status update for line ${lineKey} (Task ${taskStatus.taskId}): ${currentStatus.status} -> ${taskStatus.status}`);
                 stateUpdates[lineKey] = {
-                    taskId: taskStatus.task_id,
+                    taskId: taskStatus.taskId,
                     status: taskStatus.status,
                     info: taskStatus.info,
                     error: taskStatus.status === 'FAILURE' ? (taskStatus.info?.error || 'Unknown error') : null
@@ -298,7 +376,14 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
                 return { takeFile, taskStatus };
             } catch (err: any) {
                 console.error(`[RankingContext Crop Polling] Error fetching status for crop task ${job.taskId} (file ${takeFile}):`, err);
-                return { takeFile, taskStatus: { task_id: job.taskId, status: 'FAILURE', info: { error: `Failed to fetch status: ${err.message}` } } as TaskStatus };
+                return { 
+                    takeFile, 
+                    taskStatus: { 
+                        taskId: job.taskId, 
+                        status: 'FAILURE', 
+                        info: { error: `Failed to fetch status: ${err.message}` } 
+                    } 
+                };
             }
         });
 
@@ -310,9 +395,9 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
         results.forEach(({ takeFile, taskStatus }) => {
             const currentStatus = cropStatusByTakeFile[takeFile];
             if (currentStatus && currentStatus.status !== taskStatus.status) {
-                console.log(`[RankingContext Crop Polling] Status update for file ${takeFile} (Task ${taskStatus.task_id}): ${currentStatus.status} -> ${taskStatus.status}`);
+                console.log(`[RankingContext Crop Polling] Status update for file ${takeFile} (Task ${taskStatus.taskId}): ${currentStatus.status} -> ${taskStatus.status}`);
                 stateUpdates[takeFile] = {
-                    taskId: taskStatus.task_id,
+                    taskId: taskStatus.taskId,
                     status: taskStatus.status,
                     error: taskStatus.status === 'FAILURE' ? (taskStatus.info?.error || 'Unknown error') : null
                 };
@@ -326,7 +411,7 @@ export const RankingProvider: React.FC<RankingProviderProps> = ({ batchId, child
                      console.log(`[RankingContext Crop Polling] Crop for ${takeFile} succeeded. Removing from tracking.`);
                      // We will remove it after updating state
                 } else if (taskStatus.status === 'FAILURE'){
-                     console.error(`[RankingContext Crop Polling] Crop task ${taskStatus.task_id} for ${takeFile} FAILED: ${stateUpdates[takeFile].error}`);
+                     console.error(`[RankingContext Crop Polling] Crop task ${taskStatus.taskId} for ${takeFile} FAILED: ${stateUpdates[takeFile].error}`);
                 }
             } else if (currentStatus && currentStatus.status !== 'SUCCESS' && currentStatus.status !== 'FAILURE'){
                  stillActive = true; // Mark that polling should continue if unchanged and not terminal

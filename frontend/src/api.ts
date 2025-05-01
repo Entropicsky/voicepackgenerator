@@ -299,12 +299,16 @@ const generateCategoryBatch = async (scriptId: number, categoryName: string, mod
 // Function to TRIGGER the category batch generation TASK
 const triggerGenerateCategoryBatch = async (scriptId: number, categoryName: string, model?: string): Promise<JobSubmissionResponse> => {
     const payload = model ? { model } : {};
-    const response = await apiClient.post<{ data: JobSubmissionResponse }>(
+    const response = await apiClient.post<{ data: { task_id: string, job_id: number } }>(
         `/vo-scripts/${scriptId}/categories/${encodeURIComponent(categoryName)}/generate-batch-task`, 
         payload
     );
-    // Expects { data: { job_id, task_id } }
-    return handleApiResponse(response);
+    const data = handleApiResponse(response);
+    // Map snake_case to camelCase
+    return {
+        taskId: data.task_id,
+        jobId: data.job_id
+    };
 };
 
 // --- Voice Design --- //
@@ -347,11 +351,22 @@ interface GenerationConfig {
     // TODO: Define specific properties based on backend expectation
     [key: string]: any; 
 }
-interface GenerationStartResponse { taskId: string; jobId: number } // TODO: Verify response structure
+// Define local API response types (snake_case versions from backend)
+interface ApiTaskResponse {
+    task_id: string;
+    job_id: number;
+}
 
-const startGeneration = async (config: GenerationConfig): Promise<GenerationStartResponse> => {
-    const response = await apiClient.post<{ data: GenerationStartResponse }>('/generate', config);
-    return handleApiResponse(response);
+// Return the type from types.ts expected by the frontend (camelCase)
+const startGeneration = async (config: GenerationConfig): Promise<GenerationResponse> => {
+    const response = await apiClient.post<{ data: ApiTaskResponse }>('/generate', config);
+    const data = handleApiResponse<ApiTaskResponse>(response);
+    
+    // Map snake_case from API to camelCase for frontend
+    return {
+        taskId: data.task_id,
+        jobId: data.job_id
+    };
 };
 
 // Add missing toggleScriptArchive function
@@ -421,35 +436,120 @@ interface RegenerateLinePayload {
     replace_existing: boolean;
     update_script?: boolean;
 }
-const regenerateLineTakes = async (batchPrefix: string, payload: RegenerateLinePayload): Promise<GenerationStartResponse> => {
+
+// Define a local interface for what the components expect
+interface GenerationResponse {
+    taskId: string;
+    jobId: number;
+}
+
+const regenerateLineTakes = async (batchPrefix: string, payload: RegenerateLinePayload): Promise<GenerationResponse> => {
+    console.log(`api.regenerateLineTakes called with batchPrefix=${batchPrefix}`);
     const encodedPrefix = batchPrefix.split('/').map(encodeURIComponent).join('/');
-    const response = await apiClient.post<{ data: GenerationStartResponse }>(`/batch/${encodedPrefix}/regenerate_line`, payload);
-    return handleApiResponse(response);
+    console.log(`api.regenerateLineTakes encoded prefix: ${encodedPrefix}`);
+    
+    try {
+        const response = await apiClient.post<{ data: { task_id: string; job_id: number } }>(`/batch/${encodedPrefix}/regenerate_line`, payload);
+        const rawData = response.data.data;
+        console.log(`api.regenerateLineTakes raw response data:`, rawData);
+        
+        if (!rawData.task_id) {
+            console.error("api.regenerateLineTakes: Missing task_id in response!");
+            console.log("Full response:", response.data);
+            throw new Error("Missing task_id in API response");
+        }
+        
+        const data = handleApiResponse(response);
+        console.log(`api.regenerateLineTakes: after handleApiResponse:`, data);
+        
+        // Map snake_case to camelCase and ensure they exist
+        return {
+            taskId: data.task_id,
+            jobId: data.job_id
+        };
+        
+    } catch (error) {
+        console.error(`api.regenerateLineTakes ERROR:`, error);
+        throw error;
+    }
 };
 
 // --- Audio Cropping --- //
 // Define necessary types inline if not in types.ts
 interface CropTakePayload { startTime: number; endTime: number }
-interface CropTakeResponse { task_id: string; message: string }
+interface CropTakeResponse { taskId: string; message: string }
 
 const cropTake = async (batchPrefix: string, filename: string, startTime: number, endTime: number): Promise<CropTakeResponse> => {
     const encodedPrefix = batchPrefix.split('/').map(encodeURIComponent).join('/');
     const encodedFilename = encodeURIComponent(filename);
-    const response = await apiClient.post<{ data: CropTakeResponse }>(`/batch/${encodedPrefix}/takes/${encodedFilename}/crop`, { startTime, endTime });
-    return handleApiResponse(response);
+    
+    try {
+        console.log(`api.cropTake called with batchPrefix=${batchPrefix}, filename=${filename}`);
+        const response = await apiClient.post<{ data: { task_id: string; message: string } }>(`/batch/${encodedPrefix}/takes/${encodedFilename}/crop`, { startTime, endTime });
+        const rawData = response.data.data;
+        console.log(`api.cropTake raw response data:`, rawData);
+        
+        if (!rawData.task_id) {
+            console.error("api.cropTake: Missing task_id in response!");
+            console.log("Full response:", response.data);
+            throw new Error("Missing task_id in API response");
+        }
+        
+        const data = handleApiResponse(response);
+        console.log(`api.cropTake: after handleApiResponse:`, data);
+        
+        // Map snake_case to camelCase and ensure they exist
+        return {
+            taskId: data.task_id,
+            message: data.message || 'Crop task started'
+        };
+    } catch (error) {
+        console.error(`api.cropTake ERROR:`, error);
+        throw error;
+    }
 };
 
 // --- Task Status --- //
 // Define necessary types inline if not in types.ts
 interface TaskStatus {
-    task_id: string;
-    status: 'PENDING' | 'STARTED' | 'SUCCESS' | 'FAILURE' | 'RETRY' | 'REVOKED' | string; // Allow other statuses
+    taskId: string;
+    status: 'PENDING' | 'STARTED' | 'SUCCESS' | 'FAILURE' | 'RETRY' | 'REVOKED' | 'PROGRESS' | string; // Allow other statuses
     info?: any; // Or define more specifically if possible
 }
 const getTaskStatus = async (taskId: string): Promise<TaskStatus> => {
-    // Use a generic task status endpoint
-    const response = await apiClient.get<{ data: TaskStatus }>(`/task/${taskId}/status`);
-    return handleApiResponse(response);
+    try {
+        console.log(`api.getTaskStatus called with taskId=${taskId}`);
+        
+        if (!taskId || taskId === 'undefined') {
+            console.error(`api.getTaskStatus: Invalid taskId: ${taskId}`);
+            // Return a fake "FAILURE" status instead of throwing
+            return {
+                taskId: taskId || 'unknown',
+                status: 'FAILURE',
+                info: { error: 'Invalid task ID provided' }
+            };
+        }
+        
+        // Use a generic task status endpoint
+        const response = await apiClient.get<{ data: { task_id: string, status: string, info?: any } }>(`/task/${taskId}/status`);
+        const data = handleApiResponse(response);
+        console.log(`api.getTaskStatus: response for ${taskId}:`, data);
+        
+        // Map snake_case to camelCase
+        return {
+            taskId: data.task_id,
+            status: data.status,
+            info: data.info
+        };
+    } catch (error) {
+        console.error(`api.getTaskStatus ERROR:`, error);
+        // Return a fake "FAILURE" status instead of throwing
+        return {
+            taskId: taskId || 'unknown',
+            status: 'FAILURE',
+            info: { error: `Failed to fetch task status: ${error}` }
+        };
+    }
 };
 
 // --- Audio URL Helper --- //
@@ -471,10 +571,31 @@ interface SpeechToSpeechPayload {
     settings: any; // Define more specific type? e.g., VoiceSettings
     replace_existing: boolean;
 }
-const startSpeechToSpeech = async (batchPrefix: string, payload: SpeechToSpeechPayload): Promise<GenerationStartResponse> => {
-    const encodedPrefix = batchPrefix.split('/').map(encodeURIComponent).join('/');
-    const response = await apiClient.post<{ data: GenerationStartResponse }>(`/batch/${encodedPrefix}/speech_to_speech`, payload);
-    return handleApiResponse(response);
+const startSpeechToSpeech = async (batchPrefix: string, payload: SpeechToSpeechPayload): Promise<GenerationResponse> => {
+    try {
+        console.log(`api.startSpeechToSpeech called with batchPrefix=${batchPrefix}`);
+        const encodedPrefix = batchPrefix.split('/').map(encodeURIComponent).join('/');
+        const response = await apiClient.post<{ data: { task_id: string; job_id: number } }>(`/batch/${encodedPrefix}/speech_to_speech`, payload);
+        
+        console.log(`api.startSpeechToSpeech raw response:`, response.data);
+        const data = handleApiResponse(response);
+        console.log(`api.startSpeechToSpeech processed data:`, data);
+        
+        // EXPLICIT CHECK: Verify task_id exists before mapping to camelCase 
+        if (!data || !data.task_id) {
+            console.error("api.startSpeechToSpeech: Missing task_id in API response");
+            throw new Error("Missing task ID in API response");
+        }
+        
+        // Map snake_case to camelCase with explicit checks
+        return {
+            taskId: data.task_id,  // Explicitly map snake_case to camelCase
+            jobId: data.job_id || 0
+        };
+    } catch (error) {
+        console.error(`api.startSpeechToSpeech ERROR:`, error);
+        throw error;
+    }
 };
 
 // Add missing getVoicePreview function

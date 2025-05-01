@@ -179,6 +179,7 @@ const RegenerationModal: React.FC<RegenerationModalProps> = ({
     };
 
     try {
+        console.log("RegenerationModal: Submitting regeneration request to API...");
         const response = await api.regenerateLineTakes(batchId, {
             line_key: lineKey,
             line_text: lineText,
@@ -187,7 +188,18 @@ const RegenerationModal: React.FC<RegenerationModalProps> = ({
             replace_existing: replaceExisting,
             update_script: updateScript // <-- Pass the flag
         });
-        console.log(`Line regeneration job submitted: DB ID ${response.jobId}, Task ID ${response.taskId}`);
+        console.log("RegenerationModal: Received API response:", response);
+        console.log(`RegenerationModal: Task ID = ${response.taskId}, Job ID = ${response.jobId}`);
+        
+        // Check if taskId is defined before calling the callback
+        if (!response.taskId) {
+            console.error("RegenerationModal: taskId is undefined in API response!");
+            setError("Failed to start regeneration: Missing task ID in response");
+            setIsSubmitting(false);
+            return;
+        }
+        
+        console.log(`RegenerationModal: Calling onRegenJobStarted with lineKey=${lineKey}, taskId=${response.taskId}`);
         onRegenJobStarted(lineKey, response.taskId);
         onClose(); // Close modal on success
     } catch (err: any) {
