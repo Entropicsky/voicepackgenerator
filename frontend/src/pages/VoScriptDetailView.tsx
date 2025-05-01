@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
@@ -18,6 +18,8 @@ import { api } from '../api';
 import { VoScript, VoScriptLineData, JobSubmissionResponse, SubmitFeedbackPayload, RunAgentPayload, UpdateVoScriptPayload, UpdateVoScriptTemplateCategoryPayload, VoScriptCategoryData, RefineLinePayload, RefineLineResponse, RefineCategoryPayload, RefineMultipleLinesResponse, RefineScriptPayload, DeleteResponse, AddVoScriptLinePayload, VoScriptTemplate, VoScriptTemplateCategory } from '../types';
 // Import custom AppModal
 import AppModal from '../components/common/AppModal'; // Adjust path relative to pages/
+
+const POLLING_INTERVAL = 5000; // Poll every 5 seconds
 
 const VoScriptDetailView: React.FC = () => {
   const { scriptId } = useParams<{ scriptId: string }>();
@@ -87,6 +89,10 @@ const VoScriptDetailView: React.FC = () => {
   const [targetLineKeyPrefix, setTargetLineKeyPrefix] = useState<string>('DIRECTED_TAUNT_'); // Default prefix
   const [targetPromptHintTemplate, setTargetPromptHintTemplate] = useState<string>('Directed taunt towards {TargetName}.'); // Default template
   const [instantiateLinesLoading, setInstantiateLinesLoading] = useState<boolean>(false);
+  // NEW: State for polling generation status
+  const [pollingTaskId, setPollingTaskId] = useState<string | null>(null);
+  const [pollingCategoryName, setPollingCategoryName] = useState<string | null>(null);
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null); // Ref for interval ID
 
   // --- 1. Fetch VO Script Details --- //
   const { 
@@ -992,69 +998,75 @@ const VoScriptDetailView: React.FC = () => {
       onMutate: () => {
           setInstantiateLinesLoading(true);
       },
-      onSuccess: (response) => {
+      onSuccess: (response, variables) => {
+          // Initial success message for instantiation
           notifications.show({
+              id: `instantiate-start-${variables.template_category_id}`,
               title: 'Lines Instantiated',
               message: response.message || `${response.lines_added_count} lines added successfully. Starting content generation...`,
-              color: 'green'
+              color: 'green',
+              loading: true, // Indicate background work starting
+              autoClose: 5000, // Keep it visible for a bit
           });
           
-          // Get the category ID from our form state (the one we just added lines to)
-          const categoryIdNum = targetCategoryId ? parseInt(targetCategoryId, 10) : null;
-          
-          // Find the category name from the ID (needed for the generation API)
+          // Get the category ID and name for the generation task
+          const categoryIdNum = variables.template_category_id;
           let categoryName = '';
           if (categoryIdNum && templateCategoriesData) {
               const category = templateCategoriesData.find(cat => cat.id === categoryIdNum);
               if (category) {
                   categoryName = category.name;
-                  
-                  // Close the modal immediately 
-                  closeInstantiateModal();
-                  
-                  // Invalidate to refresh and show the new lines
-                  queryClient.invalidateQueries({ queryKey: ['voScriptDetail', numericScriptId] });
-                  
-                  // Auto-trigger generation for the category
-                  if (response.lines_added_count > 0 && categoryName) {
-                      // Show notification about starting generation
-                      notifications.show({
-                          title: 'Starting Generation',
-                          message: `Generating content for ${response.lines_added_count} new lines in category "${categoryName}"...`,
-                          color: 'blue',
-                          loading: true
-                      });
-                      
-                      // Trigger category batch generation
-                      console.log(`Attempting to generate lines for category '${categoryName}'...`);
-                      api.generateCategoryBatch(numericScriptId!, categoryName)
-                          .then((result) => {
-                              console.log('Generation completed successfully:', result);
-                              // Reload the script data after generation completes
-                              queryClient.invalidateQueries({ queryKey: ['voScriptDetail', numericScriptId] });
-                              notifications.show({
-                                  title: 'Generation Complete',
-                                  message: `Successfully generated content for lines in category "${categoryName}"`,
-                                  color: 'green'
-                              });
-                          })
-                          .catch(error => {
-                              console.error('Error during generation:', error);
-                              // Add more detailed errors to help diagnose the issue
-                              const errorMessage = error?.response?.data?.error || error.message || 'Failed to generate content for the new lines';
-                              notifications.show({
-                                  title: 'Generation Error',
-                                  message: errorMessage,
-                                  color: 'red'
-                              });
-                          });
-                  }
               }
           }
           
-          // Reset modal form state
+          // Reset modal form state immediately
           setTargetCategoryId(null);
           setTargetNamesInput('');
+          closeInstantiateModal(); 
+
+          // Invalidate query AFTER modal close and state reset, BEFORE starting generation call
+          // This ensures the UI shows the new empty lines quickly
+          queryClient.invalidateQueries({ queryKey: ['voScriptDetail', numericScriptId] });
+
+          // Auto-trigger generation for the category if lines were added and category is known
+          if (response.lines_added_count > 0 && categoryName) {
+              console.log(`Attempting to start generation task for category '${categoryName}'...`);
+              // FIX: Call triggerGenerateCategoryBatch instead of generateCategoryBatch
+              api.triggerGenerateCategoryBatch(numericScriptId!, categoryName)
+                  .then((jobResponse) => {
+                      // Check if jobResponse and task_id exist before proceeding
+                      if (jobResponse && jobResponse.task_id) { 
+                          console.log(`Generation task submitted: Task ID ${jobResponse.task_id}`);
+                          // START POLLING by setting state
+                          setPollingCategoryName(categoryName);
+                          setPollingTaskId(jobResponse.task_id);
+                          // Update notification to indicate polling has started
+                          notifications.update({
+                              id: `instantiate-start-${variables.template_category_id}`, // Use original ID
+                              title: 'Generation Started',
+                              message: `Generating content for category "${categoryName}". Waiting for completion...`,
+                              loading: true, // Keep loading indicator
+                              color: 'blue', // Change color
+                              autoClose: false, // Keep open until polling finishes
+                          });
+                      } else {
+                          throw new Error('Backend did not return a valid task ID to poll.');
+                      }
+                  })
+                  .catch(error => {
+                      console.error('Error starting category batch generation task:', error);
+                      const errorMessage = error?.response?.data?.error || error.message || 'Failed to start generation task.';
+                      notifications.hide(`instantiate-start-${variables.template_category_id}`); // Hide initial notification
+                      notifications.show({
+                          title: 'Generation Start Error',
+                          message: errorMessage,
+                          color: 'red'
+                      });
+                  });
+          } else {
+              // No generation needed or category unknown - hide initial loading notification
+              notifications.hide(`instantiate-start-${variables.template_category_id}`);
+          }
       },
       onError: (error) => {
           notifications.show({
@@ -1068,13 +1080,88 @@ const VoScriptDetailView: React.FC = () => {
       },
   });
 
+  // --- NEW: useEffect for polling task status --- //
+  useEffect(() => {
+    // Function to clear the interval
+    const stopPolling = () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+        console.log(`Polling stopped for task: ${pollingTaskId}`);
+      }
+    };
+
+    // If we have a task ID to poll, start the interval
+    if (pollingTaskId && pollingCategoryName) {
+      console.log(`Starting polling for task: ${pollingTaskId}, category: ${pollingCategoryName}`);
+      // Clear any existing interval first
+      stopPolling(); 
+
+      pollingIntervalRef.current = setInterval(async () => {
+        console.log(`Polling status for task: ${pollingTaskId}...`);
+        try {
+          const statusResult = await api.getTaskStatus(pollingTaskId);
+          const status = statusResult.status.toUpperCase(); // Normalize status
+
+          console.log(`Task ${pollingTaskId} status: ${status}`);
+
+          // Check for terminal states
+          if (status === 'SUCCESS' || status === 'FAILURE' || status === 'REVOKED') {
+            stopPolling(); // Stop interval
+            setPollingTaskId(null); // Clear task ID from state
+            setPollingCategoryName(null); // Clear category name
+
+            // Invalidate data to show final results
+            console.log(`Polling finished for ${pollingTaskId}. Invalidating query...`);
+            queryClient.invalidateQueries({ queryKey: ['voScriptDetail', numericScriptId] });
+            
+            // Show final notification
+            const notifId = `instantiate-start-${pollingCategoryName}`; // Use category name for unique ID part
+            notifications.hide(notifId);
+            notifications.show({
+                title: status === 'SUCCESS' ? 'Generation Complete' : 'Generation Failed',
+                message: `Generation for category "${pollingCategoryName}" finished with status: ${status}. ${statusResult.info?.message || statusResult.info?.error || ''}`,
+                color: status === 'SUCCESS' ? 'green' : 'red',
+                autoClose: status === 'SUCCESS' ? 5000 : 8000,
+            });
+          } else {
+            // Update notification with progress (if available)
+            notifications.update({
+                id: `instantiate-start-${pollingCategoryName}`,
+                message: `Generating content for category "${pollingCategoryName}". Status: ${status}...`,
+                loading: true,
+            });
+          }
+        } catch (err: any) {
+          console.error(`Error polling task status for ${pollingTaskId}:`, err);
+          // Decide how to handle polling errors - stop polling and show error?
+          stopPolling();
+          setPollingTaskId(null);
+          setPollingCategoryName(null);
+           notifications.hide(`instantiate-start-${pollingCategoryName}`);
+           notifications.show({
+                title: 'Polling Error',
+                message: `Failed to get task status update: ${err.message}`,
+                color: 'red',
+            });
+        }
+      }, POLLING_INTERVAL);
+    }
+
+    // Cleanup function for when component unmounts or pollingTaskId changes
+    return () => {
+      stopPolling();
+    };
+  // Add pollingCategoryName to dependency array
+  }, [pollingTaskId, pollingCategoryName, queryClient, numericScriptId]); 
+
   // --- NEW: Handler to open Instantiate Lines Modal --- //
   const handleOpenInstantiateModal = () => {
     // Reset state when opening
     setTargetCategoryId(null);
     setTargetNamesInput('');
     setTargetLineKeyPrefix('DIRECTED_TAUNT_'); // Reset to default
-    setTargetPromptHintTemplate('Directed taunt towards {TargetName}. Directly tie in the taunt to {TargetName} and their role or lore or characteristics.'); // Reset to default
+    setTargetPromptHintTemplate('Directed taunt towards {TargetName}.'); // Reset to default
     openInstantiateModal();
   };
 

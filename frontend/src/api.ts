@@ -296,6 +296,17 @@ const generateCategoryBatch = async (scriptId: number, categoryName: string, mod
     return handleApiResponse(response);
 };
 
+// Function to TRIGGER the category batch generation TASK
+const triggerGenerateCategoryBatch = async (scriptId: number, categoryName: string, model?: string): Promise<JobSubmissionResponse> => {
+    const payload = model ? { model } : {};
+    const response = await apiClient.post<{ data: JobSubmissionResponse }>(
+        `/vo-scripts/${scriptId}/categories/${encodeURIComponent(categoryName)}/generate-batch-task`, 
+        payload
+    );
+    // Expects { data: { job_id, task_id } }
+    return handleApiResponse(response);
+};
+
 // --- Voice Design --- //
 // Define necessary types inline if not in types.ts
 interface CreateVoicePreviewPayload { 
@@ -601,6 +612,8 @@ export const api = {
     instantiateTargetLines,
     // Add the new function
     generateCategoryBatch,
+    // Add function to trigger the task
+    triggerGenerateCategoryBatch,
     // --- Add Voice Design functions --- //
     createVoicePreviews,
     saveVoiceFromPreview,
