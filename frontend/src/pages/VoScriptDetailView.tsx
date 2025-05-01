@@ -1035,11 +1035,11 @@ const VoScriptDetailView: React.FC = () => {
               api.triggerGenerateCategoryBatch(numericScriptId!, categoryName)
                   .then((jobResponse) => {
                       // Check if jobResponse and task_id exist before proceeding
-                      if (jobResponse && jobResponse.task_id) { 
-                          console.log(`Generation task submitted: Task ID ${jobResponse.task_id}`);
+                      if (jobResponse && jobResponse.taskId) { 
+                          console.log(`Generation task submitted: Task ID ${jobResponse.taskId}`);
                           // START POLLING by setting state
                           setPollingCategoryName(categoryName);
-                          setPollingTaskId(jobResponse.task_id);
+                          setPollingTaskId(jobResponse.taskId);
                           // Update notification to indicate polling has started
                           notifications.update({
                               id: `instantiate-start-${variables.template_category_id}`, // Use original ID
