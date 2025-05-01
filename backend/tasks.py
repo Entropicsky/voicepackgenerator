@@ -20,6 +20,8 @@ import os # Added for environment variables
 import logging
 from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy import case # Added for ordering
+from backend.utils_voscript import get_category_lines_context, update_line_in_db
+from backend.routes.vo_script_routes import _generate_lines_batch
 
 print("Celery Worker: Loading tasks.py...")
 
@@ -1068,37 +1070,34 @@ def generate_category_lines(self,
         from backend.utils_voscript import get_category_lines_context, update_line_in_db
         from backend.routes.vo_script_routes import _generate_lines_batch
         
-        # Get all pending lines in the category
-        lines_to_process = get_category_lines_context(db, vo_script_id, category_name)
-        
-        if not lines_to_process:
-            message = f"No lines found for category '{category_name}' in script {vo_script_id}. Nothing to generate."
-            print(f"[Task ID: {task_id}] {message}")
-            db_job.status = "SUCCESS"
-            db_job.completed_at = datetime.utcnow()
-            db_job.result_message = message
-            return {'status': 'SUCCESS', 'message': message, 'data': []}
-            
-        # Filter to only include pending lines
-        pending_lines = [line for line in lines_to_process if line.get('status') == 'pending']
+        # Fetch pending lines (current logic is likely fine)
+        pending_lines_details = utils_voscript.get_category_lines_details(db, vo_script_id, category_name, status_filter='pending')
+        pending_lines = [model_to_dict(line, keys=['line_id', 'line_key', 'prompt_hint', 'category_name', 'character_description', 'template_hint', 'current_text', 'order_index']) for line in pending_lines_details]
+
         if not pending_lines:
-            message = f"No pending lines found for category '{category_name}' in script {vo_script_id}. Nothing to generate."
-            print(f"[Task ID: {task_id}] {message}")
-            db_job.status = "SUCCESS"
-            db_job.completed_at = datetime.utcnow()
-            db_job.result_message = message
-            return {'status': 'SUCCESS', 'message': message, 'data': []}
-            
-        print(f"[Task ID: {task_id}] Found {len(pending_lines)} pending lines to generate for category '{category_name}'.")
-        
-        # Find any existing generated lines in the same category (for context and variety)
-        existing_lines = [line for line in lines_to_process if line.get('status') != 'pending' and line.get('current_text')]
-        
-        updated_lines_data = []
-        errors_occurred = False
-        
-        # If we have 10 or fewer pending lines, use batch generation approach
-        if len(pending_lines) <= 10:
+            logging.warning(f"[Task ID: {task_id}] No pending lines found for category '{category_name}'. Task completing.")
+            # Update job status to reflect completion (maybe COMPLETED_NO_WORK?)
+            try:
+                 job = db.query(models.GenerationJob).get(generation_job_db_id)
+                 if job:
+                     job.status = "SUCCESS" # Or a more specific status
+                     job.completed_at = datetime.now(timezone.utc)
+                     job.result_message = "No pending lines needed generation."
+                     db.commit()
+            except Exception as e_job:
+                 logging.error(f"[Task ID: {task_id}] Failed to update job status for no pending lines: {e_job}")
+                 db.rollback()
+            db.close()
+            return {'status': 'COMPLETED', 'message': 'No pending lines found to generate.', 'db_id': generation_job_db_id}
+
+        # --- NEW: Fetch ALL lines for context, similar to refine ---
+        all_lines_for_context = utils_voscript.get_category_lines_context(db, vo_script_id, category_name)
+        # --- END NEW ---
+
+        logging.warning(f"[Task ID: {task_id}] Found {len(pending_lines)} pending lines to generate for category '{category_name}'.")
+
+        # Determine batching strategy
+        if len(pending_lines) <= BATCH_GENERATION_THRESHOLD:
             # Batch Generation (Ideal for smaller batches)
             print(f"[Task ID: {task_id}] Processing all {len(pending_lines)} lines in a single batch.")
             self.update_state(state='PROGRESS', meta={
@@ -1106,33 +1105,40 @@ def generate_category_lines(self,
                 'progress': 50,
                 'db_id': generation_job_db_id
             })
-            updated_lines_data = _generate_lines_batch(db, vo_script_id, pending_lines, existing_lines, target_model)
+            # FIX: Pass all_lines_for_context as the existing_lines argument
+            updated_lines_data = _generate_lines_batch(db, vo_script_id, pending_lines, all_lines_for_context, target_model)
         else:
             # Split into smaller batches (For larger sets)
-            print(f"[Task ID: {task_id}] Large batch of {len(pending_lines)} lines detected. Splitting into smaller batches.")
+            # ... (logging and state update) ...
+            all_updated_lines = []
+            total_lines = len(pending_lines)
+            processed_count = 0
             
-            # Process in batches of 8 lines
-            batch_size = 8
-            for i in range(0, len(pending_lines), batch_size):
-                batch = pending_lines[i:i+batch_size]
-                batch_existing = existing_lines + updated_lines_data  # Include already generated lines as context
-                
-                print(f"[Task ID: {task_id}] Processing batch {i//batch_size + 1} with {len(batch)} lines")
+            for i in range(0, total_lines, SMALL_BATCH_SIZE):
+                batch_pending = pending_lines[i:min(i + SMALL_BATCH_SIZE, total_lines)]
+                batch_start_index = i + 1
+                batch_end_index = i + len(batch_pending)
+                logging.info(f"[Task ID: {task_id}] Processing small batch {batch_start_index}-{batch_end_index} of {total_lines}...")
                 self.update_state(state='PROGRESS', meta={
-                    'status': f'Processing batch {i//batch_size + 1} of {(len(pending_lines) + batch_size - 1) // batch_size}',
-                    'progress': int(100 * (i + batch_size) / len(pending_lines)),
+                    'status': f'Generating lines {batch_start_index}-{batch_end_index} of {total_lines}',
+                    'progress': int(50 + (processed_count / total_lines) * 50), # Rough progress update
                     'db_id': generation_job_db_id
                 })
                 
-                batch_results = _generate_lines_batch(db, vo_script_id, batch, batch_existing, target_model)
+                # FIX: Pass all_lines_for_context as the existing_lines argument
+                batch_results = _generate_lines_batch(db, vo_script_id, batch_pending, all_lines_for_context, target_model)
+                all_updated_lines.extend(batch_results)
+                processed_count += len(batch_pending)
                 
-                if batch_results:
-                    updated_lines_data.extend(batch_results)
-                    # Update existing_lines for next iteration
-                    existing_lines = [line for line in existing_lines if line.get('line_id') not in [l.get('id') for l in batch_results]]
-                else:
-                    errors_occurred = True
-        
+                # Optional: Add a small delay between batches if needed
+                # time.sleep(1) 
+                
+            updated_lines_data = all_updated_lines
+            logging.info(f"[Task ID: {task_id}] Finished processing all small batches.")
+
+        # Update the database with the generated text
+        # ... (rest of the task - updating DB lines) ...
+
         # 3. Update Job Status
         if errors_occurred:
             final_status = "COMPLETED_WITH_ERRORS"
