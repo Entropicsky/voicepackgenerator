@@ -1113,7 +1113,9 @@ const VoScriptDetailView: React.FC = () => {
 
             // Invalidate data to show final results
             console.log(`Polling finished for ${pollingTaskId}. Invalidating query...`);
-            queryClient.invalidateQueries({ queryKey: ['voScriptDetail', numericScriptId] });
+            // Use refetchQueries for a more direct refetch trigger
+            // queryClient.invalidateQueries({ queryKey: ['voScriptDetail', numericScriptId] });
+            queryClient.refetchQueries({ queryKey: ['voScriptDetail', numericScriptId], exact: true });
             
             // Show final notification
             const notifId = `instantiate-start-${pollingCategoryName}`; // Use category name for unique ID part
