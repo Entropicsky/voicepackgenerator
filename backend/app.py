@@ -430,31 +430,49 @@ def get_task_status(task_id):
         # Use the celery instance imported from the module
         task_result = AsyncResult(task_id, app=celery)
 
+        # Use .state which is safer than .status for just getting the status string
+        current_status = task_result.state 
+
         response_data = {
             'task_id': task_id,
-            'status': task_result.status, # PENDING, STARTED, SUCCESS, FAILURE, RETRY, REVOKED
+            'status': current_status, 
             'info': None
         }
 
-        if task_result.status == 'PENDING':
-            response_data['info'] = {'status': 'Task is waiting to be processed.'}
-        elif task_result.status == 'FAILURE':
-            # task_result.info should contain the exception
-            response_data['info'] = {'error': str(task_result.info), 'traceback': task_result.traceback}
-            # Return 200 OK, but indicate failure in the payload
-        elif task_result.status == 'SUCCESS':
-            # task_result.info should contain the return value of the task
-            response_data['info'] = task_result.info
-        else:
-            # For STARTED, RETRY, or custom states, info might be a dict (e.g., progress)
-            if isinstance(task_result.info, dict):
-                response_data['info'] = task_result.info
+        # Safely try to get task info, handling potential decoding errors
+        task_info = None
+        try:
+            # Accessing .info can trigger the backend decoding
+            task_info = task_result.info 
+        except ValueError as decode_error:
+            # Handle the specific error we saw in the logs
+            logging.warning(f"Could not decode task result info for {task_id} (status: {current_status}): {decode_error}. Setting info to error message.")
+            response_data['info'] = {'error': f'Failed to decode task result: {decode_error}', 'traceback': None}
+        except Exception as e:
+            # Catch other potential errors during info access
+            logging.error(f"Unexpected error accessing task info for {task_id} (status: {current_status}): {e}")
+            response_data['info'] = {'error': f'Error accessing task info: {e}', 'traceback': None}
+            
+        # If info was successfully retrieved or error handled above, process based on status
+        if response_data['info'] is None: # Only proceed if info wasn't set to an error
+            if current_status == 'PENDING':
+                response_data['info'] = {'status': 'Task is waiting to be processed.'}
+            elif current_status == 'FAILURE':
+                # If it failed but we could get info, format it
+                response_data['info'] = {'error': str(task_info), 'traceback': getattr(task_result, 'traceback', None)}
+            elif current_status == 'SUCCESS':
+                response_data['info'] = task_info # Assign the actual result
             else:
-                response_data['info'] = {'status': str(task_result.info)}
+                # For STARTED, RETRY, or custom states
+                if isinstance(task_info, dict):
+                    response_data['info'] = task_info
+                else:
+                    response_data['info'] = {'status': str(task_info)}
 
         return make_api_response(data=response_data)
 
     except Exception as e:
+        # Catch errors in the overall endpoint logic (e.g., creating AsyncResult)
         logging.exception(f"Error checking task status for {task_id}: {e}")
         return make_api_response(error="Failed to retrieve task status", status_code=500)
 # --- End Task Status Endpoint --- #
