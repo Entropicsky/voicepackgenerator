@@ -3,6 +3,8 @@ from .celery_app import celery
 from backend import models
 from backend import utils_elevenlabs
 from backend import utils_r2
+from . import utils_openai
+from . import utils_voscript
 from sqlalchemy.orm import Session
 import time
 import json
