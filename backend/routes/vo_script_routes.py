@@ -1663,211 +1663,273 @@ def generate_category_lines_batch(script_id: int, category_name: str):
         if db and db.is_active:
             db.close()
 
-def _generate_lines_batch(db: Session, script_id: int, pending_lines: list, existing_lines: list, target_model: str) -> list:
+# --- Helper for Batch Generation --- #
+# @limits.limit("10 per minute") # Rate limit if needed
+# @retry(stop=stop_after_attempt(3), wait=wait_fixed(2)) # Retry logic if needed
+def _generate_lines_batch(db: Session, script_id: int, pending_lines: list, existing_lines: list | None, target_model: str) -> list:
     """Helper function to generate multiple lines in a batch with variety.
-    
+       Fetches its own limited context based on order_index of pending_lines.
+
     Args:
-        db: Database session
-        script_id: Script ID
-        pending_lines: List of line contexts needing generation
-        existing_lines: List of already generated line contexts for reference
-        target_model: OpenAI model to use
-        
+        db: Database session.
+        script_id: Parent VO Script ID.
+        pending_lines: List of line context dicts for lines needing generation in this batch.
+        existing_lines: (No longer used effectively - kept for signature compatibility but ignored)
+        target_model: OpenAI model name.
+
     Returns:
-        List of updated line data dictionaries
+        List of updated line context dicts with 'generated_text'.
     """
-    from backend.app import model_to_dict
-    updated_lines = []
-    
+    logging.info(f"_generate_lines_batch called for script {script_id} with {len(pending_lines)} pending lines. Model: {target_model}")
     if not pending_lines:
         return []
-        
-    try:
-        # Skip lines already with text but include special handling for directed taunt lines
-        lines_to_generate = []
-        for line in pending_lines:
-            line_id = line.get('line_id')
-            line_key = line.get('line_key', '')
-            current_text = line.get('current_text', '')
-            
-            # Special handling for directed taunt lines
-            if line_key.startswith('DIRECTED_TAUNT_') and not line.get('is_locked', False):
-                logging.info(f"Including directed taunt line {line_id} (key: {line_key}) for generation")
-                lines_to_generate.append(line)
-                continue
-                
-            # Skip if already has text (except for directed taunts)
-            if current_text:
-                logging.info(f"Skipping line {line_id} (key: {line_key}) that already has text: '{current_text[:50]}'")
-                # Include in updated_lines anyway
-                line_obj = db.query(models.VoScriptLine).get(line_id)
-                if line_obj:
-                    updated_lines.append(model_to_dict(line_obj))
-            else:
-                logging.info(f"Including line {line_id} (key: {line_key}) for generation (empty text)")
-                lines_to_generate.append(line)
-                
-        # If all lines already have text, return what we have
-        if not lines_to_generate:
-            logging.info(f"All lines in batch already have text, skipping batch generation")
-            return updated_lines
-            
-        # Continue with generation for remaining lines
-        pending_lines = lines_to_generate
-        
-        # 1. Get common context from first line (should be same for all lines in category)
-        char_desc = pending_lines[0].get('character_description', 'N/A')
-        template_hint = pending_lines[0].get('template_hint', 'N/A')
-        category_name = pending_lines[0].get('category_name', 'N/A')
-        
-        # --- FIX: Explicitly fetch category instructions --- 
-        category_instructions = "N/A" # Default
-        parent_script_template_id = None
-        # Get template ID from the script associated with the first line
-        first_line_id = pending_lines[0].get('line_id')
-        if first_line_id:
-             first_line_obj = db.query(models.VoScriptLine).options(joinedload(models.VoScriptLine.vo_script)).get(first_line_id)
-             if first_line_obj and first_line_obj.vo_script:
-                 parent_script_template_id = first_line_obj.vo_script.template_id
-        
-        if parent_script_template_id and category_name != "Uncategorized":
-             category = db.query(models.VoScriptTemplateCategory).filter(
-                 models.VoScriptTemplateCategory.template_id == parent_script_template_id,
-                 models.VoScriptTemplateCategory.name == category_name
-             ).first()
-             if category and category.prompt_instructions:
-                 category_instructions = category.prompt_instructions
-                 logging.info(f"Using category instructions for '{category_name}' from DB.")
-             else:
-                 logging.warning(f"Could not find category instructions for '{category_name}' in DB, using default.")
+
+    # Ensure we have a valid model - use default if none provided
+    if not target_model:
+        target_model = utils_openai.DEFAULT_GENERATION_MODEL
+        logging.info(f"No target model specified, using default model: {target_model}")
+    
+    # Use 'client' directly from utils_openai
+    openai_client = utils_openai.client
+    updated_lines = [] # Store results {line_id: id, generated_text: text}
+    
+    # Ensure we only process lines that are actually pending or empty
+    lines_to_generate = []
+    for line in pending_lines:
+        # Check if text is missing OR status is pending (even if text exists, e.g., from previous failed attempt)
+        if not line.get('current_text') or line.get('status') == 'pending':
+            lines_to_generate.append(line)
         else:
-             logging.warning(f"Could not determine template ID or category name ('{category_name}') to fetch instructions, using default.")
-        # --- END FIX --- 
-        
-        # 2. Build the batch prompt
-        prompt_parts = [
-            f"You are a creative writer for video game voiceovers.",
-            f"Character Description:\n{char_desc}\n",
-            f"Template Hint: {template_hint}",
-            f"Category: {category_name}",
-            f"Category Instructions: {category_instructions}\n"
-        ]
-        
-        # Add existing lines for context
-        if existing_lines:
-            prompt_parts.append("\n--- Existing Lines in This Category (For Context) ---")
-            for line in existing_lines:
-                key = line.get('line_key') or f"line_{line.get('line_id')}"
-                text = line.get('current_text', '')
-                if text:
-                    prompt_parts.append(f"- {key}: \"{text}\"")
-        
-        # Add variety requirements
-        prompt_parts.append("\n--- IMPORTANT: VARIETY REQUIREMENTS ---")
-        prompt_parts.append("Your task is to write NEW, VARIED lines that are DISTINCTLY DIFFERENT from each other and from existing lines.")
-        prompt_parts.append("Requirements:")
-        prompt_parts.append("1. Each new line must have a UNIQUE sentence structure")
-        prompt_parts.append("2. DO NOT repeat phrases, jokes, or puns across lines")
-        prompt_parts.append("3. VARY the opening words/phrases for each line (e.g., don't start multiple lines with 'Get ready' or similar patterns)")
-        prompt_parts.append("4. Each line should use DIFFERENT vocabulary and expressions")
-        prompt_parts.append("5. VARY the emotional tone or attitude across lines (mix of boastful, mysterious, excited, aggressive, etc.)")
-        prompt_parts.append("6. If thematic elements are used (like food references), DISTRIBUTE different themes across lines")
-        prompt_parts.append("7. Each line must stand as its own UNIQUE expression of the character's personality")
-        
-        # List the lines that need generation
-        prompt_parts.append("\n--- LINES TO GENERATE ---")
-        for i, line in enumerate(pending_lines):
-            key = line.get('line_key') or f"line_{line.get('line_id')}"
+            # If line somehow got here but already has text and isn't pending,
+            # add it to updated_lines as is, so it's included in the return count
+            updated_lines.append({
+                "line_id": line.get('line_id'),
+                "generated_text": line.get('current_text')
+            })
+            logging.info(f"Skipping line ID {line.get('line_id')} in batch generation as it already has text and status is not pending.")
             
-            # Special handling for directed taunt lines
-            if key.startswith('DIRECTED_TAUNT_'):
-                # Extract the target name from the key
-                target_name = key.replace('DIRECTED_TAUNT_', '')
-                hint = line.get('prompt_hint') or f"Write a taunt directed at {target_name}"
-                prompt_parts.append(f"{i+1}. {key}: \"{hint}\"")
-            else:
-                hint = line.get('line_template_hint', '')
-                prompt_parts.append(f"{i+1}. {key}: \"{hint}\"")
-        
-        # Final generation instructions
-        prompt_parts.append("\n--- GENERATION TASK ---")
-        prompt_parts.append(f"Generate {len(pending_lines)} UNIQUELY DISTINCT voiceover lines based on the information above.")
-        prompt_parts.append("Format your response as a numbered list matching the numbering of the LINES TO GENERATE section.")
-        prompt_parts.append("For each line, output ONLY the line text without explanation, quotation marks, or preamble.")
-        prompt_parts.append("Example format:")
-        prompt_parts.append("1. [First line text]")
-        prompt_parts.append("2. [Second line text]")
-        
-        openai_prompt = "\n".join(prompt_parts)
-        logging.info(f"Sending batch generation prompt to OpenAI for {len(pending_lines)} lines in category '{category_name}'.")
-        logging.debug(f"Prompt start: {openai_prompt[:200]}...")
-        
-        # 3. Call OpenAI to generate the batch
-        batch_result = utils_openai.call_openai_responses_api(
-            prompt=openai_prompt,
-            model=target_model
-        )
-        
-        if batch_result is None:
-            logging.error(f"OpenAI batch generation failed for category '{category_name}'")
-            return []
-        
-        # 4. Parse the results 
-        # First, split into lines and clean up
-        result_lines = batch_result.strip().split('\n')
-        
-        # Filter out any non-response lines (might contain explanations despite instructions)
-        parsed_lines = []
-        for line in result_lines:
-            line = line.strip()
-            if not line:
-                continue
-                
-            # Look for numbered line pattern (e.g., "1. Line text here")
-            import re
-            match = re.match(r'^\d+\.\s+(.+)$', line)
-            if match:
-                parsed_lines.append(match.group(1))
-            else:
-                # If not in expected format but looks like line content, use it anyway
-                if not line.startswith('---') and not line.startswith('#') and len(line) > 5:
-                    parsed_lines.append(line)
-        
-        # Check if we have enough lines
-        if len(parsed_lines) < len(pending_lines):
-            logging.warning(f"Expected {len(pending_lines)} lines but only parsed {len(parsed_lines)}. Will use what we have.")
-            
-        # 5. Update each line in the database
-        for i, line_context in enumerate(pending_lines):
-            if i >= len(parsed_lines):
-                logging.warning(f"Not enough generated lines for all pending lines. Missing line {i+1}.")
-                continue
-                
-            line_id = line_context.get('line_id')
-            generated_text = parsed_lines[i]
-            
-            logging.info(f"Updating line {line_id} with generated text: '{generated_text[:50]}...'")
-            
-            # Update with generated text
-            updated_line = utils_voscript.update_line_in_db(
-                db, 
-                line_id, 
-                generated_text, 
-                "generated", 
-                target_model
-            )
-            
-            if updated_line:
-                updated_lines.append(model_to_dict(updated_line))
-                logging.info(f"Successfully updated line {line_id}")
-            else:
-                logging.error(f"Failed to update line {line_id}")
-        
+    # If all lines already have text, return what we have
+    if not lines_to_generate:
+        logging.info(f"All lines in batch already have text, skipping batch generation")
         return updated_lines
         
+    # Continue with generation for remaining lines
+    pending_lines = lines_to_generate # Overwrite with only the lines needing generation
+    
+    # 1. Get common context from first line (should be same for all lines in category)
+    first_pending_line = pending_lines[0]
+    char_desc = first_pending_line.get('character_description', 'N/A')
+    template_hint = first_pending_line.get('template_hint', 'N/A')
+    category_name = first_pending_line.get('category_name', 'N/A')
+    first_line_id = first_pending_line.get('line_id') # Needed for category instruction lookup
+    
+    # --- Fetch category instructions --- 
+    category_instructions = "N/A" # Default
+    parent_script_template_id = None
+    # Get template ID from the script associated with the first line
+    if first_line_id:
+         first_line_obj = db.query(models.VoScriptLine).options(joinedload(models.VoScriptLine.vo_script)).get(first_line_id)
+         if first_line_obj and first_line_obj.vo_script:
+             parent_script_template_id = first_line_obj.vo_script.template_id
+    
+    if parent_script_template_id and category_name != "Uncategorized":
+         category = db.query(models.VoScriptTemplateCategory).filter(
+             models.VoScriptTemplateCategory.template_id == parent_script_template_id,
+             models.VoScriptTemplateCategory.name == category_name
+         ).first()
+         if category and category.prompt_instructions:
+             category_instructions = category.prompt_instructions
+             logging.info(f"Using category instructions for '{category_name}' from DB.")
+         else:
+             logging.warning(f"Could not find category instructions for '{category_name}' in DB, using default.")
+    else:
+         logging.warning(f"Could not determine template ID or category name ('{category_name}') to fetch instructions, using default.")
+
+    # --- NEW: Fetch Limited Context (Nearby Lines) ---
+    context_lines = []
+    context_lines_count = 5 # Fetch 5 before and 5 after
+    try:
+        # Get order indices of the current batch
+        batch_order_indices = sorted([l.get('order_index') for l in pending_lines if l.get('order_index') is not None])
+        
+        if batch_order_indices:
+            min_order = batch_order_indices[0]
+            max_order = batch_order_indices[-1]
+            category_id = first_pending_line.get('category_id') # Get category ID from first line
+
+            if category_id:
+                # Fetch preceding lines
+                preceding_lines_q = db.query(
+                        models.VoScriptLine.line_key, 
+                        models.VoScriptLine.generated_text, 
+                        models.VoScriptTemplateLine.order_index
+                    ).join(
+                        models.VoScriptLine.template_line
+                    ).filter(
+                        models.VoScriptLine.vo_script_id == script_id,
+                        models.VoScriptLine.category_id == category_id,
+                        models.VoScriptTemplateLine.order_index < min_order,
+                        models.VoScriptLine.generated_text.isnot(None),
+                        models.VoScriptLine.generated_text != ''
+                    ).order_by(
+                        models.VoScriptTemplateLine.order_index.desc()
+                    ).limit(context_lines_count)
+
+                # Fetch succeeding lines
+                succeeding_lines_q = db.query(
+                        models.VoScriptLine.line_key, 
+                        models.VoScriptLine.generated_text, 
+                        models.VoScriptTemplateLine.order_index
+                    ).join(
+                        models.VoScriptLine.template_line
+                    ).filter(
+                        models.VoScriptLine.vo_script_id == script_id,
+                        models.VoScriptLine.category_id == category_id,
+                        models.VoScriptTemplateLine.order_index > max_order,
+                        models.VoScriptLine.generated_text.isnot(None),
+                        models.VoScriptLine.generated_text != ''
+                    ).order_by(
+                        models.VoScriptTemplateLine.order_index.asc()
+                    ).limit(context_lines_count)
+                
+                context_lines_db = preceding_lines_q.all() + succeeding_lines_q.all()
+                
+                # Convert to dictionary format expected by prompt builder
+                context_lines = [
+                    {'line_key': l.line_key, 'current_text': l.generated_text} 
+                    for l in context_lines_db if l.generated_text # Ensure text exists
+                ]
+                logging.info(f"Fetched {len(context_lines)} nearby lines for context.")
+            else:
+                 logging.warning(f"Could not determine category_id for context fetching.")
+        else:
+            logging.warning("No valid order_index found in batch, cannot fetch context lines.")
+    except Exception as context_exc:
+        logging.error(f"Error fetching context lines: {context_exc}")
+    # --- END NEW CONTEXT FETCH ---
+
+    # 2. Build the batch prompt
+    prompt_parts = [
+        f"You are a creative writer for video game voiceovers.",
+        f"Character Description:\\n{char_desc}\\n",
+        f"Template Hint: {template_hint}",
+        f"Category: {category_name}",
+        f"Category Instructions: {category_instructions}\\n"
+    ]
+    
+    # Add existing lines for context (use the limited context_lines now)
+    if context_lines:
+        prompt_parts.append("\n--- Nearby Lines in This Category (For Context) ---")
+        for line in context_lines:
+            # Use line_key directly from the query result
+            key = line.get('line_key') or f"unknown_line" # Fallback needed? Query includes key.
+            text = line.get('current_text', '')
+            if key and text: # Ensure both key and text exist
+                prompt_parts.append(f'- {key}: "{text}"') # Use single quotes for f-string
+    
+    # Add variety requirements
+    prompt_parts.append("\n--- IMPORTANT: VARIETY REQUIREMENTS ---")
+    prompt_parts.append("Your task is to write NEW, VARIED lines that are DISTINCTLY DIFFERENT from each other and from the nearby context lines.")
+    prompt_parts.append("Requirements:")
+    prompt_parts.append("- Ensure each generated line is unique.")
+    prompt_parts.append("- Avoid repetition in phrasing, sentence structure, and core ideas compared to context lines AND other lines in this batch.")
+    prompt_parts.append("- Maintain the character's voice and tone.")
+    prompt_parts.append("- Fulfill the specific request/hint for each line key.")
+
+    prompt_parts.append("\n--- Lines to Generate (Provide JSON output) ---")
+    prompt_parts.append("Generate text for the following line keys. Provide ONLY a valid JSON object where keys are the line keys and values are the generated text strings:")
+
+    # Add lines to be generated with their hints
+    lines_to_request_json = {}
+    for line in pending_lines:
+        key = line.get('line_key') # Use the key directly from context
+        if not key: key = f"line_{line.get('line_id')}" # Fallback if key missing
+        hint = line.get('prompt_hint', line.get('template_prompt_hint', 'Generate appropriate text.'))
+        lines_to_request_json[key] = hint
+        # Also add to prompt for clarity for the LLM
+        prompt_parts.append(f"- {key}: (Hint: {hint})")
+        
+    prompt_parts.append("\nJSON Output:") # Cue for the LLM
+
+    full_prompt = "\n".join(prompt_parts)
+    # logging.debug(f"Full Batch Prompt:\n{full_prompt}") # DEBUG: Careful logging large prompts
+
+    try:
+        logging.info(f"Sending batch generation request to OpenAI model {target_model} for {len(pending_lines)} lines.")
+        
+        # Log the pending lines and their keys for debugging
+        logging.info(f"Pending lines data: {[{'id': l.get('id', l.get('line_id')), 'line_key': l.get('line_key')} for l in pending_lines]}")
+        
+        response = utils_openai.client.chat.completions.create(
+            model=target_model,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant providing JSON output."},
+                {"role": "user", "content": full_prompt}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.8, # Increase variety slightly?
+            # max_tokens=?? # Set appropriate limit if needed
+        )
+        
+        generated_json_str = response.choices[0].message.content
+        logging.info(f"Received response from OpenAI.")
+        # logging.debug(f"Generated JSON String: {generated_json_str}") # DEBUG
+        
+        generated_data = json.loads(generated_json_str)
+        
+        # Log the JSON keys received from OpenAI
+        logging.info(f"Keys received from OpenAI: {list(generated_data.keys())}")
+        
+        # Map results back to line IDs
+        key_to_id_map = {}
+        for l in pending_lines:
+            # Get the line ID (could be in 'id' or 'line_id' field)
+            line_id = l.get('line_id')
+            if line_id is None:
+                line_id = l.get('id')  # Try alternate field name
+            
+            # Get the line key (with fallback to line_{id})
+            line_key = l.get('line_key')
+            if not line_key and line_id is not None:
+                line_key = f"line_{line_id}"
+                
+            # Only add to map if we have both key and id
+            if line_key and line_id is not None:
+                key_to_id_map[line_key] = line_id
+            else:
+                logging.warning(f"Could not create key mapping for line: {l} - missing key or ID")
+        
+        # Log the mapping dictionary for debugging
+        logging.info(f"key_to_id_map: {key_to_id_map}")
+        
+        generated_count = 0
+        for key, text in generated_data.items():
+            line_id = key_to_id_map.get(key)
+            if line_id and isinstance(text, str) and text.strip():
+                updated_lines.append({
+                    "line_id": line_id,  # Consistently use line_id as the field name
+                    "generated_text": text.strip()
+                })
+                generated_count += 1
+                logging.info(f"Successfully mapped key '{key}' to line ID {line_id}")
+            else:
+                 logging.warning(f"Could not map generated key '{key}' back to line ID or received invalid text. Valid keys: {list(key_to_id_map.keys())}")
+                 
+        logging.info(f"Successfully processed response, generated text for {generated_count}/{len(pending_lines)} requested lines.")
+
+    except json.JSONDecodeError as json_err:
+        logging.error(f"Failed to parse JSON response from OpenAI: {json_err}")
+        logging.error(f"Received content: {generated_json_str[:500]}...") # Log beginning of invalid response
+        # How to handle? Return empty? Raise error?
+        # For now, return whatever was processed before error + any lines skipped initially
+        # Task logic needs to handle potential partial success/failure.
+        raise Exception(f"Failed to parse OpenAI JSON response: {json_err}") from json_err
     except Exception as e:
-        logging.exception(f"Error in _generate_lines_batch: {e}")
-        return []
+        logging.exception(f"Error during OpenAI call in _generate_lines_batch: {e}")
+        # Re-raise to be caught by the task
+        raise Exception(f"OpenAI API call failed: {e}") from e
+
+    return updated_lines
 
 # Add a new button in "Generate Draft" menu to generate lines by category
 

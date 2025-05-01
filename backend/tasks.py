@@ -516,22 +516,22 @@ def regenerate_line_takes(self,
                     content_type='audio/mpeg'
                 )
                 if not upload_success: raise Exception(f"Failed to upload {r2_blob_key} to R2.")
+                print(f"[...] Successfully uploaded STS audio to {r2_blob_key}")
 
                 # Add metadata for the new take
                 new_take_meta = {
                     "file": output_filename,
                     "r2_key": r2_blob_key,
                     "line": line_key,
-                    "script_text": line_text,
+                    "script_text": "[STS]", # Indicate generated via STS
                     "take_number": take_num,
                     "generation_settings": take_settings,
-                    "rank": None,
-                    "ranked_at": None
+                    "rank": None, "ranked_at": None
                 }
                 new_metadata_takes.append(new_take_meta)
                 newly_generated_takes_meta.append(new_take_meta)
             except Exception as e:
-                print(f"[Task ID: {task_id}] ERROR generating/uploading take {r2_blob_key} for line regen: {e}")
+                print(f"[Task ID: {task_id}] ERROR generating/uploading take {r2_blob_key}: {e}")
                 failures += 1
 
         # --- Upload Updated Metadata to R2 (Overwrite) --- 
@@ -1044,149 +1044,281 @@ def generate_category_lines(self,
     print(f"  Category Name: {category_name}")
     print(f"  Target Model: {target_model or 'Default Model'}")
     
-    db: Session = next(models.get_db())
+    db = None
     db_job = None
+    result = {
+        "status": "FAILED",
+        "message": "Task not processed",
+        "updated_lines": [],
+        "errors": []
+    }
+    
     try:
-        # --- 1. Update Job Status to STARTED --- 
-        db_job = db.query(models.GenerationJob).filter(models.GenerationJob.id == generation_job_db_id).first()
+        db = next(models.get_db())
+        db_job = db.query(models.GenerationJob).get(generation_job_db_id)
+        
         if not db_job:
-            raise Ignore("GenerationJob record not found.")
+            print(f"[Task ID: {task_id}] ERROR: Could not find GenerationJob with ID {generation_job_db_id}")
+            result["message"] = f"Job record not found: {generation_job_db_id}"
+            return result
         
-        db_job.status = "STARTED"
-        db_job.started_at = datetime.utcnow()
-        db_job.celery_task_id = task_id
-        
-        # Store parameters in job
-        job_params = {}
-        try: 
-            job_params = json.loads(db_job.parameters_json) if db_job.parameters_json else {}
-        except json.JSONDecodeError:
-             logging.warning(f"[Task ID: {task_id}] Could not parse existing job parameters JSON.")
-
-        job_params['task_type'] = 'generate_category'
-        job_params['category_name'] = category_name
-        if target_model:
-            job_params['model'] = target_model
-             
-        db_job.parameters_json = json.dumps(job_params)
+        # Update job status to PROCESSING
+        db_job.status = "PROCESSING"
+        db_job.started_at = datetime.now()
         db.commit()
-        self.update_state(state='STARTED', meta={'status': f'Category batch generation started (Category: {category_name})', 'db_id': generation_job_db_id})
+        db.refresh(db_job)
         
-        # --- 2. Call our batch generation function --- 
-        # Import needed utilities here to avoid circular imports
-        from backend.utils_voscript import get_category_lines_context, update_line_in_db
+        # Get the VO Script to verify it exists
+        vo_script = db.query(models.VoScript).get(vo_script_id)
+        if not vo_script:
+            print(f"[Task ID: {task_id}] ERROR: VO Script with ID {vo_script_id} not found")
+            db_job.status = "FAILED"
+            db_job.completed_at = datetime.now()
+            db_job.result_message = f"VO Script with ID {vo_script_id} not found"
+            db.commit()
+            result["message"] = f"VO Script not found: {vo_script_id}"
+            return result
+            
+        print(f"[Task ID: {task_id}] Working with VO Script: {vo_script.name} (ID: {vo_script_id})")
+        
+        # Find pending lines for this script that belong to the specified category
+        # First, find the category ID based on the name
+        print(f"[Task ID: {task_id}] Finding pending lines for category '{category_name}' in script {vo_script_id}")
+        
+        # Get template category ID from VoScriptTemplateCategory
+        template_category = db.query(models.VoScriptTemplateCategory).filter(
+            models.VoScriptTemplateCategory.name == category_name
+        ).first()
+        
+        if not template_category:
+            # Try another approach - get directly from a line that has this category (using template_line relationship)
+            print(f"[Task ID: {task_id}] WARNING: Could not find template category '{category_name}' directly")
+            
+            # Query all lines and check their category through relationships
+            all_category_lines = []
+            all_lines = db.query(models.VoScriptLine).filter(
+                models.VoScriptLine.vo_script_id == vo_script_id
+            ).all()
+            
+            category_id = None
+            for line in all_lines:
+                if hasattr(line, 'template_line') and line.template_line:
+                    if hasattr(line.template_line, 'category') and line.template_line.category:
+                        if line.template_line.category.name == category_name:
+                            category_id = line.template_line.category.id
+                            break
+            
+            if category_id is None:
+                print(f"[Task ID: {task_id}] ERROR: Could not find any lines with category '{category_name}'")
+                db_job.status = "FAILED"
+                db_job.completed_at = datetime.now()
+                db_job.result_message = f"Could not find any lines with category '{category_name}'"
+                db.commit()
+                result["message"] = f"Category not found: {category_name}"
+                return result
+                
+            # Now filter by the found category_id
+            print(f"[Task ID: {task_id}] Found category ID {category_id} for '{category_name}' from existing lines")
+            pending_lines = db.query(models.VoScriptLine).filter(
+                models.VoScriptLine.vo_script_id == vo_script_id,
+                models.VoScriptLine.category_id == category_id,
+                models.VoScriptLine.status == "pending"
+            ).order_by(models.VoScriptLine.order_index).all()
+        else:
+            # We found the category directly
+            category_id = template_category.id
+            print(f"[Task ID: {task_id}] Found category ID {category_id} for '{category_name}'")
+            
+            # Get all pending lines with this category ID
+            pending_lines = db.query(models.VoScriptLine).filter(
+                models.VoScriptLine.vo_script_id == vo_script_id,
+                models.VoScriptLine.category_id == category_id,
+                models.VoScriptLine.status == "pending"
+            ).order_by(models.VoScriptLine.order_index).all()
+        
+        if not pending_lines:
+            print(f"[Task ID: {task_id}] No pending lines found for category '{category_name}' in script {vo_script_id}")
+            db_job.status = "SUCCESS"
+            db_job.completed_at = datetime.now()
+            db_job.result_message = "No pending lines found for generation"
+            db.commit()
+            result["status"] = "SUCCESS"
+            result["message"] = "No pending lines to process"
+            return result
+        
+        # Prepare the line contexts for batch generation
+        line_contexts = []
+        for line in pending_lines:
+            line_contexts.append({
+                "id": line.id,
+                "line_key": line.line_key, 
+                "order_index": line.order_index,
+                "context": line.prompt_hint or "No additional context provided"
+            })
+            logging.info(f"Added line to contexts: id={line.id}, key={line.line_key}, status={line.status}")
+        
+        # Get model-related settings
+        # Use target_model if provided, else use default from env
+        model_to_use = target_model or os.getenv("OPENAI_MODEL", "gpt-4o")
+        print(f"[Task ID: {task_id}] Using model: {model_to_use}")
+        
+        # Call the batch generation function from vo_script_routes
         from backend.routes.vo_script_routes import _generate_lines_batch
         
-        # Fetch pending lines (current logic is likely fine)
-        pending_lines_context = utils_voscript.get_category_lines_context(db, vo_script_id, category_name) 
+        # Existing lines not needed with context-based implementation
+        existing_lines = None
         
-        # Filter the context list to find pending lines
-        pending_lines = [
-            line for line in pending_lines_context 
-            if line.get('status') == 'pending'
-        ] 
-        # pending_lines_details = utils_voscript.get_category_lines_details(db, vo_script_id, category_name, status_filter='pending')
-        # pending_lines = [model_to_dict(line, keys=['line_id', 'line_key', 'prompt_hint', 'category_name', 'character_description', 'template_hint', 'current_text', 'order_index']) for line in pending_lines_details]
-
-        if not pending_lines:
-            logging.warning(f"[Task ID: {task_id}] No pending lines found for category '{category_name}'. Task completing.")
-            # Update job status to reflect completion (maybe COMPLETED_NO_WORK?)
-            try:
-                 job = db.query(models.GenerationJob).get(generation_job_db_id)
-                 if job:
-                     job.status = "SUCCESS" # Or a more specific status
-                     job.completed_at = datetime.now(timezone.utc)
-                     job.result_message = "No pending lines needed generation."
-                     db.commit()
-            except Exception as e_job:
-                 logging.error(f"[Task ID: {task_id}] Failed to update job status for no pending lines: {e_job}")
-                 db.rollback()
-            db.close()
-            return {'status': 'COMPLETED', 'message': 'No pending lines found to generate.', 'db_id': generation_job_db_id}
-
-        # Use the already fetched context for the ALL lines context
-        all_lines_for_context = pending_lines_context # Already fetched above
-        # --- NEW: Fetch ALL lines for context, similar to refine ---
-        # all_lines_for_context = utils_voscript.get_category_lines_context(db, vo_script_id, category_name)
-        # --- END NEW ---
-
-        logging.warning(f"[Task ID: {task_id}] Found {len(pending_lines)} pending lines to generate for category '{category_name}'.")
-
-        # Determine batching strategy
-        if len(pending_lines) <= BATCH_GENERATION_THRESHOLD:
-            # Batch Generation (Ideal for smaller batches)
-            print(f"[Task ID: {task_id}] Processing all {len(pending_lines)} lines in a single batch.")
-            self.update_state(state='PROGRESS', meta={
-                'status': f'Generating {len(pending_lines)} lines in batch',
-                'progress': 50,
-                'db_id': generation_job_db_id
-            })
-            # FIX: Pass all_lines_for_context as the existing_lines argument
-            updated_lines_data = _generate_lines_batch(db, vo_script_id, pending_lines, all_lines_for_context, target_model)
-        else:
-            # Split into smaller batches (For larger sets)
-            # ... (logging and state update) ...
-            all_updated_lines = []
-            total_lines = len(pending_lines)
-            processed_count = 0
+        try:
+            print(f"[Task ID: {task_id}] Calling batch generation for {len(line_contexts)} lines")
+            generated_batch = _generate_lines_batch(
+                db=db,
+                script_id=vo_script_id, 
+                pending_lines=line_contexts,
+                existing_lines=existing_lines,
+                target_model=model_to_use
+            )
             
-            for i in range(0, total_lines, SMALL_BATCH_SIZE):
-                batch_pending = pending_lines[i:min(i + SMALL_BATCH_SIZE, total_lines)]
-                batch_start_index = i + 1
-                batch_end_index = i + len(batch_pending)
-                logging.info(f"[Task ID: {task_id}] Processing small batch {batch_start_index}-{batch_end_index} of {total_lines}...")
-                self.update_state(state='PROGRESS', meta={
-                    'status': f'Generating lines {batch_start_index}-{batch_end_index} of {total_lines}',
-                    'progress': int(50 + (processed_count / total_lines) * 50), # Rough progress update
-                    'db_id': generation_job_db_id
-                })
-                
-                # FIX: Pass all_lines_for_context as the existing_lines argument
-                batch_results = _generate_lines_batch(db, vo_script_id, batch_pending, all_lines_for_context, target_model)
-                all_updated_lines.extend(batch_results)
-                processed_count += len(batch_pending)
-                
-                # Optional: Add a small delay between batches if needed
-                # time.sleep(1) 
-                
-            updated_lines_data = all_updated_lines
-            logging.info(f"[Task ID: {task_id}] Finished processing all small batches.")
-
-        # Update the database with the generated text
-        # ... (rest of the task - updating DB lines) ...
-
-        # 3. Update Job Status
-        if errors_occurred:
-            final_status = "COMPLETED_WITH_ERRORS"
-            message = f"Category generation completed with some errors. Generated {len(updated_lines_data)} out of {len(pending_lines)} lines."
-        else:
-            final_status = "SUCCESS"
-            message = f"Successfully generated {len(updated_lines_data)} lines for category '{category_name}'."
-            
-        db_job.status = final_status
-        db_job.completed_at = datetime.utcnow()
-        db_job.result_message = message
-        db.commit()
-        print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] Category batch generation finished. Updated job status to {final_status}.")
-        
-        return {'status': final_status, 'message': message, 'data': updated_lines_data}
-        
-    except Exception as e:
-        error_msg = f"Category batch generation task failed: {type(e).__name__}: {e}"
-        print(f"[Task ID: {task_id}, DB ID: {generation_job_db_id}] {error_msg}")
-        if db_job:
-            db_job.status = "FAILURE"
-            db_job.completed_at = datetime.utcnow()
-            db_job.result_message = error_msg
-            try:
+            if not generated_batch:
+                print(f"[Task ID: {task_id}] Batch generation returned no results")
+                db_job.status = "FAILED"
+                db_job.completed_at = datetime.now()
+                db_job.result_message = "Batch generation returned no results"
                 db.commit()
-            except:
-                db.rollback()
-        self.update_state(state='FAILURE', meta={'status': error_msg, 'db_id': generation_job_db_id})
-        raise e
+                result["message"] = "Batch generation failed to return results"
+                return result
+            
+            # Log complete result of batch generation
+            print(f"[Task ID: {task_id}] Generated batch result: {generated_batch}")
+            
+            # Update the database with the generated lines
+            print(f"[Task ID: {task_id}] Processing {len(generated_batch)} generated lines")
+            
+            # Track updated line IDs
+            updated_lines = []
+            error_lines = []
+            
+            for gen_item in generated_batch:
+                try:
+                    line_id = gen_item.get("line_id")
+                    generated_text = gen_item.get("generated_text")
+                    
+                    print(f"[Task ID: {task_id}] Processing generated item: {gen_item}")
+                    
+                    if not line_id or not generated_text:
+                        print(f"[Task ID: {task_id}] Skipping invalid generated item: {gen_item}")
+                        error_lines.append({
+                            "line_id": line_id,
+                            "error": "Missing line_id or generated_text in result"
+                        })
+                        continue
+                    
+                    # Update the line in the database
+                    line = db.query(models.VoScriptLine).get(line_id)
+                    if not line:
+                        print(f"[Task ID: {task_id}] Could not find line with ID {line_id}")
+                        error_lines.append({
+                            "line_id": line_id,
+                            "error": "Line not found in database"
+                        })
+                        continue
+                    
+                    line.generated_text = generated_text
+                    line.status = "generated"
+                    line.generated_at = datetime.now()
+                    db.commit()
+                    db.refresh(line)
+                    
+                    updated_lines.append({
+                        "id": line.id,
+                        "line_key": line.line_key,
+                        "text": line.generated_text
+                    })
+                    print(f"[Task ID: {task_id}] Updated line {line.id} ({line.line_key})")
+                    
+                except Exception as line_err:
+                    print(f"[Task ID: {task_id}] Error updating line: {line_err}")
+                    if 'line_id' in locals():
+                        error_lines.append({
+                            "line_id": line_id,
+                            "error": str(line_err)
+                        })
+                    else:
+                        error_lines.append({
+                            "error": f"Error processing generated item: {str(line_err)}"
+                        })
+            
+            # Update the job record
+            if error_lines and not updated_lines:
+                db_job.status = "FAILED"
+                db_job.result_message = f"Failed to update any lines. Errors: {len(error_lines)}"
+                result["status"] = "FAILED"
+                result["message"] = f"No lines were successfully updated"
+            elif error_lines:
+                db_job.status = "COMPLETED_WITH_ERRORS"
+                db_job.result_message = f"Updated {len(updated_lines)} lines with {len(error_lines)} errors"
+                result["status"] = "PARTIAL_SUCCESS"
+                result["message"] = f"Updated {len(updated_lines)} lines with {len(error_lines)} errors"
+            else:
+                db_job.status = "SUCCESS"
+                db_job.result_message = f"Successfully updated {len(updated_lines)} lines"
+                result["status"] = "SUCCESS"
+                result["message"] = f"Successfully updated all {len(updated_lines)} lines"
+            
+            db_job.completed_at = datetime.now()
+            db.commit()
+            
+            # Prepare the result data
+            result["updated_lines"] = updated_lines
+            result["errors"] = error_lines
+            
+            print(f"[Task ID: {task_id}] Task completed with status: {result['status']}")
+            return result
+            
+        except Exception as gen_err:
+            print(f"[Task ID: {task_id}] Error during batch generation: {gen_err}")
+            db_job.status = "FAILED"
+            db_job.completed_at = datetime.now()
+            db_job.result_message = f"Batch generation error: {str(gen_err)}"
+            db.commit()
+            
+            result["message"] = f"Error during batch generation: {str(gen_err)}"
+            # Include traceback for debugging
+            import traceback
+            result["errors"].append({
+                "error": str(gen_err),
+                "traceback": traceback.format_exc()
+            })
+            return result
+    
+    except Exception as e:
+        print(f"[Task ID: {task_id}] Task exception: {e}")
+        # If we have a db session and job, try to update it
+        try:
+            if db and db_job:
+                db_job.status = "FAILED"
+                db_job.completed_at = datetime.now()
+                db_job.result_message = f"Task error: {str(e)}"
+                db.commit()
+        except Exception as db_err:
+            print(f"[Task ID: {task_id}] Failed to update job status after error: {db_err}")
+        
+        # Include traceback for debugging
+        import traceback
+        result["message"] = f"Task error: {str(e)}"
+        result["errors"].append({
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        })
+        return result
+    
     finally:
+        # Ensure database session is closed
         if db:
-            db.close()
+            try:
+                db.close()
+                print(f"[Task ID: {task_id}] Database session closed")
+            except:
+                pass
 
 # --- Placeholder Task (Keep or Remove) --- #
 # @celery.task(bind=True)
