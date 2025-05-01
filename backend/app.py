@@ -457,6 +457,42 @@ def list_generation_jobs():
     finally:
         db.close()
 
+# --- Task Status Endpoint --- #
+@app.route('/api/task/<task_id>/status', methods=['GET'])
+def get_task_status(task_id):
+    """Endpoint to check the status of any Celery task by its ID."""
+    try:
+        # Use the celery instance imported from the module
+        task_result = AsyncResult(task_id, app=celery)
+
+        response_data = {
+            'task_id': task_id,
+            'status': task_result.status, # PENDING, STARTED, SUCCESS, FAILURE, RETRY, REVOKED
+            'info': None
+        }
+
+        if task_result.status == 'PENDING':
+            response_data['info'] = {'status': 'Task is waiting to be processed.'}
+        elif task_result.status == 'FAILURE':
+            # task_result.info should contain the exception
+            response_data['info'] = {'error': str(task_result.info), 'traceback': task_result.traceback}
+            # Return 200 OK, but indicate failure in the payload
+        elif task_result.status == 'SUCCESS':
+            # task_result.info should contain the return value of the task
+            response_data['info'] = task_result.info
+        else:
+            # For STARTED, RETRY, or custom states, info might be a dict (e.g., progress)
+            if isinstance(task_result.info, dict):
+                response_data['info'] = task_result.info
+            else:
+                response_data['info'] = {'status': str(task_result.info)}
+
+        return make_api_response(data=response_data)
+
+    except Exception as e:
+        logging.exception(f"Error checking task status for {task_id}: {e}")
+        return make_api_response(error="Failed to retrieve task status", status_code=500)
+
 # --- NEW: Script Management API Endpoints --- #
 
 @app.route('/api/scripts', methods=['GET'])
