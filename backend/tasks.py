@@ -1078,8 +1078,15 @@ def generate_category_lines(self,
         from backend.routes.vo_script_routes import _generate_lines_batch
         
         # Fetch pending lines (current logic is likely fine)
-        pending_lines_details = utils_voscript.get_category_lines_details(db, vo_script_id, category_name, status_filter='pending')
-        pending_lines = [model_to_dict(line, keys=['line_id', 'line_key', 'prompt_hint', 'category_name', 'character_description', 'template_hint', 'current_text', 'order_index']) for line in pending_lines_details]
+        pending_lines_context = utils_voscript.get_category_lines_context(db, vo_script_id, category_name) 
+        
+        # Filter the context list to find pending lines
+        pending_lines = [
+            line for line in pending_lines_context 
+            if line.get('status') == 'pending'
+        ] 
+        # pending_lines_details = utils_voscript.get_category_lines_details(db, vo_script_id, category_name, status_filter='pending')
+        # pending_lines = [model_to_dict(line, keys=['line_id', 'line_key', 'prompt_hint', 'category_name', 'character_description', 'template_hint', 'current_text', 'order_index']) for line in pending_lines_details]
 
         if not pending_lines:
             logging.warning(f"[Task ID: {task_id}] No pending lines found for category '{category_name}'. Task completing.")
@@ -1097,8 +1104,10 @@ def generate_category_lines(self,
             db.close()
             return {'status': 'COMPLETED', 'message': 'No pending lines found to generate.', 'db_id': generation_job_db_id}
 
+        # Use the already fetched context for the ALL lines context
+        all_lines_for_context = pending_lines_context # Already fetched above
         # --- NEW: Fetch ALL lines for context, similar to refine ---
-        all_lines_for_context = utils_voscript.get_category_lines_context(db, vo_script_id, category_name)
+        # all_lines_for_context = utils_voscript.get_category_lines_context(db, vo_script_id, category_name)
         # --- END NEW ---
 
         logging.warning(f"[Task ID: {task_id}] Found {len(pending_lines)} pending lines to generate for category '{category_name}'.")
