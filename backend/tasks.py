@@ -25,6 +25,11 @@ from sqlalchemy import case # Added for ordering
 from backend.utils_voscript import get_category_lines_context, update_line_in_db
 from backend.routes.vo_script_routes import _generate_lines_batch
 
+# --- Constants ---
+BATCH_GENERATION_THRESHOLD = 10 # Generate <= this many lines in one go
+SMALL_BATCH_SIZE = 8 # Split larger jobs into batches of this size
+# --- End Constants ---
+
 print("Celery Worker: Loading tasks.py...")
 
 @celery.task(bind=True, name='tasks.run_generation')
