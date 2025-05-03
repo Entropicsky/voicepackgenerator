@@ -403,3 +403,77 @@
     *   [x] Modify `PUT /api/vo-script-template-lines/<line_id>` endpoint to handle static_text updates.
     *   [x] Update `create_vo_script` endpoint in `vo_script_routes.py` to copy static_text to generated_text for new lines.
     *   [x] Update `
+
+## Phase 9: Modular Backend Refactoring Validation
+
+### Code Review Checklist
+
+* [x] **Review all refactored files for missing imports**
+    * [x] Check `app.py` for missing imports (e.g., `datetime`)
+    * [x] Check all `routes/*.py` files for proper imports
+    * [x] Check all `tasks/*.py` files for proper imports
+    * [x] Verify all imports are used (no unused imports)
+
+* [x] **Check for circular import issues**
+    * [x] Review import structure in `routes/*.py` files
+    * [x] Review import structure in `tasks/*.py` files 
+    * [x] Verify that imports from `tasks` in `routes` (and vice versa) don't create circular dependencies
+
+* [x] **Verify consistent function signatures**
+    * [x] Compare function signatures in new modules against original `tasks.py`
+    * [x] Check parameter names, types, and default values
+    * [x] Verify that no function parameters were missed during refactoring
+
+* [x] **Test blueprint registration**
+    * [x] Verify that all blueprints are properly registered in `app.py`
+    * [x] Check URL prefixes match expected values
+    * [x] Ensure route decorators are properly applied
+
+* [x] **Verify error handling**
+    * [x] Check for proper error handling in route functions
+    * [x] Verify that error responses use consistent formats (via `make_api_response`)
+    * [x] Test error cases to ensure they return appropriate status codes
+
+### Testing Checklist
+
+* [x] **Create unit tests for task modules**
+    * [x] Test module imports to verify no import errors
+    * [x] Test that task functions have expected signatures
+    * [x] Verify task registry is properly populated
+
+* [x] **Create tests for route blueprints**
+    * [x] Verify blueprint registration
+    * [x] Test URL prefixes
+    * [x] Test route handler functions
+
+* [x] **Implement end-to-end testing**
+    * [x] Create test for full workflow using actual database
+    * [x] Test script creation/generation workflow
+    * [x] Test audio manipulation functions
+    * [x] Test voice generation and regeneration
+
+* [x] **Fix issues found during testing**
+    * [x] Fix missing `datetime` import in `app.py`
+    * [x] Fix test issue with blueprint URL prefixes
+    * [x] Fix direct task call issue with Celery context
+
+### Documentation and Finalization
+
+* [x] **Update documentation**
+    * [x] Document the new module structure in agent notes
+    * [x] Update project checklist with completed tasks
+    * [x] Document testing procedures for future reference
+
+* [x] **Validation**
+    * [x] Verify that all endpoints work as expected
+    * [x] Test critical endpoints manually
+    * [x] Ensure all tests pass
+
+### Bug Fixes
+
+* [x] **Fix for regeneration task status polling**
+    * [x] Identified issue with snake_case vs camelCase naming mismatch when returning task IDs from backend
+    * [x] Updated API functions (`regenerateLineTakes`, `startSpeechToSpeech`, `cropTake`, `getTaskStatus`, `triggerGenerateCategoryBatch`) to correctly map response fields
+    * [x] Made TypeScript interfaces consistent with camelCase naming convention (`JobSubmissionResponse`, `GenerationStartResponse`, `TaskStatus`, `CropTakeResponse`)
+    * [x] Restart containers to ensure all changes took effect
+    * [x] Verified that regeneration functionality now works correctly

@@ -22,8 +22,8 @@ export interface ModelOption {
 
 // UPDATED: Response from starting generation now includes DB job ID
 export interface GenerationStartResponse {
-  task_id: string; // Celery Task ID
-  job_id: number;  // Database Job ID
+  taskId: string; // Celery Task ID
+  jobId: number;  // Database Job ID
 }
 
 // ... TaskStatus (can be kept for live polling if desired, but DB is primary source now) ...
@@ -48,7 +48,7 @@ export interface GenerationJob {
 
 // Ensure TaskStatus is exported
 export interface TaskStatus {
-  task_id: string;
+  taskId: string;
   status: 'PENDING' | 'STARTED' | 'SUCCESS' | 'FAILURE' | 'RETRY' | 'REVOKED' | 'FETCH_ERROR' | string; // Added FETCH_ERROR
   info: any;
 }
@@ -173,7 +173,7 @@ export interface CropTakePayload {
 
 // Response received from backend (includes Celery task ID)
 export interface CropTakeResponse {
-    task_id: string;
+    taskId: string;
     message: string;
 }
 
@@ -376,8 +376,8 @@ export interface RunAgentPayload {
 
 // Response from agent task submission
 export interface JobSubmissionResponse {
-  job_id: number;
-  task_id: string | null; // Celery Task ID (can be null if submit fails)
+  jobId: number;
+  taskId: string | null; // Celery Task ID (can be null if submit fails)
 }
 
 // Added: Type for the items returned by GET /api/vo-scripts list endpoint

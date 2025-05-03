@@ -168,3 +168,117 @@ When a script is created from a template with static lines, those lines will:
 - Have status set to 'generated'  
 - Be visually distinguished in the UI
 - Be protected from regeneration/refinement 
+
+## Recent Work
+
+### Fixed Line Regeneration and Task Status Polling (May 2025)
+
+Fixed an issue where line regeneration tasks were getting stuck when polling for task status:
+
+1. **Issue Identified**:
+   - Frontend was polling for task status with ID "undefined" instead of the actual task ID
+   - Problem traced to snake_case vs camelCase mismatch in API responses
+
+2. **Fix Applied**:
+   - Updated API functions to correctly map response fields (task_id → taskId, job_id → jobId)
+   - Made TypeScript interfaces consistent with camelCase naming convention
+   - Applied the fix to all similar endpoints (regeneration, speech-to-speech, crop)
+
+3. **API Functions Updated**:
+   - `regenerateLineTakes`
+   - `startSpeechToSpeech`
+   - `cropTake`
+   - `getTaskStatus`
+   - `triggerGenerateCategoryBatch`
+
+This fix resolved issues where regeneration tasks appeared to be running but never completed because the frontend was polling for an undefined task ID.
+
+### Backend Modular Refactoring (May 2025)
+
+The backend was recently refactored to improve maintainability:
+
+1. **Task Module Structure**:
+   - Created `backend/tasks/` directory as a package
+   - Implemented central registry in `tasks/__init__.py`
+   - Split functionality into:
+     - `generation_tasks.py` (voice generation)
+     - `regeneration_tasks.py` (line regeneration and speech-to-speech)
+     - `audio_tasks.py` (audio cropping)
+     - `script_tasks.py` (script creation and category generation)
+
+2. **Route Blueprint Structure**:
+   - Leveraged Flask's Blueprint system
+   - Created specialized route modules:
+     - `voice_routes.py` (voice management)
+     - `generation_routes.py` (generation jobs)
+     - `batch_routes.py` (batch operations)
+     - `audio_routes.py` (audio serving)
+     - `task_routes.py` (task status endpoint)
+     - `vo_script_routes.py` (VO script management)
+     - `vo_template_routes.py` (VO template management)
+
+3. **Testing and Validation**:
+   - Implemented comprehensive testing for refactored code:
+     - `test_tasks_modules.py`: Validates task module imports and function signatures
+     - `test_blueprint_routes.py`: Verifies blueprint registrations and route structure
+     - `test_blueprint_routes_live.py`: Tests actual endpoints against the database
+     - `test_refactoring_e2e.py`: End-to-end tests of the full workflow
+
+4. **Fixes Applied**:
+   - Added missing `datetime` import in `app.py`
+   - Fixed blueprint URL prefix handling
+   - Added proper error handling for Celery tasks called directly
+
+## Environment Setup
+
+### Docker Environment
+- Uses Docker Compose for local development
+- Services:
+  - `backend`: Flask API server
+  - `worker`: Celery worker
+  - `frontend`: React frontend
+  - `redis`: Message broker for Celery
+  - `db`: PostgreSQL database
+
+### API Keys and Environment Variables
+- `ELEVENLABS_API_KEY`: For voice synthesis
+- `OPENAI_API_KEY`: For AI script generation
+- Cloudflare R2 credentials for audio storage
+
+## Development Guidelines
+
+### Code Structure
+- Keep files under 500 lines for maintainability
+- Follow single responsibility principle
+- Each module should have a clear focus:
+  - Task modules handle background processing
+  - Route modules handle API endpoints
+  - Utility modules provide shared functionality
+
+### Testing
+- Always run tests after making changes to the backend
+- Use comprehensive tests for new features
+- Prefer testing with real database when possible
+
+## Common Development Tasks
+
+### Running Tests
+```bash
+# Run all tests
+docker-compose exec backend python -m unittest discover
+
+# Run specific test file
+docker-compose exec backend python -m unittest backend.tests.test_refactoring_e2e
+
+# Run with proper Flask app context
+docker-compose exec backend python -m flask test
+```
+
+### Accessing API Endpoints
+```bash
+# Check API status
+curl http://localhost:5001/api/ping
+
+# List voices
+curl http://localhost:5001/api/voices
+``` 

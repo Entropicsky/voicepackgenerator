@@ -8,6 +8,7 @@ import { api } from '../api';
 // Import types
 import { VoScriptTemplateMetadata, VoScript, CreateVoScriptPayload } from '../types';
 
+
 const VoScriptCreateView: React.FC = () => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();

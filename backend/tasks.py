@@ -1,4 +1,32 @@
 # backend/tasks.py
+"""
+Tasks package - imports tasks from specialized modules.
+This file now serves as a compatibility layer to maintain backwards compatibility
+with existing imports while transitioning to a more modular structure.
+"""
+
+# Import all tasks from the specialized modules 
+from backend.tasks.generation_tasks import run_generation
+from backend.tasks.regeneration_tasks import regenerate_line_takes, run_speech_to_speech_line
+from backend.tasks.audio_tasks import crop_audio_take
+from backend.tasks.script_tasks import run_script_creation_agent, generate_category_lines
+
+# This file is kept for backwards compatibility
+# All task implementations have been moved to specialized modules
+# under the backend/tasks/ directory.
+
+# Define what should be exported when "from backend.tasks import *" is used
+__all__ = [
+    'run_generation',
+    'regenerate_line_takes',
+    'run_speech_to_speech_line',
+    'crop_audio_take',
+    'run_script_creation_agent',
+    'generate_category_lines',
+]
+
+print("Celery Worker: Loaded tasks.py compatibility layer")
+
 from .celery_app import celery
 from backend import models
 from backend import utils_elevenlabs

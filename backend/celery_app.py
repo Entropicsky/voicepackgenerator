@@ -44,6 +44,11 @@ celery.conf.update(
     task_serializer='json',
     accept_content=['json'],
     result_serializer='json',
+    result_extended=True,  # Enable extended result format for better error handling
+    task_track_started=True,  # Ensure tasks are tracked when started
+    result_expires=86400,  # Keep results for a day (in seconds)
+    worker_prefetch_multiplier=1,  # Handle one task at a time to prevent overloading
+    task_reject_on_worker_lost=True,  # Reject tasks if worker is lost
     timezone='UTC',
     enable_utc=True,
 )
