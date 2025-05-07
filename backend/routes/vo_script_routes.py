@@ -2407,3 +2407,74 @@ def get_chat_history(script_id: int):
     finally:
         if db:
             db.close()
+
+@vo_script_bp.route("/vo-scripts/<int:script_id>/chat/history", methods=["DELETE"])
+def delete_chat_history(script_id: int):
+    """Deletes all chat history for a specific VO Script."""
+    db = next(models.get_db())
+    try:
+        # Verify the script exists (optional, but good practice)
+        script = db.query(models.VoScript.id).filter(models.VoScript.id == script_id).first()
+        if not script:
+            return make_api_response(error=f"VO Script with ID {script_id} not found", status_code=404)
+
+        # Delete chat messages associated with this script_id
+        num_deleted = db.query(models.ChatMessageHistory).filter(
+            models.ChatMessageHistory.vo_script_id == script_id
+        ).delete(synchronize_session=False) # synchronize_session=False is common for bulk deletes
+        
+        db.commit()
+        current_app.logger.info(f"Deleted {num_deleted} chat history messages for script {script_id}")
+        return make_api_response(data={"message": f"Chat history for script {script_id} cleared successfully. {num_deleted} messages deleted."})
+
+    except Exception as e:
+        db.rollback()
+        current_app.logger.error(f"Error deleting chat history for script {script_id}: {e}", exc_info=True)
+        return make_api_response(error="Internal server error deleting chat history.", status_code=500)
+    finally:
+        if db:
+            db.close()
+
+# --- Pydantic model for Character Description Update --- #
+class CharacterDescriptionUpdatePayload(BaseModel):
+    new_description: str
+
+# --- NEW Endpoint to commit staged character description update --- #
+@vo_script_bp.route("/vo-scripts/<int:script_id>/character-description", methods=["PATCH"])
+def commit_character_description_update(script_id: int):
+    """Applies a new character description to the VO Script."""
+    if not request.is_json:
+        return make_api_response(error="Request must be JSON", status_code=400)
+    
+    try:
+        payload = CharacterDescriptionUpdatePayload(**request.get_json())
+    except ValidationError as e:
+        return make_api_response(error=f"Invalid request body: {e.errors()}", status_code=400)
+    except Exception as e_parse:
+        current_app.logger.error(f"Error parsing description update request JSON: {e_parse}")
+        return make_api_response(error="Invalid JSON body format", status_code=400)
+
+    db: Session = None
+    try:
+        db = next(get_db())
+        script = db.query(models.VoScript).get(script_id)
+        if script is None:
+            return make_api_response(error=f"VO Script with ID {script_id} not found", status_code=404)
+
+        # Update the description
+        script.character_description = payload.new_description
+        db.commit()
+        db.refresh(script)
+        
+        current_app.logger.info(f"Committed character description update for script {script_id}")
+        # Return the updated script object (or relevant parts)
+        # Use the same serialization as the GET endpoint for consistency
+        script_data = model_to_dict(script) # Use existing serialization helper
+        return make_api_response(data=script_data)
+
+    except Exception as e:
+        if db and db.is_active: db.rollback()
+        current_app.logger.error(f"Error committing character description update for script {script_id}: {e}", exc_info=True)
+        return make_api_response(error="Failed to update character description", status_code=500)
+    finally:
+        if db and db.is_active: db.close()

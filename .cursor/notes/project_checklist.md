@@ -51,6 +51,40 @@
 - [ ] Task 3: Enhance agent instructions/prompts for more proactivity and contextual depth.
 - [ ] Task 4: Handle category-wide feedback/requests.
 
+**NEW Phase: Agent-Staged Commits (In Progress)**
+**Goal:** Refine interaction so agent stages changes (description, lines) for explicit user commit via UI buttons, improving UX and data refresh.
+
+*Sub-Phase 1: Staged Character Description Updates (In Progress)*
+    - [ ] **Backend Tool:**
+        - [ ] Define Pydantic models: `StageCharacterDescriptionParams`, `StagedCharacterDescriptionData`, `StageCharacterDescriptionToolResponse`.
+        - [ ] Implement `@function_tool def stage_character_description_update` in `script_collaborator_agent.py` (returns staged data, no DB write).
+        - [ ] Register tool with `ScriptCollaboratorAgent`.
+        - [ ] Update `AGENT_INSTRUCTIONS` for new tool.
+    - [ ] **Celery Task (`run_script_collaborator_chat_task`):**
+        - [ ] Detect `stage_character_description_update` tool output.
+        - [ ] Add `staged_description_update: Optional[StagedCharacterDescriptionData]` to task result.
+    - [ ] **Backend API (`vo_script_routes.py`):**
+        - [ ] New Endpoint: `PATCH /api/vo-scripts/<script_id>/character-description` (accepts `{ new_description: str }`, updates DB).
+    - [ ] **Frontend (`types.ts`):**
+        - [ ] Add `StagedCharacterDescriptionData` interface.
+        - [ ] Update `ChatTaskResult` to include `staged_description_update?: StagedCharacterDescriptionData;`.
+    - [ ] **Frontend (`api.ts`):**
+        - [ ] Add `api.commitCharacterDescription(scriptId, newDescription)` function (calls new PATCH endpoint).
+    - [ ] **Frontend (`chatStore.ts`):**
+        - [ ] Add state: `stagedDescriptionUpdate: StagedCharacterDescriptionData | null`.
+        - [ ] Add actions: `setStagedDescriptionUpdate()`, `clearStagedDescriptionUpdate()`.
+    - [ ] **Frontend (`ChatPanelContent.tsx`):**
+        - [ ] Polling logic: If `successInfo.staged_description_update` present, call `setStagedDescriptionUpdate`.
+        - [ ] UI: Render "Commit Character Description" card/button if `stagedDescriptionUpdate` is present.
+        - [ ] Logic: "Commit" button calls `api.commitCharacterDescription`, invalidates `voScriptDetail` query, clears staged update.
+        - [ ] Logic: "Dismiss" button clears staged update.
+
+*Sub-Phase 2: Staged Line Modifications (In Progress)*
+    - [X] Adapt staging pattern for `propose_script_modification` tool (created `propose_multiple_line_modifications` tool) - Backend Done
+    - [X] Update Celery task to handle staged line proposals from batch tool - Backend Done
+    - [ ] Frontend to display staged line proposals with commit/dismiss options - TODO
+    - [ ] Commit action calls existing line update/creation API endpoints - TODO (Frontend part)
+
 **Phase 8: Testing & Deployment (TODO)**
 - [ ] Task 1: Write comprehensive frontend tests (unit, integration).
 - [ ] Task 2: Write comprehensive backend tests (unit, integration).

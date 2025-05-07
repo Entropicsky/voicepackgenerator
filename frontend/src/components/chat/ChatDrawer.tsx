@@ -1,21 +1,24 @@
 import { Text, Stack, Textarea, Button, Group, ScrollArea, Paper, Loader, Alert, Card, ActionIcon, Box, Tooltip, Grid } from '@mantine/core';
-import { IconSend, IconX, IconBulb, IconCheck, IconEdit, IconTrash, IconAlertCircle } from '@tabler/icons-react';
+import { IconSend, IconX, IconBulb, IconCheck, IconEdit, IconTrash, IconAlertCircle, IconClearAll } from '@tabler/icons-react';
 import { useChatStore, ChatState, ChatMessage, getChatHistoryForContext } from '../../stores/chatStore';
-import { ChatTaskResult, ProposedModificationDetail, ModificationType, VoScriptLineData, InitiateChatPayload, ChatHistoryItem } from '../../types';
+import { ChatTaskResult, ProposedModificationDetail, ModificationType, VoScriptLineData, InitiateChatPayload, ChatHistoryItem, StagedCharacterDescriptionData } from '../../types';
 import { api } from '../../api';
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { notifications } from '@mantine/notifications';
 
 const POLLING_INTERVAL = 3000;
-const MAX_POLLING_ATTEMPTS = 20; // Approx 1 minute (20 attempts * 3 seconds/attempt)
+const MAX_POLLING_ATTEMPTS = 40; // Approx 2 minutes (40 attempts * 3 seconds/attempt)
 
 export function ChatPanelContent() {
     const {
         isChatOpen, toggleChatOpen, chatDisplayHistory, currentMessage, setCurrentMessage,
         isLoading, setLoading, error, setError, currentFocus, currentAgentTaskID,
         setCurrentAgentTaskID, addMessageToHistory, activeProposals, setActiveProposals, removeProposal,
-        setChatDisplayHistory
+        setChatDisplayHistory,
+        stagedDescriptionUpdate,
+        setStagedDescriptionUpdate,
+        clearStagedDescriptionUpdate
     } = useChatStore((state: ChatState) => state);
 
     console.log("[ChatPanelContent] Rendering. Active proposals from store:", JSON.parse(JSON.stringify(activeProposals)));
@@ -34,6 +37,12 @@ export function ChatPanelContent() {
     // Add state for initial history loading
     const [isHistoryLoading, setIsHistoryLoading] = useState(false);
     const [historyError, setHistoryError] = useState<string | null>(null);
+
+    // Get clearChat from store with explicit state typing
+    const storeClearChat = useChatStore((state: ChatState) => state.clearChat);
+
+    const [isCommittingDescription, setIsCommittingDescription] = useState(false);
+    const [currentProgressMessage, setCurrentProgressMessage] = useState<string | null>(null);
 
     useEffect(() => {
         if (viewport.current) {
@@ -85,6 +94,7 @@ export function ChatPanelContent() {
         setLoading(true);
         setError(null);
         setActiveProposals([]);
+        setCurrentProgressMessage(null); // Clear previous progress message
 
         try {
             const payload: InitiateChatPayload = {
@@ -96,6 +106,7 @@ export function ChatPanelContent() {
         } catch (err: any) {
             setError(err.message || 'Failed to send message.');
             setLoading(false);
+            setCurrentProgressMessage(null); // Clear on error too
         }
     };
 
@@ -156,11 +167,16 @@ export function ChatPanelContent() {
                         
                         // Process status ONLY if the status field exists
                         if (statusResponse && typeof statusResponse.status !== 'undefined') {
-                            if (statusResponse.status === 'SUCCESS' && statusResponse.info) {
+                            if (statusResponse.status === 'PROGRESS' && statusResponse.info && typeof statusResponse.info.status_message === 'string') {
+                                console.log(`[ChatPanelContent] PROGRESS for task ${taskIdBeingPolled}: ${statusResponse.info.status_message}`);
+                                setCurrentProgressMessage(statusResponse.info.status_message);
+                                if (!isLoading) setLoading(true); // Ensure loading spinner stays if it somehow got turned off
+                            } else if (statusResponse.status === 'SUCCESS' && statusResponse.info) {
                                 console.log(`[ChatPanelContent] SUCCESS received for task ${taskIdBeingPolled}`); 
                                 stopPolling();
                                 setCurrentAgentTaskID(null); 
                                 setLoading(false);
+                                setCurrentProgressMessage(null); // Clear progress on final success
 
                                 const successInfo = statusResponse.info as ChatTaskResult;
                                 
@@ -191,11 +207,24 @@ export function ChatPanelContent() {
                                     console.log("[ChatPanelContent] No proposals received, or array empty. Setting loading to false.");
                                     setActiveProposals([]);
                                 }
+
+                                // --- NEW: Handle staged description update --- 
+                                if (successInfo.staged_description_update) {
+                                    console.log("[ChatPanelContent] Received staged description update:", successInfo.staged_description_update);
+                                    setStagedDescriptionUpdate(successInfo.staged_description_update);
+                                } else {
+                                    // If no new staged update, clear any existing one (e.g., if it was committed/dismissed by another means)
+                                    // Or, only clear if there were proposals/other actions, to avoid clearing if agent is just talking.
+                                    // For now, let's be simple: if the response *doesn't* have a new staged update, don't clear an existing one.
+                                    // The commit/dismiss actions below will handle clearing.
+                                }
+                                // --- END NEW --- 
                             } else if (statusResponse.status === 'FAILURE') {
                                 console.log(`[ChatPanelContent] FAILURE received for task ${taskIdBeingPolled}`); 
                                 stopPolling(); 
                                 setLoading(false); 
                                 setCurrentAgentTaskID(null);
+                                setCurrentProgressMessage(null); // Clear progress on final failure
                                 const errorInfo = statusResponse.info as { error?: string; message?: string; };
                                 const errorMessage = errorInfo?.error || errorInfo?.message || 'Task failed.';
                                 setError(errorMessage);
@@ -227,6 +256,7 @@ export function ChatPanelContent() {
                         setLoading(false); 
                         setCurrentAgentTaskID(null);
                         setError(err.message || 'Failed to get task update.');
+                        setCurrentProgressMessage(null); // Clear on error
                     }
                 }, POLLING_INTERVAL);
             }, 500); // Start polling after 500ms delay
@@ -237,8 +267,9 @@ export function ChatPanelContent() {
             console.log("[ChatPanelContent] Cleanup polling useEffect.");
             if (initialDelayTimer) clearTimeout(initialDelayTimer);
             stopPolling(); // Ensure interval is cleared on unmount or dependency change
+            setCurrentProgressMessage(null); // Clear progress on component unmount / task ID change
         };
-    }, [currentAgentTaskID, addMessageToHistory, setLoading, setError, setCurrentAgentTaskID, setActiveProposals]);
+    }, [currentAgentTaskID, addMessageToHistory, setLoading, setError, setCurrentAgentTaskID, setActiveProposals, setStagedDescriptionUpdate, setCurrentProgressMessage]);
 
     const prevScriptIdRef = useRef<number | null>(null);
     useEffect(() => {
@@ -390,6 +421,74 @@ export function ChatPanelContent() {
         });
     };
 
+    const handleClearHistory = async () => {
+        if (!currentFocus.scriptId) {
+            notifications.show({
+                title: 'Cannot Clear History',
+                message: 'No active script selected.',
+                color: 'orange'
+            });
+            return;
+        }
+        // Optional: Add a confirmation dialog here (e.g., using Mantine Modals service)
+        // For now, direct clear.
+        console.log(`[ChatPanelContent] Clearing history for script ID: ${currentFocus.scriptId}`);
+        setLoading(true); // Use general loading state or a specific one for this action
+        try {
+            await api.clearChatHistory(currentFocus.scriptId);
+            storeClearChat(); // Clears display history in Zustand store
+            setActiveProposals([]); // Also clear any active proposals
+            notifications.show({
+                title: 'Chat History Cleared',
+                message: `History for the current script has been cleared.`, 
+                color: 'green'
+            });
+        } catch (err: any) {
+            console.error("[ChatPanelContent] Failed to clear chat history:", err);
+            notifications.show({
+                title: 'Error Clearing History',
+                message: err.message || 'Could not clear chat history.',
+                color: 'red'
+            });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleCommitDescription = async () => {
+        if (!stagedDescriptionUpdate || !currentFocus.scriptId) return;
+        setIsCommittingDescription(true);
+        try {
+            await api.commitCharacterDescription(currentFocus.scriptId, stagedDescriptionUpdate.new_description);
+            notifications.show({
+                title: 'Character Description Updated',
+                message: 'The character description has been successfully updated.',
+                color: 'green'
+            });
+            queryClient.invalidateQueries({ queryKey: ['voScriptDetail', currentFocus.scriptId] });
+            clearStagedDescriptionUpdate(); // Clear from store
+            addMessageToHistory({ role: 'assistant', content: "Okay, I've updated the character description in the script!" });
+        } catch (err: any) {
+            notifications.show({
+                title: 'Update Failed',
+                message: err.message || 'Could not update character description.',
+                color: 'red'
+            });
+        } finally {
+            setIsCommittingDescription(false);
+        }
+    };
+
+    const handleDismissStagedDescription = () => {
+        clearStagedDescriptionUpdate();
+        notifications.show({
+            title: 'Update Dismissed',
+            message: 'The proposed character description update has been dismissed.',
+            color: 'gray'
+        });
+        addMessageToHistory({ role: 'assistant', content: "Alright, I'll discard that description update." });
+    };
+
     // Add final check log before returning JSX
     console.log(`[ChatPanelContent] FINAL RENDER CHECK - isLoading: ${isLoading}, isHistoryLoading: ${isHistoryLoading}, historyError: ${historyError}`);
 
@@ -397,11 +496,18 @@ export function ChatPanelContent() {
         <Stack h="100%" justify="space-between" gap="xs">
             <Group justify="space-between" p="xs" style={{ borderBottom: '1px solid var(--mantine-color-gray-3)' }}>
                 <Text fw={500}>AI Script Collaborator</Text>
-                <Tooltip label="Close Chat">
-                    <ActionIcon onClick={handleCloseChat} variant="subtle" size="sm">
-                        <IconX />
-                    </ActionIcon>
-                </Tooltip>
+                <Group gap="xs">
+                    <Tooltip label="Clear Chat History">
+                        <ActionIcon onClick={handleClearHistory} variant="subtle" size="sm" color="red" disabled={isLoading || isHistoryLoading}>
+                            <IconClearAll />
+                        </ActionIcon>
+                    </Tooltip>
+                    <Tooltip label="Close Chat">
+                        <ActionIcon onClick={handleCloseChat} variant="subtle" size="sm">
+                            <IconX />
+                        </ActionIcon>
+                    </Tooltip>
+                </Group>
             </Group>
             
             <ScrollArea style={{ flex: 1 }} viewportRef={viewport} p="xs">
@@ -421,8 +527,36 @@ export function ChatPanelContent() {
                         </Text>
                     </Paper>
                 ))}
-                {isLoading && !isHistoryLoading && !activeProposals.length && 
-                    <Group justify="center" mt="md"><Loader size="sm" /></Group>}
+                {isLoading && !isHistoryLoading && !activeProposals.length && (
+                    <Group justify="center" mt="md">
+                        <Loader size="sm" />
+                        {currentProgressMessage && <Text size="xs" c="dimmed" ml="xs">{currentProgressMessage}</Text>}
+                    </Group>
+                )}
+
+                {stagedDescriptionUpdate && (
+                    <Card withBorder p="sm" mt="sm" radius="md" shadow="sm">
+                        <Text fw={500} mb="xs">Proposed Character Description Update:</Text>
+                        <Textarea 
+                            value={stagedDescriptionUpdate.new_description} 
+                            readOnly 
+                            minRows={3} 
+                            autosize 
+                            mb="xs"
+                        />
+                        {stagedDescriptionUpdate.reasoning && (
+                            <Text size="xs" c="dimmed" mb="xs">Reasoning: {stagedDescriptionUpdate.reasoning}</Text>
+                        )}
+                        <Group justify="flex-end">
+                            <Button variant="default" onClick={handleDismissStagedDescription} disabled={isCommittingDescription}>
+                                Dismiss
+                            </Button>
+                            <Button onClick={handleCommitDescription} loading={isCommittingDescription} color="teal">
+                                Commit Description
+                            </Button>
+                        </Group>
+                    </Card>
+                )}
             </ScrollArea>
 
             {/* Display Active Proposals - Restoring full card with buttons */}

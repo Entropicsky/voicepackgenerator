@@ -49,8 +49,15 @@ export interface GenerationJob {
 // Ensure TaskStatus is exported
 export interface TaskStatus {
   taskId: string;
-  status: 'PENDING' | 'STARTED' | 'SUCCESS' | 'FAILURE' | 'RETRY' | 'REVOKED' | 'FETCH_ERROR' | string; // Added FETCH_ERROR
-  info: any;
+  status: 'PENDING' | 'STARTED' | 'SUCCESS' | 'FAILURE' | 'RETRY' | 'REVOKED' | 'FETCH_ERROR' | 'PROGRESS' | string; // Added PROGRESS
+  info?: { // Made info optional and more specific
+    status_message?: string; // For PROGRESS state
+    error?: string; // For FAILURE state
+    message?: string; // General message, sometimes used by backend for failure
+    // For SUCCESS, info will be ChatTaskResult, but we cast it later
+    // For other states, it might be other structured data or simple messages
+    [key: string]: any; // Allow other arbitrary keys from Celery meta
+  } | ChatTaskResult | null; // Allow ChatTaskResult for SUCCESS, or null
 }
 
 // This interface defines the config received from the /api/generate endpoint
@@ -83,8 +90,8 @@ export interface RegenerateLinePayload {
 
 // Response from starting any async job (generate, regenerate, STS)
 export interface JobSubmissionResponse {
-  task_id: string | null; // USE snake_case
-  job_id: number;        // USE snake_case
+  taskId: string | null; // USE camelCase to match frontend convention
+  jobId: number;        // USE camelCase to match frontend convention
 }
 
 // Represents detailed batch info from the LIST endpoint /api/batches
@@ -508,12 +515,19 @@ export interface ProposedModificationDetail {
     suggested_order_index?: number | null;
 }
 
+// --- ADDED Type for Staged Description Update --- //
+export interface StagedCharacterDescriptionData {
+    script_id: number;
+    new_description: string;
+    reasoning?: string | null;
+}
+
 // Update existing ChatTaskResult
 export interface ChatTaskResult { // The 'info' field of a successful chat task
     ai_response_text: string;
-    proposed_modifications: ProposedModificationDetail[]; // Use the new detailed type
-    scratchpad_updates: any[];   // TODO: Define more strictly based on backend tool output (e.g., AddToScratchpadResponse)
-    updated_conversation_history: any[]; // TODO: Define more strictly based on backend agent output (e.g., ChatMessageContext[])
+    proposed_modifications: ProposedModificationDetail[];
+    scratchpad_updates: any[];   
+    staged_description_update?: StagedCharacterDescriptionData | null; // ADDED optional field
 }
 
 // ChatTaskStatusData already uses ChatTaskResult, so it will benefit from this update.

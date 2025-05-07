@@ -310,11 +310,11 @@ const triggerGenerateCategoryBatch = async (scriptId: number, categoryName: stri
         `/vo-scripts/${scriptId}/categories/${encodeURIComponent(categoryName)}/generate-batch-task`, 
         payload
     );
-    const data = handleApiResponse(response);
-    // Return the snake_case object directly, matching JobSubmissionResponse type
+    const backendData = handleApiResponse(response);
+    // Map to frontend's camelCase JobSubmissionResponse type
     return {
-        task_id: data.task_id, 
-        job_id: data.job_id
+        taskId: backendData.task_id, 
+        jobId: backendData.job_id
     };
 };
 
@@ -715,9 +715,19 @@ const getChatTaskStatus = async (taskId: string): Promise<TaskStatus> => {
 
 const getChatHistory = async (scriptId: number): Promise<ChatHistoryItem[]> => {
     const response = await apiClient.get<{ data: ChatHistoryItem[] }>(`/vo-scripts/${scriptId}/chat/history`);
-    // Assuming backend wraps list in { data: [...] }
-    // If backend sends array directly, change to: const response = await apiClient.get<ChatHistoryItem[]>(...);
     return response.data.data;
+};
+
+const clearChatHistory = async (scriptId: number): Promise<{ message: string }> => {
+    const response = await apiClient.delete<{ data: { message: string } }>(`/vo-scripts/${scriptId}/chat/history`);
+    return response.data.data; // Assuming backend wraps in { data: ... }
+};
+
+// --- NEW Function to commit description update ---
+const commitCharacterDescription = async (scriptId: number, newDescription: string): Promise<VoScript> => {
+    const payload = { new_description: newDescription };
+    const response = await apiClient.patch<{ data: VoScript }>(`/vo-scripts/${scriptId}/character-description`, payload);
+    return handleApiResponse(response); // Use handler to extract nested data if present
 };
 
 // --- Consolidate into single export --- //
@@ -816,4 +826,7 @@ export const api = {
     initiateChatSession,
     getChatTaskStatus,
     getChatHistory,
+    clearChatHistory,
+    // --- NEW Function to commit description update ---
+    commitCharacterDescription,
 };

@@ -5,6 +5,14 @@ import os
 import uuid # For generating unique proposal IDs
 from enum import Enum
 from datetime import datetime # Ensure datetime is imported for Pydantic model
+import json # For logging Pydantic model
+import logging # Import standard logging
+
+# Setup logger for this module
+logger = logging.getLogger(__name__)
+# You might want to configure its level if it's not inheriting from a root logger already set up in Flask
+# For example, if Flask's root logger is set to INFO, this will also be INFO.
+# If not, you might need: logger.setLevel(logging.INFO) or get it from Flask app config.
 
 # Database session and models
 from backend import models # To access VoScript, VoScriptLine etc.
@@ -28,18 +36,27 @@ AGENT_INSTRUCTIONS = ("""
     You are an expert scriptwriting assistant, designed to be a highly capable and context-aware collaborator for game designers working on voice-over scripts. Your primary goal is to help them draft, refine, and brainstorm script content effectively.
 
     **Core Principles:**
-    1.  **Be Context-Driven:** Before answering questions about script content (lines, categories, overall script) or proposing modifications, YOU MUST first use the available tools (`get_script_context`, `get_line_details`) to fetch the most current information from the database. Do not rely on prior turn memory for specific line text or script structure; always fetch fresh data if the query pertains to it.
-    2.  **Informed Proposals:** When using the `propose_script_modification` tool, ensure your suggestions are based on the context you've actively fetched for the relevant script, category, or line.
-    3.  **Proactive Information Gathering:** If a user's request is about a specific part of the script (e.g., "improve the intro," "make line X more sarcastic," "what's the theme of the 'Chapter 1' category?") and they haven't provided all necessary details, use your tools to get that information first. For example, if they mention a line key or category name, use that to query.
-    4.  **Character Consistency:** The character description is vital. Always use `get_script_context` to understand the character when generating new lines or refining existing ones to ensure they are in character.
-    5.  **Tool Usage:**
-        *   Use `get_script_context` to fetch broader script details, category lines, or a line with its surroundings.
-        *   Use `get_line_details` to get all attributes of a single, specific line if you have its ID.
-        *   Use `propose_script_modification` to suggest concrete changes to lines or propose new lines. Remember to provide `suggested_line_key` and `suggested_order_index` when proposing new lines (e.g., for `NEW_LINE_IN_CATEGORY`, `INSERT_LINE_AFTER`, `INSERT_LINE_BEFORE`).
-        *   Use `add_to_scratchpad` for saving general notes, ideas, or brainstorming that isn't a direct line edit.
-    6.  **Interaction Style:** Be helpful, concise, and conversational. Ask clarifying questions if a request is ambiguous, but prefer to use your tools to find information first.
+    1.  **Be Context-Driven:** Before answering questions about script content (lines, categories, overall script) or proposing modifications, YOU MUST first use the available tools (`get_script_context`, `get_line_details`) to fetch the most current information from the database. Do not rely on prior turn memory for specific line text or script structure; always fetch fresh data if the query pertains to it. The character description is a key part of this context.
+    2.  **Informed Proposals:** When using `propose_script_modification` (for lines) or when suggesting a character description change, ensure your suggestions are based on the context you've actively fetched.
+    3.  **Proactive Information Gathering:** If a user's request is about a specific part of the script or character, use your tools to get that information first.
+    4.  **Character Consistency & Evolution:** The character description is vital. 
+        *   Always use `get_script_context` to understand the current character description when generating new lines or refining existing ones.
+        *   If the user wishes to update the character description, or if through collaboration you arrive at a refined description, YOU SHOULD PREFER to use the `stage_character_description_update` tool. This allows the user to review your proposed description before it's saved.
+        *   Only use the `update_character_description` tool for direct updates if the user explicitly bypasses the staging/review step or if they are confirming a previously staged update that you are now re-confirming for some reason (though this latter case should be rare).
+    5.  **Tool Usage & Change Workflow:**
+        *   `get_script_context`: Fetches script details. Args in `params` object.
+        *   `get_line_details`: Fetches details for a single line. Args in `params` object.
+        *   `propose_multiple_line_modifications` **(Preferred for multiple lines):** Use this tool to submit multiple formulated line changes at once for user review. When the user asks for changes to multiple lines, get context, formulate ALL the changes, and then submit them together in a single call to this tool. Args MUST be in a `params` object containing `script_id` and a `proposals` list, where each item in the list has `modification_type`, `target_id`, `new_text`, etc. Example: `{"params": {"script_id": 1, "proposals": [{"modification_type": "REPLACE_LINE", "target_id": 1, ...}, {"modification_type": "REPLACE_LINE", "target_id": 2, ...}]}}`. DO NOT ask for confirmation again after the user has requested the changes.
+        *   `propose_script_modification` **(Use only for SINGLE line changes):** Use this only if you need to propose a change for exactly one line. Arguments MUST be in a `params` object.
+        *   `add_to_scratchpad`: Saves notes. Args in `params` object.
+        *   `stage_character_description_update`: Submits a new character description for review. Args in `params` object.
+        *   `update_character_description`: Directly updates character description. Args in `params` object. Use cautiously.
+    6.  **Interaction Style:**
+        *   When you formulate a new character description, use `stage_character_description_update` to present it for user review.
+        *   When the user asks you to refine or change **multiple** script lines, understand their request, gather context, formulate all the new lines, and then **directly use the `propose_multiple_line_modifications` tool (ensuring correct JSON argument structure) without further conversational delay.** Your textual response should then confirm submission of the batch.
+        *   If only changing a single line, you may use `propose_script_modification` directly.
 
-    Always aim to act like an intelligent assistant who can independently use the provided tools to gather necessary data to fulfill the user's request comprehensively.
+    Always aim to act like an intelligent assistant who can independently use the provided tools to gather necessary data and submit concrete, actionable changes for the user's review to fulfill their request comprehensively.
 """)
 
 # --- Pydantic Models for Tools ---
@@ -97,8 +114,8 @@ def get_script_context(params: GetScriptContextParams) -> ScriptContextResponse:
     num_surrounding = params.include_surrounding_lines if params.include_surrounding_lines is not None else 3
     num_surrounding = max(0, min(num_surrounding, 10))
 
-    response_kwargs = {"script_id": params.script_id}
-    
+    response_kwargs = {"script_id": params.script_id, "error": None} # Initialize error as None
+    final_response_obj = None
     try:
         script = db.query(models.VoScript).options(joinedload(models.VoScript.template)).filter(models.VoScript.id == params.script_id).first()
         if not script:
@@ -217,16 +234,32 @@ def get_script_context(params: GetScriptContextParams) -> ScriptContextResponse:
                 ) for l in all_lines_db
             ]
             
-        return ScriptContextResponse(**response_kwargs)
+        # --- Add detailed logging before returning --- 
+        logger.info(f"[get_script_context] Raw response_kwargs before creating ScriptContextResponse: {response_kwargs}")
+        final_response_obj = ScriptContextResponse(**response_kwargs)
+        try:
+            logger.info(f"[get_script_context] Attempting to return ScriptContextResponse (JSON): {final_response_obj.model_dump_json(indent=2)}")
+        except Exception as serialization_exc:
+            logger.error(f"[get_script_context] Error serializing ScriptContextResponse for logging: {serialization_exc}")
+            logger.info(f"[get_script_context] Returning ScriptContextResponse (object form): {final_response_obj}")
+        return final_response_obj
     except Exception as e:
-        print(f"Error in get_script_context: {e}") 
-        import traceback
-        traceback.print_exc()
-        return ScriptContextResponse(script_id=params.script_id, error=f"Error fetching script context: {str(e)}")
+        logger.error(f"[get_script_context] Unhandled error: {e}", exc_info=True)
+        # Construct a clear error response if one wasn't already formed
+        error_response = ScriptContextResponse(
+            script_id=params.script_id, 
+            error=f"Unhandled error in get_script_context: {str(e)}"
+        )
+        try:
+            logger.info(f"[get_script_context] Attempting to return ERROR ScriptContextResponse (JSON): {error_response.model_dump_json(indent=2)}")
+        except Exception as serialization_exc_err:
+            logger.error(f"[get_script_context] Error serializing ERROR ScriptContextResponse for logging: {serialization_exc_err}")
+            logger.info(f"[get_script_context] Returning ERROR ScriptContextResponse (object form): {error_response}")
+        return error_response
     finally:
         if db.is_active: db.close() # Close session from generator
 
-# --- Pydantic Models for propose_script_modification Tool ---
+# --- Pydantic Models for propose_script_modification Tool (Single - To be Deprecated/Refocused) ---
 class ModificationType(str, Enum):
     REPLACE_LINE = "REPLACE_LINE"
     INSERT_LINE_AFTER = "INSERT_LINE_AFTER"
@@ -260,24 +293,22 @@ class ProposedModificationResponse(BaseModel):
     proposal: Optional[ProposedModificationDetail] = None
     error: Optional[str] = None
 
-# --- Tool Definition for propose_script_modification ---
+# --- Tool Definition for propose_script_modification (Single) ---
 @function_tool
 def propose_script_modification(params: ProposeScriptModificationParams) -> ProposedModificationResponse:
     """
-    Proposes a modification to a script line or category.
-    This tool DOES NOT directly write to the database. It returns a structured proposal for the user to review and commit.
-    'target_id' should be a line_id for REPLACE_LINE, INSERT_LINE_AFTER, INSERT_LINE_BEFORE.
-    'target_id' should be a category_id for NEW_LINE_IN_CATEGORY.
-    'new_text' is required for modifications that add or change text.
+    (Less Preferred) Proposes a modification for **only one** script line. Use propose_multiple_line_modifications for multiple lines.
+    Returns a structured proposal for user review. Does not write to the database.
+    Arguments MUST be in a `params` object.
     """
+    # ... (existing implementation for single proposal) ...
     try:
-        if params.modification_type in [ModificationType.REPLACE_LINE, ModificationType.NEW_LINE_IN_CATEGORY] and not params.new_text:
-            return ProposedModificationResponse(error=f"New text is required for modification type {params.modification_type.value}.")
-        if params.modification_type in [ModificationType.INSERT_LINE_AFTER, ModificationType.INSERT_LINE_BEFORE] and not params.new_text:
-             return ProposedModificationResponse(error=f"New text is required for modification type {params.modification_type.value}.")
+        # Add logger info
+        logger.info(f"Processing SINGLE proposal via propose_script_modification. Type: {params.modification_type}, Target: {params.target_id}")
+        if params.modification_type in [ModificationType.REPLACE_LINE, ModificationType.NEW_LINE_IN_CATEGORY, ModificationType.INSERT_LINE_AFTER, ModificationType.INSERT_LINE_BEFORE] and not params.new_text:
+            return ProposedModificationResponse(error=f"New text is required for modification type {params.modification_type.value}. Use propose_multiple_line_modifications for batch proposals.")
 
         proposal_id = str(uuid.uuid4())
-        
         proposal_detail = ProposedModificationDetail(
             proposal_id=proposal_id,
             script_id=params.script_id,
@@ -293,10 +324,81 @@ def propose_script_modification(params: ProposeScriptModificationParams) -> Prop
         return ProposedModificationResponse(proposal=proposal_detail)
 
     except Exception as e:
-        print(f"Error in propose_script_modification: {e}")
-        import traceback
-        traceback.print_exc()
-        return ProposedModificationResponse(error=f"Error creating proposal: {str(e)}")
+        logger.error(f"Error in single propose_script_modification: {e}", exc_info=True)
+        return ProposedModificationResponse(error=f"Error creating single proposal: {str(e)}")
+
+# --- Pydantic Models for BATCH propose_multiple_line_modifications Tool --- #
+class LineModificationProposalInput(BaseModel):
+    # Fields needed for a single proposal, EXCLUDING script_id (passed once)
+    modification_type: ModificationType
+    target_id: int 
+    new_text: Optional[str] = None
+    reasoning: Optional[str] = None
+    suggested_line_key: Optional[str] = None
+    suggested_order_index: Optional[int] = None
+    # character_id, metadata_notes could be added if needed per-line
+
+class ProposeMultipleModificationsParams(BaseModel):
+    script_id: int = Field(..., description="The ID of the VO Script these proposals belong to.")
+    proposals: List[LineModificationProposalInput] = Field(..., description="A list of line modification proposals.")
+
+class ProposeMultipleModificationsResponse(BaseModel):
+    proposals_staged: List[ProposedModificationDetail] = [] # Returns full details needed by frontend
+    success_count: int = 0
+    failed_count: int = 0
+    message: str # e.g., "Staged 3 proposals for review (1 failed validation)."
+    error: Optional[str] = None # For total tool failure
+
+# --- Tool Definition for BATCH propose_multiple_line_modifications --- #
+@function_tool
+def propose_multiple_line_modifications(params: ProposeMultipleModificationsParams) -> ProposeMultipleModificationsResponse:
+    """ (Preferred) Stages multiple script line modification proposals for user review in a single batch. Does not write to the database. Arguments MUST be in a `params` object. """
+    logger.info(f"Processing BATCH proposal via propose_multiple_line_modifications for script {params.script_id}. Count: {len(params.proposals)}")
+    
+    staged_proposals = []
+    success_count = 0
+    failed_count = 0
+    failure_reasons = []
+
+    for i, proposal_input in enumerate(params.proposals):
+        try:
+            # Validation (Example: check for new_text if required)
+            if proposal_input.modification_type in [ModificationType.REPLACE_LINE, ModificationType.NEW_LINE_IN_CATEGORY, ModificationType.INSERT_LINE_AFTER, ModificationType.INSERT_LINE_BEFORE] and not proposal_input.new_text:
+                raise ValueError(f"New text is required for modification type {proposal_input.modification_type.value}")
+
+            # Generate proposal ID and create the full detail object
+            proposal_id = str(uuid.uuid4())
+            proposal_detail = ProposedModificationDetail(
+                proposal_id=proposal_id,
+                script_id=params.script_id, # Add script_id back in
+                modification_type=proposal_input.modification_type,
+                target_id=proposal_input.target_id,
+                new_text=proposal_input.new_text,
+                reasoning=proposal_input.reasoning,
+                suggested_line_key=proposal_input.suggested_line_key,
+                suggested_order_index=proposal_input.suggested_order_index,
+                # Set others to None if not included in input model
+                character_id=None, 
+                metadata_notes=None 
+            )
+            staged_proposals.append(proposal_detail)
+            success_count += 1
+        except Exception as e:
+            failed_count += 1
+            fail_msg = f"Proposal {i+1} (TargetID: {proposal_input.target_id}, Type: {proposal_input.modification_type}) failed validation: {str(e)}"
+            logger.warning(f"[Batch Proposal] {fail_msg}")
+            failure_reasons.append(fail_msg)
+
+    final_message = f"Staged {success_count} proposals for review."
+    if failed_count > 0:
+        final_message += f" ({failed_count} failed validation: {'; '.join(failure_reasons[:2])}...)."
+        
+    return ProposeMultipleModificationsResponse(
+        proposals_staged=staged_proposals,
+        success_count=success_count,
+        failed_count=failed_count,
+        message=final_message
+    )
 
 # --- Pydantic Models for get_line_details Tool ---
 class GetLineDetailsParams(BaseModel):
@@ -456,6 +558,81 @@ def add_to_scratchpad(params: AddToScratchpadParams) -> AddToScratchpadResponse:
     finally:
         pass # DB session closed by get_db_session context manager
 
+# --- Pydantic Models for update_character_description Tool (Direct Update - may be deprecated/refactored later) ---
+class UpdateCharacterDescriptionParams(BaseModel):
+    script_id: int = Field(..., description="The ID of the VO Script whose character description should be updated.")
+    new_description: str = Field(..., description="The new character description text.")
+    reasoning: Optional[str] = Field(None, description="Optional reason why the description is being updated.")
+
+class UpdateCharacterDescriptionResponse(BaseModel):
+    success: bool
+    message: str
+    updated_description: Optional[str] = None
+
+# --- Tool Definition for update_character_description (Direct Update) ---
+@function_tool
+def update_character_description(params: UpdateCharacterDescriptionParams) -> UpdateCharacterDescriptionResponse:
+    db_session_gen = get_db_session()
+    db: Session = next(db_session_gen)
+    try:
+        script = db.query(models.VoScript).filter(models.VoScript.id == params.script_id).first()
+        if not script:
+            return UpdateCharacterDescriptionResponse(success=False, message=f"Script ID {params.script_id} not found.")
+
+        script.character_description = params.new_description
+        db.commit()
+        db.refresh(script)
+        logger.info(f"Character description for script {params.script_id} updated directly. Reasoning: {params.reasoning}")
+        return UpdateCharacterDescriptionResponse(
+            success=True, 
+            message="Character description updated successfully (direct update).",
+            updated_description=script.character_description
+        )
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error in direct update_character_description for script {params.script_id}: {e}", exc_info=True)
+        return UpdateCharacterDescriptionResponse(success=False, message=f"Failed to directly update character description: {str(e)}")
+    finally:
+        if db.is_active: db.close()
+
+# --- Pydantic Models for STAGING Character Description Update Tool ---
+class StageCharacterDescriptionParams(BaseModel):
+    script_id: int = Field(..., description="The ID of the VO Script for which the description update is being staged.")
+    new_description: str = Field(..., description="The proposed new character description text.")
+    reasoning: Optional[str] = Field(None, description="The agent's reasoning for proposing this change.")
+
+class StagedCharacterDescriptionData(BaseModel):
+    script_id: int # Keep script_id for context if needed by frontend
+    new_description: str
+    reasoning: Optional[str] = None
+
+class StageCharacterDescriptionToolResponse(BaseModel):
+    staged_update: Optional[StagedCharacterDescriptionData] = None
+    message: str # e.g., "Character description staged for review."
+    error: Optional[str] = None
+
+# --- Tool Definition for STAGING Character Description Update ---
+@function_tool
+def stage_character_description_update(params: StageCharacterDescriptionParams) -> StageCharacterDescriptionToolResponse:
+    """Stages a proposed update to a character description for user review. Does not write to the database directly."""
+    logger.info(f"Staging character description update for script ID: {params.script_id}. Reasoning: {params.reasoning}")
+    # Basic validation (further validation could be added if needed)
+    if not params.new_description or len(params.new_description) < 5: # Arbitrary min length
+        return StageCharacterDescriptionToolResponse(
+            error="New description is too short or empty.",
+            message="Failed to stage character description: Text too short."
+        )
+    
+    staged_data = StagedCharacterDescriptionData(
+        script_id=params.script_id,
+        new_description=params.new_description,
+        reasoning=params.reasoning
+    )
+    return StageCharacterDescriptionToolResponse(
+        staged_update=staged_data,
+        message="Character description update has been staged for your review."
+    )
+
 class ScriptCollaboratorAgent(Agent):
     def __init__(self, **kwargs):
         super().__init__(
@@ -464,9 +641,11 @@ class ScriptCollaboratorAgent(Agent):
             model=OPENAI_AGENT_MODEL,
             tools=[
                 get_script_context, 
-                propose_script_modification,
+                propose_multiple_line_modifications,
                 get_line_details,
-                add_to_scratchpad
+                add_to_scratchpad,
+                update_character_description,
+                stage_character_description_update
             ],
             **kwargs
         )

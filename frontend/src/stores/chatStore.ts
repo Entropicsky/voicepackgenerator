@@ -1,5 +1,5 @@
 import { create, StateCreator } from 'zustand';
-import { ProposedModificationDetail } from '../types'; // Import the new type
+import { ProposedModificationDetail, StagedCharacterDescriptionData } from '../types'; // Import the new type
 
 export interface ChatMessage {
     role: 'user' | 'assistant';
@@ -22,6 +22,7 @@ export interface ChatState {
     currentAgentTaskID: string | null;
     error: string | null;
     activeProposals: ProposedModificationDetail[];
+    stagedDescriptionUpdate: StagedCharacterDescriptionData | null;
 
     toggleChatOpen: () => void;
     openChatWithFocus: (focus: ChatFocus) => void;
@@ -36,6 +37,8 @@ export interface ChatState {
     setActiveProposals: (proposals: ProposedModificationDetail[]) => void;
     removeProposal: (proposalId: string) => void; // To remove one after action
     clearActiveProposals: () => void;
+    setStagedDescriptionUpdate: (update: StagedCharacterDescriptionData | null) => void;
+    clearStagedDescriptionUpdate: () => void;
 }
 
 // Explicitly type the creator function for better type safety
@@ -48,6 +51,7 @@ const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
     currentAgentTaskID: null,
     error: null,
     activeProposals: [],
+    stagedDescriptionUpdate: null,
 
     toggleChatOpen: () => set((state) => ({ isChatOpen: !state.isChatOpen })),
     
@@ -91,6 +95,9 @@ const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
             activeProposals: state.activeProposals.filter(p => p.proposal_id !== proposalId) 
         })),
     clearActiveProposals: () => set({ activeProposals: [] }),
+
+    setStagedDescriptionUpdate: (update) => set({ stagedDescriptionUpdate: update }),
+    clearStagedDescriptionUpdate: () => set({ stagedDescriptionUpdate: null }),
 });
 
 export const useChatStore = create<ChatState>(chatStoreCreator);
