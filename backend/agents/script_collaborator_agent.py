@@ -8,7 +8,7 @@ from datetime import datetime # Ensure datetime is imported for Pydantic model
 
 # Database session and models
 from backend import models # To access VoScript, VoScriptLine etc.
-from sqlalchemy.orm import Session 
+from sqlalchemy.orm import Session, joinedload
 
 # Helper to get DB session (assuming models.get_db() is appropriate)
 # This mirrors the FastAPI dependency pattern for use in tools.
@@ -25,11 +25,21 @@ OPENAI_AGENT_MODEL = os.getenv("OPENAI_AGENT_MODEL", "gpt-4o")
 
 # Initial Agent Instructions from the Tech Spec
 AGENT_INSTRUCTIONS = ("""
-    You are an expert scriptwriting assistant. You are collaborating with a game designer to refine voice-over scripts.
-    Your goal is to help them improve script lines, brainstorm ideas, and ensure consistency.
-    When asked to modify a line or suggest new content, use the 'propose_script_modification' tool.
-    For general discussion or brainstorming that isn't a direct line edit, use your conversational abilities. You can use the 'add_to_scratchpad' tool to save interesting ideas.
-    Always be helpful, concise, and focus on the user's active script context (e.g., a specific line or category they are working on).
+    You are an expert scriptwriting assistant, designed to be a highly capable and context-aware collaborator for game designers working on voice-over scripts. Your primary goal is to help them draft, refine, and brainstorm script content effectively.
+
+    **Core Principles:**
+    1.  **Be Context-Driven:** Before answering questions about script content (lines, categories, overall script) or proposing modifications, YOU MUST first use the available tools (`get_script_context`, `get_line_details`) to fetch the most current information from the database. Do not rely on prior turn memory for specific line text or script structure; always fetch fresh data if the query pertains to it.
+    2.  **Informed Proposals:** When using the `propose_script_modification` tool, ensure your suggestions are based on the context you've actively fetched for the relevant script, category, or line.
+    3.  **Proactive Information Gathering:** If a user's request is about a specific part of the script (e.g., "improve the intro," "make line X more sarcastic," "what's the theme of the 'Chapter 1' category?") and they haven't provided all necessary details, use your tools to get that information first. For example, if they mention a line key or category name, use that to query.
+    4.  **Character Consistency:** The character description is vital. Always use `get_script_context` to understand the character when generating new lines or refining existing ones to ensure they are in character.
+    5.  **Tool Usage:**
+        *   Use `get_script_context` to fetch broader script details, category lines, or a line with its surroundings.
+        *   Use `get_line_details` to get all attributes of a single, specific line if you have its ID.
+        *   Use `propose_script_modification` to suggest concrete changes to lines or propose new lines. Remember to provide `suggested_line_key` and `suggested_order_index` when proposing new lines (e.g., for `NEW_LINE_IN_CATEGORY`, `INSERT_LINE_AFTER`, `INSERT_LINE_BEFORE`).
+        *   Use `add_to_scratchpad` for saving general notes, ideas, or brainstorming that isn't a direct line edit.
+    6.  **Interaction Style:** Be helpful, concise, and conversational. Ask clarifying questions if a request is ambiguous, but prefer to use your tools to find information first.
+
+    Always aim to act like an intelligent assistant who can independently use the provided tools to gather necessary data to fulfill the user's request comprehensively.
 """)
 
 # --- Pydantic Models for Tools ---
@@ -37,22 +47,38 @@ class GetScriptContextParams(BaseModel):
     script_id: int
     category_id: Optional[int] = None
     line_id: Optional[int] = None
-    include_surrounding_lines: Optional[int] = None # Made Optional, default will be handled in logic
+    include_surrounding_lines: Optional[int] = None
 
 class LineDetail(BaseModel):
     id: int
     line_key: Optional[str] = None
-    text: Optional[str] = None
+    text: Optional[str] = None # VoScriptLine.generated_text
     order_index: Optional[int] = None
-    # Add other relevant fields from VoScriptLine as needed for context
+    vo_script_line_prompt_hint: Optional[str] = None # From VoScriptLine.prompt_hint
+    template_line_prompt_hint: Optional[str] = None # From VoScriptLine.template_line.prompt_hint
+    # Optionally, add category_id/name to each line if returning a flat list for the whole script
+    category_id_for_line: Optional[int] = None 
+    category_name_for_line: Optional[str] = None
+
+class CategoryDetail(BaseModel):
+    id: int
+    name: str
+    prompt_instructions: Optional[str] = None
+    lines: List[LineDetail] # Lines within this category
 
 class ScriptContextResponse(BaseModel):
     script_id: int
     script_name: Optional[str] = None
     character_description: Optional[str] = None
-    category_name: Optional[str] = None
-    lines: Optional[List[LineDetail]] = None # For category/full script context
-    target_line: Optional[LineDetail] = None # For specific line context
+    template_global_hint: Optional[str] = None # From VoScript.template.prompt_hint
+    
+    # If a specific category is requested or relevant to a line:
+    focused_category_details: Optional[CategoryDetail] = None 
+    
+    # If no specific category/line, or for overall context, list all lines (could be flat or grouped by unincluded category headers)
+    all_script_lines: Optional[List[LineDetail]] = None 
+    
+    target_line: Optional[LineDetail] = None # Populated if line_id is given
     surrounding_before: Optional[List[LineDetail]] = None
     surrounding_after: Optional[List[LineDetail]] = None
     error: Optional[str] = None
@@ -61,94 +87,144 @@ class ScriptContextResponse(BaseModel):
 @function_tool
 def get_script_context(params: GetScriptContextParams) -> ScriptContextResponse:
     """
-    Fetches the content of the current script, a specific category, or a specific line.
-    Can optionally include a few surrounding lines for better conversational context if a line_id is provided.
+    Fetches context for a script. If category_id is given, focuses on that category.
+    If line_id is given, focuses on that line and its surroundings within its category (if any).
+    If only script_id is given, returns all lines and general script info.
     """
     db_session_gen = get_db_session()
     db: Session = next(db_session_gen)
     
-    # Handle default for include_surrounding_lines
     num_surrounding = params.include_surrounding_lines if params.include_surrounding_lines is not None else 3
-    # Basic validation for the number, even if not in schema
-    num_surrounding = max(0, min(num_surrounding, 10)) # Cap between 0 and 10
+    num_surrounding = max(0, min(num_surrounding, 10))
 
-    response_data = {"script_id": params.script_id}
+    response_kwargs = {"script_id": params.script_id}
     
     try:
-        script = db.query(models.VoScript).filter(models.VoScript.id == params.script_id).first()
+        script = db.query(models.VoScript).options(joinedload(models.VoScript.template)).filter(models.VoScript.id == params.script_id).first()
         if not script:
             return ScriptContextResponse(script_id=params.script_id, error="Script not found.")
         
-        response_data["script_name"] = script.name
-        response_data["character_description"] = script.character_description
+        response_kwargs["script_name"] = script.name
+        response_kwargs["character_description"] = script.character_description
+        if script.template:
+            response_kwargs["template_global_hint"] = script.template.prompt_hint
 
-        query = db.query(models.VoScriptLine).filter(models.VoScriptLine.vo_script_id == params.script_id)
+        # Determine base query for lines
+        lines_query = db.query(models.VoScriptLine).options(
+            joinedload(models.VoScriptLine.template_line).joinedload(models.VoScriptTemplateLine.category)
+        ).filter(models.VoScriptLine.vo_script_id == params.script_id)
+
+        category_template_for_line_detail = None
 
         if params.category_id:
-            category = db.query(models.VoScriptTemplateCategory).filter(models.VoScriptTemplateCategory.id == params.category_id).first()
-            if category:
-                response_data["category_name"] = category.name
-            # Important: Filter VoScriptLine by category_id. This assumes VoScriptLine.category_id links to VoScriptTemplateCategory.id
-            # Need to confirm VoScriptLine.category_id is correctly populated and refers to the template category ID.
-            # If VoScriptLine.category_id refers to something else, or if category context is derived differently (e.g. via template_line), this needs adjustment.
-            query = query.filter(models.VoScriptLine.category_id == params.category_id) 
+            category_template = db.query(models.VoScriptTemplateCategory).filter(models.VoScriptTemplateCategory.id == params.category_id).first()
+            if not category_template or (script.template_id and category_template.template_id != script.template_id):
+                return ScriptContextResponse(script_id=params.script_id, error=f"Category ID {params.category_id} not found or not part of script's template.")
+            
+            lines_in_category_db = lines_query.filter(models.VoScriptLine.category_id == params.category_id).order_by(models.VoScriptLine.order_index, models.VoScriptLine.id).all()
+            line_details_for_category = [
+                LineDetail(
+                    id=l.id, line_key=l.line_key or (l.template_line.line_key if l.template_line else None),
+                    text=l.generated_text, order_index=l.order_index or (l.template_line.order_index if l.template_line else None),
+                    vo_script_line_prompt_hint=l.prompt_hint,
+                    template_line_prompt_hint=l.template_line.prompt_hint if l.template_line else None,
+                    category_id_for_line=l.category_id,
+                    category_name_for_line=category_template.name
+                ) for l in lines_in_category_db
+            ]
+            response_kwargs["focused_category_details"] = CategoryDetail(
+                id=category_template.id, name=category_template.name,
+                prompt_instructions=category_template.prompt_instructions,
+                lines=line_details_for_category
+            )
+            category_template_for_line_detail = category_template # For use if line_id is also specified
         
         if params.line_id:
-            # If category_id was also provided, query is already filtered by category.
-            target_line_db = query.filter(models.VoScriptLine.id == params.line_id).first()
-            if not target_line_db:
-                 return ScriptContextResponse(script_id=params.script_id, error=f"Line ID {params.line_id} not found in script or specified scope.")
+            # If category_id was provided, lines_query is already filtered. Otherwise, it's all lines for the script.
+            if params.category_id:
+                 target_line_db_query = lines_query.filter(models.VoScriptLine.category_id == params.category_id, models.VoScriptLine.id == params.line_id)
+            else: # Search line in any category if category_id is not specified
+                 target_line_db_query = lines_query.filter(models.VoScriptLine.id == params.line_id)
+            
+            target_line_db = target_line_db_query.first()
 
-            response_data["target_line"] = LineDetail(
-                id=target_line_db.id, 
-                line_key=target_line_db.line_key, 
-                text=target_line_db.generated_text, 
-                order_index=target_line_db.order_index
+            if not target_line_db:
+                 return ScriptContextResponse(script_id=params.script_id, error=f"Line ID {params.line_id} not found within the specified scope.")
+
+            # Determine category context for this specific line if not already set by category_id param
+            current_line_category_template = category_template_for_line_detail
+            if not current_line_category_template and target_line_db.category_id:
+                 current_line_category_template = db.query(models.VoScriptTemplateCategory).filter(models.VoScriptTemplateCategory.id == target_line_db.category_id).first()
+            
+            response_kwargs["target_line"] = LineDetail(
+                id=target_line_db.id, line_key=target_line_db.line_key or (target_line_db.template_line.line_key if target_line_db.template_line else None),
+                text=target_line_db.generated_text, order_index=target_line_db.order_index or (target_line_db.template_line.order_index if target_line_db.template_line else None),
+                vo_script_line_prompt_hint=target_line_db.prompt_hint,
+                template_line_prompt_hint=target_line_db.template_line.prompt_hint if target_line_db.template_line else None,
+                category_id_for_line=target_line_db.category_id,
+                category_name_for_line=current_line_category_template.name if current_line_category_template else None
             )
             
+            # If focused_category_details wasn't set by category_id param, set it now based on target_line's category
+            if not response_kwargs.get("focused_category_details") and current_line_category_template:
+                # We need all lines from this category to populate focused_category_details.lines correctly
+                # This might be redundant if category_id was already processed, but good for line_id only case.
+                lines_in_target_category_db = db.query(models.VoScriptLine).options(joinedload(models.VoScriptLine.template_line)).filter(
+                    models.VoScriptLine.vo_script_id == params.script_id,
+                    models.VoScriptLine.category_id == current_line_category_template.id
+                ).order_by(models.VoScriptLine.order_index, models.VoScriptLine.id).all()
+                
+                line_details_for_target_cat = [
+                    LineDetail(
+                        id=l.id, line_key=l.line_key or (l.template_line.line_key if l.template_line else None),
+                        text=l.generated_text, order_index=l.order_index or (l.template_line.order_index if l.template_line else None),
+                        vo_script_line_prompt_hint=l.prompt_hint,
+                        template_line_prompt_hint=l.template_line.prompt_hint if l.template_line else None,
+                        category_id_for_line=l.category_id,
+                        category_name_for_line=current_line_category_template.name
+                    ) for l in lines_in_target_category_db
+                ]
+                response_kwargs["focused_category_details"] = CategoryDetail(
+                    id=current_line_category_template.id, name=current_line_category_template.name,
+                    prompt_instructions=current_line_category_template.prompt_instructions,
+                    lines=line_details_for_target_cat
+                )
+
             if num_surrounding > 0 and target_line_db.order_index is not None:
-                # Base query for surrounding lines (within the same script, and same category if category_id is present)
-                surrounding_query_base = db.query(models.VoScriptLine).filter(models.VoScriptLine.vo_script_id == params.script_id)
-                if params.category_id:
-                    surrounding_query_base = surrounding_query_base.filter(models.VoScriptLine.category_id == params.category_id)
+                surrounding_query_base = db.query(models.VoScriptLine).options(joinedload(models.VoScriptLine.template_line)).filter(models.VoScriptLine.vo_script_id == params.script_id)
+                # Filter by category if target line has one for surrounding lines
+                if target_line_db.category_id:
+                    surrounding_query_base = surrounding_query_base.filter(models.VoScriptLine.category_id == target_line_db.category_id)
 
-                lines_before_db = surrounding_query_base.filter(models.VoScriptLine.order_index < target_line_db.order_index)\
-                    .order_by(models.VoScriptLine.order_index.desc())\
-                    .limit(num_surrounding).all() # Use num_surrounding
-                response_data["surrounding_before"] = [
-                    LineDetail(id=l.id, line_key=l.line_key, text=l.generated_text, order_index=l.order_index) 
-                    for l in reversed(lines_before_db)
-                ]
-
-                lines_after_db = surrounding_query_base.filter(models.VoScriptLine.order_index > target_line_db.order_index)\
-                    .order_by(models.VoScriptLine.order_index.asc())\
-                    .limit(num_surrounding).all() # Use num_surrounding
-                response_data["surrounding_after"] = [
-                    LineDetail(id=l.id, line_key=l.line_key, text=l.generated_text, order_index=l.order_index) 
-                    for l in lines_after_db
-                ]
-        else:
-            # No specific line_id, fetch all lines for the script (and category if specified)
-            all_lines_db = query.order_by(models.VoScriptLine.order_index, models.VoScriptLine.id).all()
-            response_data["lines"] = [
-                LineDetail(id=l.id, line_key=l.line_key, text=l.generated_text, order_index=l.order_index) 
-                for l in all_lines_db
+                lines_before_db = surrounding_query_base.filter(models.VoScriptLine.order_index < target_line_db.order_index).order_by(models.VoScriptLine.order_index.desc()).limit(num_surrounding).all()
+                response_kwargs["surrounding_before"] = [LineDetail(id=l.id, line_key=l.line_key or (l.template_line.line_key if l.template_line else None), text=l.generated_text, order_index=l.order_index or (l.template_line.order_index if l.template_line else None), vo_script_line_prompt_hint=l.prompt_hint, template_line_prompt_hint=l.template_line.prompt_hint if l.template_line else None, category_id_for_line=l.category_id, category_name_for_line=current_line_category_template.name if current_line_category_template else None) for l in reversed(lines_before_db)]
+                lines_after_db = surrounding_query_base.filter(models.VoScriptLine.order_index > target_line_db.order_index).order_by(models.VoScriptLine.order_index.asc()).limit(num_surrounding).all()
+                response_kwargs["surrounding_after"] = [LineDetail(id=l.id, line_key=l.line_key or (l.template_line.line_key if l.template_line else None), text=l.generated_text, order_index=l.order_index or (l.template_line.order_index if l.template_line else None), vo_script_line_prompt_hint=l.prompt_hint, template_line_prompt_hint=l.template_line.prompt_hint if l.template_line else None, category_id_for_line=l.category_id, category_name_for_line=current_line_category_template.name if current_line_category_template else None) for l in lines_after_db]
+        
+        elif not params.category_id: # Only script_id given, fetch all lines (flat list for now)
+            all_lines_db = lines_query.order_by(models.VoScriptLine.category_id, models.VoScriptLine.order_index, models.VoScriptLine.id).all()
+            # To get category name for each line, we might need a more complex query or iterate and fetch
+            # For simplicity in this pass, category_name_for_line might be None if not easily available
+            # TODO: Enhance this to efficiently fetch category names for all_script_lines
+            response_kwargs["all_script_lines"] = [
+                LineDetail(
+                    id=l.id, line_key=l.line_key or (l.template_line.line_key if l.template_line else None),
+                    text=l.generated_text, order_index=l.order_index or (l.template_line.order_index if l.template_line else None),
+                    vo_script_line_prompt_hint=l.prompt_hint,
+                    template_line_prompt_hint=l.template_line.prompt_hint if l.template_line else None,
+                    category_id_for_line=l.category_id,
+                    category_name_for_line=l.template_line.category.name if (l.template_line and l.template_line.category) else None # Example
+                ) for l in all_lines_db
             ]
             
-        return ScriptContextResponse(**response_data)
-
+        return ScriptContextResponse(**response_kwargs)
     except Exception as e:
-        # TODO: Add proper logging here
-        print(f"Error in get_script_context: {e}") # Temporary print
+        print(f"Error in get_script_context: {e}") 
         import traceback
-        traceback.print_exc() # Temporary print
+        traceback.print_exc()
         return ScriptContextResponse(script_id=params.script_id, error=f"Error fetching script context: {str(e)}")
     finally:
-        # Ensure the generator is exhausted to close the session via the try/finally in get_db_session
-        # This happens naturally if next(db_session_gen) was the only call, 
-        # but if it were in a loop, it needs careful handling.
-        # The way get_db_session is written, db.close() handles it.
-        pass
+        if db.is_active: db.close() # Close session from generator
 
 # --- Pydantic Models for propose_script_modification Tool ---
 class ModificationType(str, Enum):
@@ -231,12 +307,14 @@ class VoScriptLineFullDetail(BaseModel):
     vo_script_id: int
     template_line_id: Optional[int] = None
     category_id: Optional[int] = None
+    category_name: Optional[str] = None 
+    category_prompt_instructions: Optional[str] = None
     line_key: Optional[str] = None
     order_index: Optional[int] = None
-    prompt_hint: Optional[str] = None
+    prompt_hint: Optional[str] = None # This is VoScriptLine.prompt_hint (direct on the line)
+    template_line_prompt_hint: Optional[str] = None # From VoScriptLine.template_line.prompt_hint
     generated_text: Optional[str] = None
     status: Optional[str] = None
-    # generation_history: Optional[Dict[str, Any]] = None # Omitting for MVP simplicity unless strictly needed by agent
     latest_feedback: Optional[str] = None
     is_locked: Optional[bool] = None
     created_at: Optional[datetime] = None 
@@ -250,25 +328,46 @@ class GetLineDetailsResponse(BaseModel):
 @function_tool
 def get_line_details(params: GetLineDetailsParams) -> GetLineDetailsResponse:
     """
-    Fetches all details for a specific VO script line given its ID.
+    Fetches all details for a specific VO script line given its ID,
+    including related template and category context.
     """
     db_session_gen = get_db_session()
     db: Session = next(db_session_gen)
 
     try:
-        line_db = db.query(models.VoScriptLine).filter(models.VoScriptLine.id == params.line_id).first()
+        line_db = db.query(models.VoScriptLine).options(
+            joinedload(models.VoScriptLine.template_line).joinedload(models.VoScriptTemplateLine.category) # Eager load template line and its category
+        ).filter(models.VoScriptLine.id == params.line_id).first()
 
         if not line_db:
             return GetLineDetailsResponse(error=f"VoScriptLine with ID {params.line_id} not found.")
+
+        category_name_val = None
+        category_instructions_val = None
+        template_line_hint_val = None
+
+        if line_db.template_line:
+            template_line_hint_val = line_db.template_line.prompt_hint
+            if line_db.template_line.category:
+                category_name_val = line_db.template_line.category.name
+                category_instructions_val = line_db.template_line.category.prompt_instructions
+        elif line_db.category_id: # If it's a custom line with a direct category_id
+            category_db = db.query(models.VoScriptTemplateCategory).filter(models.VoScriptTemplateCategory.id == line_db.category_id).first()
+            if category_db:
+                category_name_val = category_db.name
+                category_instructions_val = category_db.prompt_instructions
 
         line_detail_data = {
             "id": line_db.id,
             "vo_script_id": line_db.vo_script_id,
             "template_line_id": line_db.template_line_id,
             "category_id": line_db.category_id,
+            "category_name": category_name_val,
+            "category_prompt_instructions": category_instructions_val,
             "line_key": line_db.line_key,
             "order_index": line_db.order_index,
-            "prompt_hint": line_db.prompt_hint,
+            "prompt_hint": line_db.prompt_hint, # This is VoScriptLine.prompt_hint
+            "template_line_prompt_hint": template_line_hint_val,
             "generated_text": line_db.generated_text,
             "status": line_db.status,
             "latest_feedback": line_db.latest_feedback,
@@ -286,7 +385,7 @@ def get_line_details(params: GetLineDetailsParams) -> GetLineDetailsResponse:
         traceback.print_exc()
         return GetLineDetailsResponse(error=f"Error fetching line details: {str(e)}")
     finally:
-        pass 
+        if db.is_active: db.close()
 
 # --- Pydantic Models for add_to_scratchpad Tool ---
 class AddToScratchpadParams(BaseModel):
@@ -367,7 +466,7 @@ class ScriptCollaboratorAgent(Agent):
                 get_script_context, 
                 propose_script_modification,
                 get_line_details,
-                add_to_scratchpad # Register the new tool
+                add_to_scratchpad
             ],
             **kwargs
         )

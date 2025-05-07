@@ -1,4 +1,74 @@
-# Project Checklist
+# Project Checklist: AI Script Collaborator Chat
+
+**Overall Status:** Phase 5 (Frontend Interaction Logic) largely complete, basic chat flow operational. Ready for more advanced interaction patterns or deployment prep.
+
+**Phase 1: Backend Foundation (DONE)**
+- [X] Task 1: Define `ScriptNote` model & migration (`backend/models.py`) - DONE
+- [X] Task 2: Define `ScriptCollaboratorAgent` (`backend/agents/script_collaborator_agent.py`) - DONE
+- [X] Task 3: Define Celery task `run_script_collaborator_chat_task` (`backend/tasks/script_tasks.py`) - DONE (Includes history passing)
+- [X] Task 4: Basic Logging Setup (`backend/app.py`, task logger) - DONE
+
+**Phase 2: Agent Tools (DONE)**
+- [X] Task 1: Implement `get_script_context` tool - DONE (Enhanced with template context)
+- [X] Task 2: Implement `propose_script_modification` tool - DONE
+- [X] Task 3: Implement `get_line_details` tool - DONE (Enhanced with context)
+- [X] Task 4: Implement `add_to_scratchpad` tool - DONE
+- [X] Task 5: Seed test data for tools (`seed_chat_test_data.py`) - DONE
+
+**Phase 3: API Endpoints (DONE)**
+- [X] Task 1: Implement `POST /api/vo-scripts/<script_id>/chat` endpoint (`backend/routes/vo_script_routes.py`) - DONE
+- [X] Task 2: Verify `GET /api/task/<task_id>/status` endpoint (`backend/routes/task_routes.py`) - DONE
+
+**Phase 4: Frontend UI Shell (DONE)**
+- [X] Task 1: Create Chat FAB (`ChatFab.tsx`) - DONE
+- [X] Task 2: Implement Chat UI container (Initially Modal, Refactored to `AppShell.Aside` via `ChatPanelContent` in `ChatDrawer.tsx`) - DONE
+- [X] Task 3: Setup Zustand store (`chatStore.ts`) - DONE
+- [X] Task 4: Implement API client functions (`api.ts`) - DONE
+
+**Phase 5: Frontend Interaction Logic (Largely DONE)**
+- [X] Task 1: Implement message sending & display (`ChatPanelContent`) - DONE
+- [X] Task 2: Implement polling for task results (`ChatPanelContent`) - DONE
+- [X] Task 3: Display active proposals (`ChatPanelContent`) - DONE
+- [X] Task 4: Implement proposal actions (Dismiss, Accept REPLACE_LINE) (`ChatPanelContent`) - DONE
+- [X] Task 5: Implement inline editing for REPLACE_LINE proposals (`ChatPanelContent`) - DONE
+- [X] Task 6: Display `line_key` on proposal cards - DONE
+- [X] Task 7: Add "Accept All" functionality - DONE
+- [X] Task 8: Sort proposals by `suggested_order_index` / `suggested_line_key` - DONE
+- [ ] Task 9: Implement actions for other proposal types (INSERT_*, NEW_LINE_*) - TODO
+
+**Phase 6: Frontend Refinements (Partially Done)**
+- [X] Task 1: Improve proposal card display (UI polish) - Addressed during Phase 5
+- [ ] Task 2: Enhance error handling and user feedback - Partially addressed with polling timeout
+- [ ] Task 3: Handle scratchpad display/interaction - TODO
+- [ ] Task 4: Visual indication of focused line/category in main script view? - TODO
+
+**Phase 7: Advanced Agent Interactions & Context (TODO)**
+- [ ] Task 1: Implement agent ability to propose INSERT_LINE_AFTER / INSERT_LINE_BEFORE / NEW_LINE_IN_CATEGORY modifications.
+- [ ] Task 2: Implement agent ability to use `add_to_scratchpad` tool.
+- [ ] Task 3: Enhance agent instructions/prompts for more proactivity and contextual depth (e.g., summarizing category themes, asking clarifying questions before proposing).
+- [ ] Task 4: Handle category-wide feedback/requests (e.g., "Make all lines in category X more aggressive").
+
+**Phase 8: Testing & Deployment (TODO)**
+- [ ] Task 1: Write comprehensive frontend tests (unit, integration).
+- [ ] Task 2: Write comprehensive backend tests (unit, integration).
+- [ ] Task 3: Manual end-to-end testing.
+- [ ] Task 4: Prepare for Heroku deployment (environment variables, buildpacks, etc.).
+- [ ] Task 5: Deployment to staging/production.
+
+**Resilience Notes:**
+- Added frontend polling timeout (`MAX_POLLING_ATTEMPTS`) as a user-facing safeguard.
+- Attempts to configure backend OpenAI client `timeout` / `max_retries` via `Agent` constructor failed due to `TypeError`s with the `openai-agents` SDK.
+- Current implementation relies on default timeout/retry behavior of the underlying `openai` library. Backend resilience enhancement deferred for now.
+
+**Known Issues/Debugging Notes:**
+- (Resolved) Initial `openai-agents` tool decorator was `@tool`, needed `@function_tool`.
+- (Resolved) Pydantic `Field` constraints (min/max length) caused issues with OpenAI tool schema parsing; removed and handled in tool logic.
+- (Resolved) Celery task import/logging issues (`ImportError`, logger setup).
+- (Resolved) Flask `db upgrade` issues (Docker exec path, stamping revisions).
+- (Resolved) Frontend modal display ("blank page") fixed using `AppModal`. Refactored to `AppShell.Aside`.
+- (Resolved) Multiple proposals display logic fixed in Celery task result processing.
+- (Resolved) Agent init `TypeError` loop (`max_retries`, `client` args).
+- (Resolved) `Runner.run_sync` `TypeError` (`messages` keyword).
 
 ## Housekeeping / Setup
 
@@ -83,395 +153,112 @@
 
 1.  **Task: Research & Decide on Mantine Component**
     *   **Sub-Tasks:**
-        *   Evaluate Mantine `Drawer` vs. modifying `AppShell` to include a right-hand toggleable section.
+        *   Evaluate Mantine `Drawer` vs. modifying `AppShell` to include a right-hand toggleable section. (Decision: `AppShell.Aside`)
         *   Consider implications for responsiveness and content shifting.
-    *   **Status:** `Pending`
+    *   **Status:** `DONE`
 
 2.  **Task: Refactor `ChatModal.tsx` (or create `ChatDrawer.tsx`)**
     *   **Sub-Tasks:**
-        *   Adapt existing chat UI elements (history, input, buttons) to fit the chosen Drawer/Panel component.
+        *   Adapt existing chat UI elements (history, input, buttons) to fit the chosen Drawer/Panel component. (Status: `DONE` - Content moved to `ChatPanelContent`)
         *   Ensure styling and layout are appropriate for a docked view.
-    *   **Status:** `Pending`
+    *   **Status:** `DONE`
 
 3.  **Task: Integrate Docked Chat Panel into Main Layout**
     *   **Sub-Tasks:**
-        *   Modify `VoScriptDetailView.tsx` and/or `AppLayout.tsx` (`App.tsx`) to correctly render and manage the docked panel.
-        *   Ensure the main content area adjusts or allows overlay without full dimming, so script lines are visible.
-        *   Update `ChatFab.tsx` or chat-opening logic to control the new docked panel.
-    *   **Status:** `Pending`
+        *   Modify `AppLayout.tsx` (`App.tsx`) to correctly render and manage the docked panel using `AppShell.Aside`. (Status: `DONE`)
+        *   Ensure the main content area adjusts or allows overlay without full dimming, so script lines are visible. (Status: `DONE` - Main content resizes)
+        *   Update `ChatFab.tsx` or chat-opening logic to control the new docked panel. (Status: `DONE` - FAB opens, close button in panel closes)
+    *   **Status:** `DONE`
 
 4.  **Task: Testing and Refinement**
     *   **Sub-Tasks:**
-        *   Test chat functionality thoroughly in the new docked view.
-        *   Test responsiveness across different screen sizes.
-        *   Gather feedback and make necessary UX adjustments.
+        *   Test chat functionality thoroughly in the new docked view. (Status: `DONE` - Basic functionality confirmed)
+        *   Test responsiveness across different screen sizes. (Status: `Pending`)
+        *   Gather feedback and make necessary UX adjustments. (Status: `In Progress`)
+    *   **Status:** `In Progress`
+
+## Phase 7: Advanced Agent Interactions & Context (Post-Docked Panel)
+
+**Goal:** Enhance agent to proactively gather context, handle multi-line/category feedback, propose changes to character descriptions, and maintain conversational memory, making interaction more human-like.
+
+1.  **Task: Enhance Agent Proactive Context Gathering, Conversational Memory & Richness**
+    *   **Sub-Tasks:**
+        *   **1.1 (Context Richness):** Modify `get_script_context` tool & `ScriptContextResponse`/`LineDetail` Pydantic models to fetch and return `template_global_hint`, `category_prompt_instructions`, and `template_line_prompt_hint`. (Status: `Pending`)
+        *   **1.2 (Context Richness):** Modify `get_line_details` tool & `VoScriptLineFullDetail` Pydantic model to include `template_line_prompt_hint`. (Status: `Pending`)
+        *   **1.3 (Conversational Memory):** Modify `run_script_collaborator_chat_task` (in `backend/tasks/script_tasks.py`) to construct the input for `Runner.run_sync` by combining `initial_prompt_context_from_prior_sessions` with the current `user_message` into a list of messages. (Status: `Pending`)
+        *   **1.4 (Agent Guidance):** Refine `AGENT_INSTRUCTIONS` to explicitly guide the agent to:
+            *   Utilize all newly available template context fields.
+            *   Proactively use context-fetching tools before answering or proposing.
+            *   Maintain conversational memory based on provided history.
+            *   Ask clarifying questions when appropriate.
+            *   Proactively offer suggestions.
+        *   **1.5 (Tool Descriptions):** Review and refine all tool descriptions for optimal clarity to the LLM.
+    *   **Status:** `Pending`
+    *   **Testing:** Observe agent behavior with various queries; check if it correctly uses conversation history, calls context tools, and if its responses/proposals reflect richer template context and improved proactivity.
+
+2.  **Task: Implement Multi-Proposal Handling (Category/Batch Refinement)**
+    *   **Sub-Tasks:**
+        *   Backend: Ensure agent can make multiple `propose_script_modification` calls in one turn if refining a category based on general feedback. (Agent SDK supports this; depends on LLM prompting).
+        *   Frontend: Ensure `ChatPanelContent` can display multiple `activeProposals` cards gracefully. (Current map should handle it).
+        *   Frontend: Add UI for "Accept All Visible Proposals" or similar batch actions (optional for first pass).
     *   **Status:** `Pending`
 
-## Phase 7: New Feature - Create Script from Scratch
+3.  **Task: Implement Character Description Update Tool & Flow**
+    *   **Sub-Tasks:**
+        *   Backend: Create new tool `propose_character_description_update(script_id: int, new_description: str, reasoning: Optional[str])` in `script_collaborator_agent.py`. It returns a structured proposal.
+        *   Backend: Register this tool with `ScriptCollaboratorAgent`.
+        *   Frontend: Add Pydantic models for this new proposal type in `types.ts`.
+        *   Frontend: Update `ChatPanelContent` to render character description proposals (distinct UI card).
+        *   Frontend: Implement "Accept & Commit" for description proposals, calling `api.updateVoScript`.
+        *   Backend: Update `AGENT_INSTRUCTIONS` to guide agent on when to use this tool.
+    *   **Status:** `Pending`
 
-*   [x] Create Technical Specification ([scriptcreator_tech_spec.md](mdc:.cursor/docs/scriptcreator_tech_spec.md)).
-*   [ ] **TODO: Backend - Database**
-    *   [x] Define SQLAlchemy models for `vo_script_templates`, `vo_script_template_categories`, `vo_script_template_lines`, `vo_scripts`, `vo_script_lines` in [models.py](mdc:backend/models.py).
-    *   [x] Generate Alembic migration script (`flask db migrate -m "Add VO Script Creator tables"`).
-    *   [x] Review and refine the generated migration script.
-    *   [x] Apply migration (`flask db upgrade`).
-*   [ ] **TODO: Backend - Dependencies**
-    *   [x] Add `openai[agents]` to `backend/requirements.txt`.
-    *   [x] Implement `OPENAI_AGENT_MODEL` environment variable handling (Read in task, passed to agent).
-*   [ ] **TODO: Backend - API Endpoints ([app.py](mdc:backend/app.py), [routes/*](mdc:backend/routes))**
-    *   [x] Refactor: Move existing routes to blueprint files ([vo_template_routes.py](mdc:backend/routes/vo_template_routes.py), etc.)
-    *   [x] Refactor: Register blueprints in [app.py](mdc:backend/app.py)
-    *   [x] Refactor: Test moved routes (GET list/POST create for templates)
-    *   [x] Implement & Test `VoScriptTemplate` GET by ID, PUT, DELETE in [vo_template_routes.py](mdc:backend/routes/vo_template_routes.py)
-        *   [x] Implement `GET /api/vo-script-templates/<id>`
-        *   [x] Test `GET /api/vo-script-templates/<id>` (existing, non-existent)
-        *   [x] Implement `PUT /api/vo-script-templates/<id>`
-        *   [x] Test `PUT /api/vo-script-templates/<id>` (update, 404, 409/500)
-        *   [x] Implement `DELETE /api/vo-script-templates/<id>`
-        *   [x] Test `DELETE /api/vo-script-templates/<id>` (delete, 404)
-    *   [x] Implement & Test `VoScriptTemplateCategory` CRUD in [vo_template_routes.py](mdc:backend/routes/vo_template_routes.py)
-        *   [x] Implement GET list (or nested)
-        *   [x] Test GET list
-        *   [x] Implement POST (or nested)
-        *   [x] Test POST (create, 409)
-        *   [x] Implement GET by ID
-        *   [x] Test GET by ID (existing, 404)
-        *   [x] Implement PUT
-        *   [x] Test PUT (update, 404, 409)
-        *   [x] Implement DELETE
-        *   [x] Test DELETE (delete, 404)
-    *   [x] Implement & Test `VoScriptTemplateLine` CRUD in [vo_template_routes.py](mdc:backend/routes/vo_template_routes.py)
-        *   [x] Implement GET list (or nested)
-        *   [x] Test GET list
-        *   [x] Implement POST (or nested)
-        *   [x] Test POST (create, 409)
-        *   [x] Implement GET by ID
-        *   [x] Test GET by ID (existing, 404)
-        *   [x] Implement PUT
-        *   [x] Test PUT (update, 404, 409)
-        *   [x] Implement DELETE
-        *   [x] Test DELETE (delete, 404)
-    *   [x] Implement & Test `VoScript` CRUD (New file: [routes/vo_script_routes.py](mdc:backend/routes/vo_script_routes.py))
-        *   [x] Create blueprint file `vo_script_routes.py`
-        *   [x] Implement `POST /api/vo-scripts`
-        *   [x] Register blueprint `vo_script_bp`
-        *   [x] Test `POST /api/vo-scripts`
-        *   [x] Implement `GET /api/vo-scripts`
-        *   [x] Test `GET /api/vo-scripts`
-        *   [x] Implement `GET /api/vo-scripts/<id>`
-        *   [x] Test `GET /api/vo-scripts/<id>`
-        *   [x] Implement `PUT /api/vo-scripts/<id>`
-        *   [x] Test `PUT /api/vo-scripts/<id>`
-        *   [x] Implement `DELETE /api/vo-scripts/<id>`
-        *   [x] Test `DELETE /api/vo-scripts/<id>`
-    *   [ ] Implement & Test `VoScriptLine` related endpoints (in [routes/vo_script_routes.py](mdc:backend/routes/vo_script_routes.py))
-        *   [ ] `GET /api/vo-scripts/<id>/lines` (Note: Already included in GET /api/vo-scripts/<id>)
-        *   [x] `POST /api/vo-scripts/<id>/feedback`
-        *   [x] `POST /api/vo-scripts/<id>/run-agent` (API Endpoint + Placeholder Task)
-*   [ ] **TODO: Backend - Agent & Task ([agents/script_writer.py](mdc:backend/script_agents/script_writer.py), [tasks.py](mdc:backend/tasks.py))**
-    *   [x] Define `ScriptWriterAgent` class skeleton ([agents/script_writer.py](mdc:backend/script_agents/script_writer.py)).
-    *   [x] Define `@tool` function skeletons in ([agents/script_writer.py](mdc:backend/script_agents/script_writer.py)).
-    *   [x] Implement `@tool` function `get_vo_script_details`.
-    *   [x] Implement `@tool` function `get_lines_for_processing`.
-    *   [x] Implement `@tool` function `update_script_line` (includes history append).
-    *   [x] Define Celery task `run_script_creation_agent` in [tasks.py](mdc:backend/tasks.py).
-    *   [x] Update Celery task to instantiate Agent and call `run_sync` (Basic Implementation).
-    *   [x] Test agent invocation flow (API -> Task -> Agent -> Tools -> DB Update).
-*   [ ] **TODO: Frontend - Routing & Pages**
-    *   [ ] Implement route and page component for `/script-templates`.
-    *   [x] Implement route and page component for `/vo-scripts` (`VoScriptListView`).
-    *   [x] Implement route and page component for `/vo-scripts/new` (`VoScriptCreateView`).
-    *   [x] Implement route and page component for `/vo-scripts/:scriptId` (`VoScriptDetailView`).
-*   [ ] **TODO: Frontend - Components**
-    *   [ ] Implement `TemplateManager` component (or integrate into `/script-templates` page).
-    *   [x] Implement `VoScriptListView` component.
-        *   [x] Fetch and display list of VO Scripts.
-        *   [x] Add 'Create New' button/link.
-        *   [x] Add link to detail view for each script.
-        *   [x] Implement Delete button/action.
-    *   [x] Implement `VoScriptCreateView` component.
-        *   [x] Fetch and display `VoScriptTemplate` list in dropdown.
-        *   [x] Implement form for name/description/template selection.
-        *   [x] Handle form submission (call `POST /api/vo-scripts`).
-        *   [x] Redirect to detail view on success.
-    *   [x] Implement `VoScriptDetailView` component.
-        *   [x] Fetch and display script metadata.
-        *   [x] Fetch and display script lines (confirm API structure needed).
-        *   [x] Group lines by category.
-        *   [x] Implement 'Run Agent' button/action.
-        *   [x] Implement line display (text, status).
-        *   [ ] Implement metadata update functionality (optional inline edit).
-        *   [x] Implement feedback mechanisms.
-        *   [ ] Display generation status/progress.
-*   [ ] **TODO: Testing**
-    *   [ ] Write backend unit/integration tests for new models, API endpoints, agent tools, and Celery task.
-    *   [ ] Write frontend tests for new `VoScript` components and pages.
-*   [ ] **TODO: Documentation**
-    *   [ ] Update README with setup instructions for new environment variables (`OPENAI_AGENT_MODEL`).
-    *   [ ] Document the new API endpoints (e.g., in `.cursor/docs/api.md`).
-*   [ ] **TODO: Future Integration**
-    *   [ ] Plan strategy for integrating `vo_scripts` data with the main `scripts` table.
-    *   [ ] Implement data migration/integration.
+4.  **Task: Enhance New Line Proposals with Key/Order Suggestions & Implement "Accept"**
+    *   **Sub-Tasks:**
+        *   Backend: `propose_script_modification` tool already accepts `suggested_line_key` and `suggested_order_index`. Ensure agent instructions guide the LLM to provide these when `modification_type` is `INSERT_LINE_AFTER`, `INSERT_LINE_BEFORE`, or `NEW_LINE_IN_CATEGORY`.
+        *   Frontend: Implement `addVoScriptLineMutation` in `ChatPanelContent.tsx`.
+        *   Frontend: Implement "Accept & Commit" for `INSERT_LINE_AFTER`, `INSERT_LINE_BEFORE`, `NEW_LINE_IN_CATEGORY` modification types in `handleAcceptProposal`. This will involve:
+            *   Using `suggested_line_key` (or generating one if missing).
+            *   Calculating the correct `order_index` based on `target_id` and type (e.g., after target line, end of category).
+            *   Getting `category_name` if `target_id` is a category_id or if needed for line insertion.
+            *   Calling the `addVoScriptLineMutation`.
+    *   **Status:** `Pending`
 
-## Backlog Features
+## Phase 8: End-to-End Testing & Refinement (Adjusted phase number)
 
-*   **Feature: Audio Cropping**
-    *   [x] Create technical specification (`.cursor/docs/cropping_tech_spec.md`).
-    *   [ ] **TODO:** Implement Frontend (`AudioEditModal.tsx`, `wavesurfer.js` integration, `TakeRow.tsx` changes).
-    *   [x] Implement Backend (`/crop` API endpoint, `crop_audio_take` Celery task, `pydub`/`ffmpeg` integration).
-    *   [ ] **TODO:** Add dependencies (`wavesurfer.js`, `pydub`, `ffmpeg`).
-    *   [ ] **TODO:** Test cropping functionality thoroughly (local & Heroku).
-*   **Feature: AI Text Optimization Wizard**
-    *   [x] Add backend endpoint (`/api/optimize-line-text`) using OpenAI Responses API.
-    *   [x] Add `openai` dependency to `backend/requirements.txt`.
-    *   [x] Read `OPENAI_API_KEY` and `OPENAI_MODEL` from env vars.
-    *   [x] Add frontend API call (`api.optimizeLineText`).
-    *   [x] Add button and logic to `RegenerationModal.tsx`.
-    *   [x] Verify Docker/Heroku compatibility.
-    *   [ ] **TODO:** Test functionality end-to-end.
-    *   [ ] **TODO:** Refine OpenAI prompt in `backend/app.py` based on testing if needed.
+**Goal:** Thoroughly test the entire feature workflow with realistic data and refine based on findings.
 
-## Phase 8: Interactive VO Script Refinement
+1.  **Task: Comprehensive E2E Testing**
+    *   **Sub-Tasks:**
+        *   Create diverse test scripts and scenarios in the dev database (e.g., empty scripts, scripts with many lines, different categories).
+        *   Test all chat functionalities: initiating chat, sending various queries to trigger different tools, handling proposals, using scratchpad.
+        *   Test edge cases: network errors during polling, API errors from backend, invalid user inputs.
+        *   Verify context awareness (chatting about specific line vs. category vs. whole script).
+    *   **Status:** `Pending`
+    *   **Testing Strategy/Steps:**
+        *   Manually execute test scenarios as a user would.
+        *   Use browser dev tools and backend logs extensively.
 
-*   [x] Create Technical Specification (`.cursor/docs/interactive_refinement_spec.md`).
-*   [x] **TODO: Backend - Setup & Utilities**
-    *   [x] Add `openai` dependency to `backend/requirements.txt` if not already present (Confirm it includes base client, not just `[agents]`).
-    *   [x] Ensure OpenAI API key (`OPENAI_API_KEY`) is configured via environment variables (`.env`, Heroku Config Vars).
-    *   [x] Create `backend/utils_openai.py` (or similar) for reusable OpenAI Responses API call logic (including prompt construction helpers, error handling).
-        *   [x] Define function `call_openai_responses_api(prompt: str, ...) -> str | None`.
-        *   [x] Write unit tests for `call_openai_responses_api` (mocking `openai.Client().responses.create`).
-    *   [x] Create `backend/utils_voscript.py` (or similar) for reusable VO Script database logic.
-        *   [x] Refactor/create function `get_line_context(db: Session, line_id: int) -> dict | None`.
-        *   [x] Write unit tests for `get_line_context`.
-        *   [x] Refactor/create function `get_category_lines_context(db: Session, script_id: int, category_name: str) -> list[dict]`.
-        *   [x] Write unit tests for `get_category_lines_context`.
-        *   [x] Refactor/create function `get_script_lines_context(db: Session, script_id: int) -> list[dict]`.
-        *   [x] Write unit tests for `get_script_lines_context`.
-        *   [x] Refactor/create function `update_line_in_db(db: Session, line_id: int, new_text: str, new_status: str, model_name: str) -> models.VoScriptLine | None`.
-        *   [x] Write unit tests for `update_line_in_db`.
-*   [x] **TODO: Backend - API Endpoint: Line Refinement**
-    *   [x] Define route `POST /api/vo-scripts/<int:script_id>/lines/<int:line_id>/refine` in `vo_script_routes.py`.
-    *   [x] Implement request body parsing (expecting `line_prompt`).
-    *   [x] Implement logic to fetch line context using `utils_voscript.get_line_context`.
-    *   [ ] Implement logic to construct prompt for single-line refinement.
-        *   [ ] Write unit tests for line refinement prompt construction.
-    *   [x] Implement call to `utils_openai.call_openai_responses_api`.
-    *   [x] Implement logic to parse OpenAI response and update DB using `utils_voscript.update_line_in_db`.
-    *   [x] Implement response formatting (return updated line).
-    *   [x] Write integration test for the endpoint (mocking DB utils & OpenAI util).
-*   [x] **TODO: Backend - API Endpoint: Category Refinement**
-    *   [x] Define route `POST /api/vo-scripts/<int:script_id>/categories/refine` in `vo_script_routes.py`.
-    *   [x] Implement request body parsing (expecting `category_name`, `category_prompt`, potentially `line_prompts: dict`).
-    *   [x] Implement logic to fetch context for lines in category using `utils_voscript.get_category_lines_context`.
-    *   [ ] Implement logic to construct prompt(s) for category refinement.
-        *   [ ] Write unit tests for category refinement prompt construction.
-    *   [x] Implement call(s) to `utils_openai.call_openai_responses_api`.
-    *   [x] Implement logic to parse OpenAI response(s) and update DB using `utils_voscript.update_line_in_db` for affected lines.
-    *   [x] Implement response formatting (return list of updated lines).
-    *   [x] Write integration test for the endpoint.
-*   [x] **TODO: Backend - API Endpoint: Script Refinement**
-    *   [x] Define route `POST /api/vo-scripts/<int:script_id>/refine` in `vo_script_routes.py`.
-    *   [x] Implement request body parsing (expecting `global_prompt`, potentially `category_prompts: dict`, `line_prompts: dict`).
-    *   [x] Implement logic to fetch context for all relevant script lines using `utils_voscript.get_script_lines_context`.
-    *   [ ] Implement logic to construct prompt(s) for script refinement.
-        *   [ ] Write unit tests for script refinement prompt construction.
-    *   [x] Implement call(s) to `utils_openai.call_openai_responses_api`.
-    *   [x] Implement logic to parse OpenAI response(s) and update DB using `utils_voscript.update_line_in_db` for affected lines.
-    *   [x] Implement response formatting (return list of updated lines).
-    *   [x] Write integration test for the endpoint.
-*   [x] **TODO: Backend - Hierarchical Prompting**
-    *   [x] Modify `utils_voscript.get_category_lines_context` to include script-level `refinement_prompt`.
-    *   [x] Write/Update unit tests for `get_category_lines_context` script prompt retrieval.
-    *   [x] Modify `utils_voscript.get_script_lines_context` to include category-level `refinement_prompt`.
-    *   [x] Write/Update unit tests for `get_script_lines_context` category prompt retrieval.
-    *   [x] Update `refine_vo_script_category` endpoint logic to fetch and use hierarchical prompts (global, category, line).
-    *   [x] Write unit tests for hierarchical prompt construction in `refine_vo_script_category`.
-    *   [x] Run integration tests for `refine_vo_script_category` endpoint.
-    *   [x] Update `refine_vo_script` endpoint logic to fetch and use hierarchical prompts (global, category, line).
-    *   [x] Write unit tests for hierarchical prompt construction in `refine_vo_script`.
-    *   [x] Run integration tests for `refine_vo_script` endpoint.
-*   [x] **TODO: Frontend - API Client (`frontend/src/api.ts`)**
-    *   [x] Define functions to call the new `/refine` endpoints.
-*   [x] **TODO: Frontend - Line Refinement UI (`VoScriptDetailView.tsx`)**
-    *   [x] Add "Refine" `ActionIcon` next to each line's feedback `Textarea`.
-    *   [x] Implement state (e.g., `useState` or `useReducer`) to manage loading status per line.
-    *   [x] Implement `useMutation` hook (from `@tanstack/react-query`) for the line refine API call.
-    *   [x] Update `onClick` handler for the new button to trigger the mutation, passing the current line prompt text.
-    *   [x] Implement UI updates on mutation success (update line text, clear loading state) and error handling (show notification).
-    *   [ ] Write component tests mocking the API call mutation.
-*   [x] **TODO: Frontend - Category Refinement UI (`VoScriptDetailView.tsx`)**
-    *   [x] Implement state to manage loading status per category.
-    *   [x] Implement `useMutation` hook for the category refine API call.
-    *   [x] Update `onClick` handler for the "Refine Category" button to trigger the mutation, passing the current category prompt text.
-    *   [x] Implement UI updates on mutation success (update relevant lines, clear loading state) and error handling.
-    *   [x] Disconnect "Refine Category" button from `runAgentMutation`.
-    *   [ ] Write component tests.
-*   [x] **TODO: Frontend - Script Refinement UI (`VoScriptDetailView.tsx`)**
-    *   [x] Rename/Repurpose "Refine All (Feedback)" button to "Refine Script".
-    *   [x] Implement state to manage global script refinement loading status.
-    *   [x] Implement `useMutation` hook for the script refine API call.
-    *   [x] Update `onClick` handler for the "Refine Script" button to trigger the mutation, passing the global prompt (and potentially collected category/line prompts).
-    *   [x] Implement UI updates on mutation success (update relevant lines, clear loading state) and error handling.
-    *   [x] Disconnect this button from `runAgentMutation`.
-    *   [ ] Write component tests.
-*   [x] **TODO: Backend - Cleanup**
-    *   [x] Review `run_script_creation_agent` task (`tasks.py`) and `ScriptWriterAgent` (`script_writer.py`).
-    *   [x] Remove or comment out code related to `'refine_category'` and `'refine_feedback'` task types if fully superseded.
-    *   [x] Ensure `generate_draft` functionality remains intact.
-*   [x] **TODO: Feature - Editable Character Description**
-    *   [x] FE: Modify `VoScriptDetailView.tsx`: Replace `<pre>` with `<Textarea>` for character description.
-    *   [x] FE: Add state management for edited description text.
-    *   [x] FE: Add "Save Description" button and enable/disable logic.
-    *   [x] FE: Implement `useMutation` hook calling `api.updateVoScript` for description update.
-    *   [x] FE: Add loading/error/success handling for description save.
-    *   [ ] Test: Manually test description editing and saving.
-    *   [x] BE: Verify refinement endpoints use updated description (via context fetch - likely no change needed).
-*   [x] **TODO: Feature - Line Locking**
-    *   [x] BE: Add `is_locked` column (Boolean, default False) to `vo_script_lines` table model (`models.py`).
-    *   [x] BE: Generate Alembic migration (`flask db migrate -m "Add is_locked to vo_script_lines"`).
-    *   [x] BE: Review and apply migration (`flask db upgrade`).
-    *   [x] BE: Implement `PATCH /api/vo-scripts/<script_id>/lines/<line_id>/toggle-lock` endpoint logic.
-    *   [x] BE: Write integration test for the `toggle-lock` endpoint.
-    *   [x] BE: Modify `refine_vo_script_category` and `refine_vo_script` endpoints to filter out locked lines before processing.
-    *   [x] BE: Update integration tests for category/script refinement to verify locked lines are skipped.
-    *   [x] FE: Add `toggleLock` function to `api.ts`.
-    *   [x] FE: Implement lock/unlock UI and mutation in `VoScriptDetailView.tsx` (as part of Table refactor).
-*   [x] **TODO: Feature - Refactored Line UI & Actions**
-    *   [x] BE: Implement `PATCH /api/vo-scripts/<script_id>/lines/<line_id>/update-text` endpoint logic.
-    *   [x] BE: Write integration test for the `update-text` endpoint.
-    *   [x] BE: Implement `DELETE /api/vo-scripts/<script_id>/lines/<line_id>` endpoint logic.
-    *   [x] BE: Write integration test for the `delete line` endpoint.
-    *   [x] FE: Add `updateLineText` and `deleteVoScriptLine` functions to `api.ts`.
-    *   [x] FE (`VoScriptDetailView.tsx`): Refactor line display from `<Stack>`/`<Paper>` to `<Table>`.
-    *   [x] FE (`VoScriptDetailView.tsx`): Implement editable `<Textarea>` for `generated_text` with state management.
-    *   [x] FE (`VoScriptDetailView.tsx`): Implement "Save" ActionIcon with mutation logic for `update-text`.
-    *   [x] FE (`VoScriptDetailView.tsx`): Implement "Delete" ActionIcon with confirmation and mutation logic for `delete line`.
-    *   [x] FE (`VoScriptDetailView.tsx`): Implement "Refine" ActionIcon and associated Modal.
-    *   [x] FE (`VoScriptDetailView.tsx`): Connect Refine Modal submit to `refineLineMutation`.
-    *   [x] FE (`VoScriptDetailView.tsx`): Add Lock/Unlock ActionIcon (connecting to mutation from Line Locking feature).
-    *   [ ] Test: Write basic component tests for the new Table row / Modal interactions.
-    *   [ ] Test: Manually test all actions in the new line table UI.
-*   [x] **TODO: Feature - Add New Line**
-    *   [x] BE: Add nullable `line_key`, `order_index`, `prompt_hint`, `category_id` (FK) columns to `vo_script_lines` table model (`models.py`).
-    *   [x] BE: Make `template_line_id` nullable in `vo_script_lines` model.
-    *   [x] BE: Generate Alembic migration (`flask db migrate -m "Add custom line fields to vo_script_lines"`).
-    *   [x] BE: Review and apply migration (`flask db upgrade`).
-    *   [x] BE: Implement `POST /api/vo-scripts/<script_id>/lines` endpoint logic (create line, find category ID by name).
-    *   [x] BE: Write integration test for the `add line` endpoint.
-    *   [x] FE: Add `addVoScriptLine` function to `api.ts`.
-    *   [x] FE (`VoScriptDetailView.tsx`): Add "Add Line" button per category.
-    *   [x] FE (`VoScriptDetailView.tsx`): Implement Add Line Modal component with form.
-    *   [x] FE (`VoScriptDetailView.tsx`): Implement state and mutation logic for adding a line.
-    *   [x] FE (`VoScriptDetailView.tsx`): Update UI/cache on successful line addition.
-    *   [ ] Test: Write basic component tests for Add Line Modal.
-    *   [ ] Test: Manually test adding new lines.
-*   [ ] **TODO: Feature - View/Revert Line History**
-    *   [ ] FE (`VoScriptDetailView.tsx`): Add "View History" ActionIcon (`IconHistory`) to line actions group in the table.
-    *   [ ] FE (`VoScriptDetailView.tsx`): Add state management for History Modal visibility and selected line data (`lineToViewHistory`).
-    *   [ ] FE (`VoScriptDetailView.tsx`): Implement `handleOpenHistoryModal` function.
-    *   [ ] FE (`VoScriptDetailView.tsx`): Create History Modal component structure.
-    *   [ ] FE (`VoScriptDetailView.tsx`): Display history entries (timestamp, type, text) within the modal.
-    *   [ ] FE (`VoScriptDetailView.tsx`): Add "Revert to this version" button for each history entry.
-    *   [ ] FE (`VoScriptDetailView.tsx`): Connect "Revert" button `onClick` to call `handleSaveLineText` with the historical text.
-    *   [ ] FE (`VoScriptDetailView.tsx`): Ensure modal closes on successful revert.
-    *   [ ] Test: Write basic component tests for History Modal.
-    *   [ ] Test: Manually test viewing history and reverting.
-*   [ ] **TODO: Testing - End-to-End**
-    *   [ ] Manually test line refinement flow with OpenAI API.
-    *   [ ] Manually test category refinement flow with OpenAI API.
-    *   [ ] Manually test script refinement flow with OpenAI API.
-    *   [ ] Test edge cases (empty prompts, API errors, lines that shouldn't change).
-    *   [ ] Test hierarchical prompt application.
-*   [ ] **TODO: Documentation**
-    *   [ ] Update `.cursor/notes/agentnotes.md` with the new architecture details.
-    *   [ ] Update API documentation (if any exists) for new endpoints.
+2.  **Task: UI/UX Review and Refinement**
+    *   **Sub-Tasks:**
+        *   Review chat flow, clarity of proposals, ease of committing/dismissing.
+        *   Address any awkward interactions or visual glitches.
+    *   **Status:** `Pending`
 
-## Phase Z: Static Template Lines Feature
+## Phase 9: Documentation Updates (Adjusted phase number)
 
-*   [x] Create Technical Specification (`.cursor/notes/static_template_lines_spec.md`).
-*   [x] **TODO: Backend - Database Changes**
-    *   [x] Add `static_text` column (Text, nullable) to `vo_script_template_lines` table model in `models.py`.
-    *   [x] Generate Alembic migration (`flask db migrate -m "Add static_text to vo_script_template_lines"`).
-    *   [x] Review and apply migration (`flask db upgrade`).
-*   [x] **TODO: Backend - Create/Update Logic**
-    *   [x] Modify `POST /api/vo-script-template-lines` endpoint in `vo_template_routes.py` to handle static_text field.
-    *   [x] Modify `PUT /api/vo-script-template-lines/<line_id>` endpoint to handle static_text updates.
-    *   [x] Update `create_vo_script` endpoint in `vo_script_routes.py` to copy static_text to generated_text for new lines.
-    *   [x] Update `
+**Goal:** Ensure any necessary documentation is updated.
 
-## Phase 9: Modular Backend Refactoring Validation
+1.  **Task: Update Internal Documentation**
+    *   **Sub-Tasks:**
+        *   Update `agentnotes.md` with details about the new agent, tools, and API endpoints.
+        *   Ensure code comments are thorough.
+    *   **Status:** `Pending`
 
-### Code Review Checklist
-
-* [x] **Review all refactored files for missing imports**
-    * [x] Check `app.py` for missing imports (e.g., `datetime`)
-    * [x] Check all `routes/*.py` files for proper imports
-    * [x] Check all `tasks/*.py` files for proper imports
-    * [x] Verify all imports are used (no unused imports)
-
-* [x] **Check for circular import issues**
-    * [x] Review import structure in `routes/*.py` files
-    * [x] Review import structure in `tasks/*.py` files 
-    * [x] Verify that imports from `tasks` in `routes` (and vice versa) don't create circular dependencies
-
-* [x] **Verify consistent function signatures**
-    * [x] Compare function signatures in new modules against original `tasks.py`
-    * [x] Check parameter names, types, and default values
-    * [x] Verify that no function parameters were missed during refactoring
-
-* [x] **Test blueprint registration**
-    * [x] Verify that all blueprints are properly registered in `app.py`
-    * [x] Check URL prefixes match expected values
-    * [x] Ensure route decorators are properly applied
-
-* [x] **Verify error handling**
-    * [x] Check for proper error handling in route functions
-    * [x] Verify that error responses use consistent formats (via `make_api_response`)
-    * [x] Test error cases to ensure they return appropriate status codes
-
-### Testing Checklist
-
-* [x] **Create unit tests for task modules**
-    * [x] Test module imports to verify no import errors
-    * [x] Test that task functions have expected signatures
-    * [x] Verify task registry is properly populated
-
-* [x] **Create tests for route blueprints**
-    * [x] Verify blueprint registration
-    * [x] Test URL prefixes
-    * [x] Test route handler functions
-
-* [x] **Implement end-to-end testing**
-    * [x] Create test for full workflow using actual database
-    * [x] Test script creation/generation workflow
-    * [x] Test audio manipulation functions
-    * [x] Test voice generation and regeneration
-
-* [x] **Fix issues found during testing**
-    * [x] Fix missing `datetime` import in `app.py`
-    * [x] Fix test issue with blueprint URL prefixes
-    * [x] Fix direct task call issue with Celery context
-
-### Documentation and Finalization
-
-* [x] **Update documentation**
-    * [x] Document the new module structure in agent notes
-    * [x] Update project checklist with completed tasks
-    * [x] Document testing procedures for future reference
-
-* [x] **Validation**
-    * [x] Verify that all endpoints work as expected
-    * [x] Test critical endpoints manually
-    * [x] Ensure all tests pass
-
-### Bug Fixes
-
-* [x] **Fix for regeneration task status polling**
-    * [x] Identified issue with snake_case vs camelCase naming mismatch when returning task IDs from backend
-    * [x] Updated API functions (`regenerateLineTakes`, `startSpeechToSpeech`, `cropTake`, `getTaskStatus`, `triggerGenerateCategoryBatch`) to correctly map response fields
-    * [x] Made TypeScript interfaces consistent with camelCase naming convention (`JobSubmissionResponse`, `GenerationStartResponse`, `TaskStatus`, `CropTakeResponse`)
-    * [x] Restart containers to ensure all changes took effect
-    * [x] Verified that regeneration functionality now works correctly
+2.  **Task: User-Facing Documentation (if applicable)**
+    *   **Sub-Tasks:**
+        *   If needed, create a brief guide for game designers on how to use the new chat feature.
+    *   **Status:** `Pending`
 
 ## Feature: AI Script Collaborator Chat (Side Car)
 
@@ -639,33 +426,36 @@
     *   **Sub-Tasks:**
         *   Store Active Proposals: Add `activeProposals` state and actions (`setActiveProposals`, `removeProposal`, `clearActiveProposals`) to `chatStore.ts`. (Status: `DONE`)
         *   Parse Proposals: In `ChatModal.tsx` polling logic, extract `proposed_modifications` from successful task results and call `setActiveProposals`. (Status: `DONE`)
-        *   Render Proposals: In `ChatModal.tsx`, if `activeProposals` is not empty, map over it and render each proposal in a distinct card, showing type, target, new text, reasoning. (Status: `DONE`)
+        *   Render Proposals: In `ChatPanelContent` (formerly ChatModal.tsx), if `activeProposals` is not empty, map over it and render each proposal in a distinct card, showing type, target, new text, reasoning. (Status: `DONE`)
         *   Add placeholder action buttons ("Accept", "Edit", "Dismiss") to each proposal card. (Status: `DONE`)
-    *   **Status:** `DONE` (Display and placeholder actions implemented)
+    *   **Status:** `DONE (Display and placeholder actions implemented)
 
 3.  **Task: Implement "Accept & Commit" Logic**
     *   **Sub-Tasks:**
         *   Define API client function in `api.ts` to update/create script lines (Status: `DONE` - `api.updateLineText` used, `api.addVoScriptLine` exists for future use).
-        *   Implement `handleAcceptProposal` in `ChatModal.tsx`: (Status: `DONE`)
-            *   Based on `proposal.modification_type`, construct payload and call the appropriate existing backend API endpoint. (Status: `DONE` - Implemented for `REPLACE_LINE`)
-            *   On success: Invalidate React Query cache for `voScriptDetail`, call `removeProposal(proposal.proposal_id)`, show success notification. (Status: `DONE`)
-            *   Handle API errors with notifications. (Status: `DONE`)
-        *   Implement logic for `INSERT_LINE_AFTER`, `INSERT_LINE_BEFORE`, `NEW_LINE_IN_CATEGORY`. (Status: `Pending` - Deferred for MVP)
+        *   Implement `handleAcceptProposal` in `ChatPanelContent` for `REPLACE_LINE`. (Status: `DONE`)
+        *   On success: Invalidate React Query cache for `voScriptDetail`, call `removeProposal(proposal.proposal_id)`, show success notification. (Status: `DONE`)
+        *   Handle API errors with notifications. (Status: `DONE`)
+        *   Implement logic for `INSERT_LINE_AFTER`, `INSERT_LINE_BEFORE`, `NEW_LINE_IN_CATEGORY`. (Status: `Pending` - Requires agent to suggest key/order, and frontend to use `addVoScriptLine` mutation)
     *   **Status:** `Partially DONE` (REPLACE_LINE implemented and working)
+    *   **Testing Strategy/Steps:**
+        *   Test `REPLACE_LINE` (Status: `DONE` - Functionally working)
 
 4.  **Task: Implement "Dismiss" Logic**
     *   **Sub-Tasks:**
-        *   Implement `handleDismissProposal` in `ChatModal.tsx` to call `removeProposal(proposal.proposal_id)` from the store. (Status: `DONE`)
+        *   Implement `handleDismissProposal` in `ChatPanelContent` to call `removeProposal(proposal.proposal_id)` from the store. (Status: `DONE`)
         *   Show confirmation notification. (Status: `DONE`)
     *   **Status:** `DONE`
 
 5.  **Task: Implement "Edit & Commit" Logic (MVP - Simple Text Edit)**
     *   **Sub-Tasks:**
-        *   When "Edit" is clicked, allow inline editing of the `new_text` in the proposal card (e.g., replace `Text` with `Textarea`).
-        *   Show "Save Edit" and "Cancel Edit" buttons for the editing mode.
-        *   "Save Edit": Use the edited text and existing proposal details to call the "Accept & Commit" logic/API.
-        *   "Cancel Edit": Revert to displaying the original proposed text.
-    *   **Status:** `Pending`
+        *   When "Edit" is clicked, allow inline editing of `new_text` in proposal card. (Status: `DONE`)
+        *   Show "Save Edit" and "Cancel Edit" buttons. (Status: `DONE`)
+        *   "Save Edit": Use edited text and call `handleAcceptProposal`. (Status: `DONE`)
+        *   "Cancel Edit": Revert UI. (Status: `DONE`)
+    *   **Status:** `DONE (Pending User E2E Verification)` 
+    *   **Testing Strategy/Steps:**
+        *   User to test UI flow: AI proposes `REPLACE_LINE` -> Click Edit -> Modify text -> Click Save Edit -> Verify correct text is committed and UI updates. (Status: `Pending - User Verification`)
 
 --- 
 
@@ -715,7 +505,7 @@
 
 --- 
 
-### Phase 7: Documentation Updates
+### Phase 7: Documentation Updates (Adjusted phase number)
 
 **Goal:** Ensure any necessary documentation is updated.
 

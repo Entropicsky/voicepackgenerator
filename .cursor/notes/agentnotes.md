@@ -281,4 +281,38 @@ curl http://localhost:5001/api/ping
 
 # List voices
 curl http://localhost:5001/api/voices
-``` 
+```
+
+## Current State (AI Chat Collaborator)
+- **UI:** Implemented as a collapsible side panel (`AppShell.Aside`) using Mantine in the `VoScriptDetailView`.
+- **Backend:** Uses Celery (`run_script_collaborator_chat_task`) to run an `openai-agents` based agent (`ScriptCollaboratorAgent`).
+- **Functionality:**
+    - Users can send messages to the agent.
+    - Agent uses tools (`get_script_context`, `propose_script_modification`, etc.) to interact with the database.
+    - Agent provides text responses and structured proposals for script line modifications (`REPLACE_LINE` currently implemented).
+    - Proposals are displayed as interactive cards in the UI.
+    - Users can Accept, Dismiss, or Edit & Commit `REPLACE_LINE` proposals.
+    - Multiple proposals are handled and displayed, sorted by script order (`suggested_order_index` then `suggested_line_key`).
+    - "Accept All" button allows batch acceptance of proposals.
+    - Line key (`suggested_line_key`) is displayed on proposal cards for clarity.
+    - Conversational history is passed back to the agent on subsequent turns.
+- **Resilience:**
+    - Frontend includes a polling timeout (`MAX_POLLING_ATTEMPTS`) to prevent infinite spinners.
+    - Backend agent uses default `openai` library timeout/retry settings; attempts to configure these via the `openai-agents` SDK failed.
+
+## Next Steps / Focus Areas (AI Chat)
+- Implement frontend handling for other proposal types (INSERT_*, NEW_LINE_*).
+- Implement backend agent logic/tools to *generate* these other proposal types.
+- Implement agent's use of `add_to_scratchpad` tool and corresponding frontend display.
+- Enhance agent proactivity and contextual understanding based on instructions.
+
+## Pointers to Key Files
+- Chat UI: `frontend/src/components/chat/ChatDrawer.tsx`
+- Chat State: `frontend/src/stores/chatStore.ts`
+- Chat API Client: `frontend/src/api.ts`, `frontend/src/types.ts` (Chat types)
+- Chat Backend API Route: `backend/routes/vo_script_routes.py` (`/vo-scripts/<id>/chat`)
+- Chat Celery Task: `backend/tasks/script_tasks.py` (`run_script_collaborator_chat_task`)
+- Chat Agent Definition: `backend/agents/script_collaborator_agent.py`
+- Agent Tools: Defined within `backend/agents/script_collaborator_agent.py`
+- Checklist: `.cursor/notes/project_checklist.md`
+- Notebook: `.cursor/notes/notebook.md` 
