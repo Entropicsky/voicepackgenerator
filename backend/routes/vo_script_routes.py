@@ -1,6 +1,6 @@
 # backend/routes/vo_script_routes.py
 
-from flask import Blueprint, request, jsonify, send_file
+from flask import Blueprint, request, jsonify, send_file, current_app
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.attributes import flag_modified # Import flag_modified
@@ -14,15 +14,17 @@ from openpyxl.styles import Font, Alignment, PatternFill # For formatting
 from openpyxl.utils import get_column_letter # For setting column width
 import re # Import regex for natural sort
 import sqlalchemy as sa # Added import
+from pydantic import BaseModel, ValidationError
+from typing import List, Optional, Dict, Any # Ensure these are imported
 
 # Assuming models and helpers are accessible, adjust imports as necessary
-from backend import models, tasks # Added tasks import
+from backend import models # Added tasks import
 from backend.models import get_db
-from backend.app import make_api_response, model_to_dict
-# from backend.tasks import run_script_creation_agent # Celery task for agent runs -> REMOVE/COMMENT OUT
+from backend.utils.response_utils import make_api_response, model_to_dict # NEW imports
 from backend import utils_openai # Import for direct OpenAI calls
 from backend import utils_voscript # Import for DB utils
 from backend.utils_prompts import _get_elevenlabs_rules # NEW IMPORT
+from backend.tasks.script_tasks import run_script_collaborator_chat_task # Import the Celery task
 
 vo_script_bp = Blueprint('vo_script_bp', __name__, url_prefix='/api')
 
@@ -2325,4 +2327,48 @@ def instantiate_target_lines(script_id: int):
         return make_api_response(error="Failed to instantiate target lines.", status_code=500)
     finally:
         if db and db.is_active:
+            db.close()
+
+# --- Pydantic model for Chat Request Body ---
+class ChatRequestBody(BaseModel):
+    user_message: str
+    initial_prompt_context_from_prior_sessions: Optional[List[Dict[str, Any]]] = None
+    current_context: Optional[Dict[str, Any]] = None
+
+@vo_script_bp.route("/vo-scripts/<int:script_id>/chat", methods=["POST"])
+def handle_chat_interaction(script_id: int):
+    db = next(models.get_db())
+    try:
+        vo_script = db.query(models.VoScript).filter(models.VoScript.id == script_id).first()
+        if not vo_script:
+            return make_api_response(error="VO Script not found", status_code=404)
+
+        if not request.is_json:
+            return make_api_response(error="Request must be JSON", status_code=400)
+        
+        try:
+            json_data = request.get_json()
+            if json_data is None:
+                return make_api_response(error="Invalid JSON body or missing Content-Type header", status_code=400)
+            request_data = ChatRequestBody(**json_data)
+        except ValidationError as e:
+            return make_api_response(error=f"Invalid request body: {e.errors()}", status_code=400)
+        except Exception as e_parse:
+            return make_api_response(error="Invalid JSON body format", status_code=400)
+
+        task = run_script_collaborator_chat_task.delay(
+            script_id=script_id,
+            user_message=request_data.user_message,
+            initial_prompt_context_from_prior_sessions=request_data.initial_prompt_context_from_prior_sessions or [],
+            current_context=request_data.current_context or {}
+        )
+        
+        current_app.logger.info(f"Dispatched AI Chat Collaborator task {task.id} for script ID {script_id}")
+        return make_api_response(data={"task_id": task.id}, status_code=202)
+
+    except Exception as e:
+        current_app.logger.error(f"Error in chat interaction endpoint for script {script_id}: {e}", exc_info=True)
+        return make_api_response(error="Internal server error during chat interaction.", status_code=500)
+    finally:
+        if db:
             db.close()

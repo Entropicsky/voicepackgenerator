@@ -22,6 +22,7 @@ __all__ = [
     'crop_audio_take',
     'run_script_creation_agent',
     'generate_category_lines',
+    'run_script_collaborator_chat_task'
 ]
 
 print("Celery Worker: Loading tasks package...") 

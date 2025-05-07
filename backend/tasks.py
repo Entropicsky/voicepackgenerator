@@ -52,6 +52,8 @@ from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy import case # Added for ordering
 from backend.utils_voscript import get_category_lines_context, update_line_in_db
 from backend.routes.vo_script_routes import _generate_lines_batch
+from backend.agents.script_collaborator_agent import ScriptCollaboratorAgent
+from agents import Runner # Assuming Runner is available globally or correctly imported by the Agent SDK
 
 # --- Constants ---
 BATCH_GENERATION_THRESHOLD = 10 # Generate <= this many lines in one go
@@ -1357,5 +1359,72 @@ def generate_category_lines(self,
 #     time.sleep(5)
 #     print(f"placeholder_task (ID: {task_id}) finished.")
 #     return {"status": "Complete", "result": "Placeholder result"}
+
+# Add other generation tasks here later 
+
+@celery.task(name="run_script_collaborator_chat")
+def run_script_collaborator_chat_task(script_id: int, user_message: str, initial_prompt_context_from_prior_sessions: list = None, current_context: dict = None):
+    """ 
+    Celery task to run the ScriptCollaboratorAgent for a chat interaction.
+    """
+    logger.info(f"Starting ScriptCollaboratorAgent task for script_id: {script_id}, user_message: '{user_message[:50]}...'")
+    
+    if initial_prompt_context_from_prior_sessions is None:
+        initial_prompt_context_from_prior_sessions = []
+    if current_context is None:
+        current_context = {}
+
+    # Construct the initial prompt for the agent based on context
+    # For now, a simple concatenation. This might become more sophisticated.
+    # The agent's main instructions are already part of its definition.
+    # This initial_prompt_context is for *this specific run*.
+    
+    # We need to create a prompt that the agent can understand as its primary input query.
+    # The agent's own instructions are the system prompt.
+    # The user_message is the current user query.
+    # initial_prompt_context_from_prior_sessions can provide conversational history.
+    # current_context (line_id, category_id) can help focus the agent if tools use it later.
+
+    # For the Runner.run_sync(agent, query), the query is typically a string.
+    # We might need to format the context and user_message into a single string query
+    # or adapt how the agent processes this if the SDK allows richer input.
+    # For MVP, let's assume the agent takes the latest user_message as the primary query,
+    # and the initial_prompt_context can be used to build a preamble if needed, or the agent can be enhanced to process it.
+
+    # For now, the agent's primary input will be the user_message. Tools will use current_context.
+    # The `initial_prompt_context_from_prior_sessions` is more for the *agent* to be aware of past turns if its internal logic or tools are designed to use it.
+    # The core query to kick off the agent run will be the `user_message`.
+
+    try:
+        agent = ScriptCollaboratorAgent() # Tools will be added later
+        
+        # The primary query to the agent for this specific turn
+        # We are not explicitly passing initial_prompt_context_from_prior_sessions or current_context to agent.run_sync directly
+        # as arguments unless the agent is specifically designed to take them in its run method or as part of a complex query object.
+        # Instead, these contexts are for the *tools* the agent might call, or for the agent's overall awareness if its prompt implies it.
+        # The agent is initialized with its general instructions. The `user_message` is the immediate task.
+
+        logger.info(f"Running ScriptCollaboratorAgent with user_message: '{user_message}'")
+        result = Runner.run_sync(agent, user_message) # The main query for this run
+
+        # The tech spec expects: ai_response_text, proposed_modifications, scratchpad_updates, updated_conversation_history
+        # For now, result.final_output is the ai_response_text.
+        # proposed_modifications and scratchpad_updates will come from tool calls, which are not yet implemented.
+        # updated_conversation_history would be result.history or similar from the agent run, if available and needed.
+
+        response_data = {
+            "ai_response_text": result.final_output,
+            "proposed_modifications": [], # Placeholder
+            "scratchpad_updates": [], # Placeholder
+            "updated_conversation_history": [] # Placeholder, need to see what `result` contains for history
+        }
+        logger.info(f"ScriptCollaboratorAgent task completed successfully for script_id: {script_id}")
+        return response_data
+
+    except Exception as e:
+        logger.error(f"Error in ScriptCollaboratorAgent task for script_id {script_id}: {e}", exc_info=True)
+        # Reraise to mark the task as FAILED in Celery, or return a structured error
+        # For now, let Celery handle it as a task failure based on the exception.
+        raise
 
 # Add other generation tasks here later 

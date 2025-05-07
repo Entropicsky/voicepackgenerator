@@ -167,6 +167,30 @@ class VoScriptLine(Base):
 
 # --- End VO Script Creator Models --- #
 
+# --- NEW: ScriptNote Model for AI Script Collaborator Chat --- #
+
+class ScriptNote(Base):
+    __tablename__ = "script_notes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    vo_script_id = Column(Integer, ForeignKey("vo_scripts.id"), nullable=False, index=True)
+    # Nullable True because a note might be general to the script, or linked to a specific category/line
+    category_id = Column(Integer, ForeignKey("vo_script_template_categories.id"), nullable=True, index=True)
+    line_id = Column(Integer, ForeignKey("vo_script_lines.id"), nullable=True, index=True)
+    
+    title = Column(String(255), nullable=True)
+    text_content = Column(Text, nullable=False)
+    
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+
+    # Relationships (optional, but good practice if you foresee needing them)
+    vo_script = relationship("VoScript") # Add back_populates if VoScript will link back to notes
+    category = relationship("VoScriptTemplateCategory") # Add back_populates if VoScriptTemplateCategory will link back
+    line = relationship("VoScriptLine") # Add back_populates if VoScriptLine will link back
+
+# --- End ScriptNote Model --- #
+
 def init_db():
     """Create database tables if they don't exist."""
     # This function might still be useful for initial local SQLite setup,

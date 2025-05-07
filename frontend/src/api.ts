@@ -7,7 +7,14 @@ import {
     RefineLineResponse, UpdateVoScriptTemplateCategoryPayload, RefineCategoryPayload,
     RefineMultipleLinesResponse, RefineScriptPayload, DeleteResponse, AddVoScriptLinePayload,
     JobSubmissionResponse,
-    VoScriptTemplateLine
+    VoScriptTemplateLine,
+    // NEW: Import chat types from types.ts
+    InitiateChatPayload,
+    InitiateChatResponseData,
+    ChatTaskStatusData,
+    ChatTaskResult,
+    // Add new types for chat if they are in types.ts
+    // InitiateChatPayload, InitiateChatResponse, ChatTaskStatusResponse (assuming they'd be in types.ts)
 } from './types'; // Ensure all necessary types are imported
 
 // Define these types if they don't exist in types.ts
@@ -668,6 +675,18 @@ const getVoScriptTemplateLine = async (lineId: number): Promise<VoScriptTemplate
     return handleApiResponse(response);
 };
 
+// --- NEW: Chat API Functions --- //
+const initiateChatSession = async (scriptId: number, payload: InitiateChatPayload): Promise<InitiateChatResponseData> => {
+    const response = await apiClient.post<{ data: InitiateChatResponseData }>(`/vo-scripts/${scriptId}/chat`, payload);
+    return handleApiResponse(response);
+};
+
+const getChatTaskStatus = async (taskId: string): Promise<ChatTaskStatusData> => {
+    const response = await apiClient.get<{ data: ChatTaskStatusData }>(`/task/${taskId}/status`);
+    return handleApiResponse(response);
+};
+// --- END: Chat API Functions --- //
+
 // --- Consolidate into single export --- //
 // Group functions logically
 export const api = {
@@ -760,4 +779,7 @@ export const api = {
     getVoicePreview,
     // Add missing optimizeLineText export
     optimizeLineText,
+    // Add new function
+    initiateChatSession,
+    getChatTaskStatus,
 };

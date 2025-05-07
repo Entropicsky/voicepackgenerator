@@ -77,40 +77,35 @@
 *   [x] Verify full R2 functionality on Heroku (storage, playback, download).
 *   [ ] **TODO:** Implement Cloudflare Access for authentication (Requires custom domain setup).
 
-## Phase 6: Tidy Up & Documentation
+## Phase 6: Chat UI Refactor - Docked Panel (Post-MVP UX Improvement)
 
-*   [x] Update frontend components (BatchesPage, RankingPage) to use R2 prefixes correctly.
-*   [ ] **TODO:** Ensure all documentation (.cursor folder, README) is up-to-date (Partially done, ongoing).
-*   [ ] **TODO:** Review and potentially remove unused code/dependencies.
-*   [ ] **TODO:** Final testing pass (Blocked by Phase 3).
-*   [ ] **TODO:** Update README with R2/DB/OpenAI env var details.
+**Goal:** Improve usability by changing the chat interface from a modal to a docked panel/drawer that allows viewing script content simultaneously.
 
-## Phase 6.5: API Client Cleanup (Post-Refactor Issues)
+1.  **Task: Research & Decide on Mantine Component**
+    *   **Sub-Tasks:**
+        *   Evaluate Mantine `Drawer` vs. modifying `AppShell` to include a right-hand toggleable section.
+        *   Consider implications for responsiveness and content shifting.
+    *   **Status:** `Pending`
 
-*   [ ] **TODO: Frontend - API Client (`api.ts`)**
-    *   [x] Add missing `api.updateVoScriptTemplate` function definition & export.
-    *   [x] Add missing `api.createVoicePreviews` function definition & export.
-    *   [x] Add missing `api.saveVoiceFromPreview` function definition & export.
-    *   [x] Add missing `api.startGeneration` function definition & export.
-    *   [x] Add missing `api.listScripts` function definition & export.
-    *   [x] Add missing `api.toggleScriptArchive` function definition & export.
-    *   [x] Add missing `api.getJobs` function definition & export (or rename call to `listGenerationJobs`).
-    *   [x] Add missing `api.listBatches` function definition & export.
-    *   [x] Add missing `api.updateTakeRank` function definition & export.
-    *   [ ] Add missing `api.getLineTakes` function definition & export (or confirm client-side filtering is sufficient).
-    *   [ ] Add missing `api.cropTake` function definition & export.
-    *   [ ] Add missing `api.getTaskStatus` function definition & export.
-    *   [ ] Add missing `api.regenerateLineTakes` function definition & export.
-    *   [ ] Add missing `api.startSpeechToSpeech` function definition & export.
-    *   [ ] Add missing `api.getVoicePreview` function definition & export.
-    *   [ ] Add missing `api.optimizeLineText` function definition & export.
-    *   [ ] Add missing `api.updateScript` function definition & export (for legacy scripts).
-    *   [ ] Add missing `api.listVoScriptTemplateCategories` function definition & export (maybe lower priority).
-    *   [ ] Add missing `api.getVoScriptTemplateCategory` function definition & export (maybe lower priority).
-    *   [ ] Add missing `api.listVoScriptTemplateLines` function definition & export (maybe lower priority).
-    *   [ ] Add missing `api.getVoScriptTemplateLine` function definition & export (maybe lower priority).
-*   [ ] **TODO: Testing**
-    *   [ ] Verify functionality of pages/components using the above API calls after fixes.
+2.  **Task: Refactor `ChatModal.tsx` (or create `ChatDrawer.tsx`)**
+    *   **Sub-Tasks:**
+        *   Adapt existing chat UI elements (history, input, buttons) to fit the chosen Drawer/Panel component.
+        *   Ensure styling and layout are appropriate for a docked view.
+    *   **Status:** `Pending`
+
+3.  **Task: Integrate Docked Chat Panel into Main Layout**
+    *   **Sub-Tasks:**
+        *   Modify `VoScriptDetailView.tsx` and/or `AppLayout.tsx` (`App.tsx`) to correctly render and manage the docked panel.
+        *   Ensure the main content area adjusts or allows overlay without full dimming, so script lines are visible.
+        *   Update `ChatFab.tsx` or chat-opening logic to control the new docked panel.
+    *   **Status:** `Pending`
+
+4.  **Task: Testing and Refinement**
+    *   **Sub-Tasks:**
+        *   Test chat functionality thoroughly in the new docked view.
+        *   Test responsiveness across different screen sizes.
+        *   Gather feedback and make necessary UX adjustments.
+    *   **Status:** `Pending`
 
 ## Phase 7: New Feature - Create Script from Scratch
 
@@ -477,3 +472,262 @@
     * [x] Made TypeScript interfaces consistent with camelCase naming convention (`JobSubmissionResponse`, `GenerationStartResponse`, `TaskStatus`, `CropTakeResponse`)
     * [x] Restart containers to ensure all changes took effect
     * [x] Verified that regeneration functionality now works correctly
+
+## Feature: AI Script Collaborator Chat (Side Car)
+
+**Tech Spec:** [.cursor/docs/ai_script_collaborator_chat_spec.md](mdc:.cursor/docs/ai_script_collaborator_chat_spec.md)
+
+**Overall Goal:** Implement an iterative, conversational chat interface for script refinement as a "side car" feature, augmenting existing functionalities.
+
+--- 
+
+### Phase 1: Backend Setup & Core Agent Infrastructure
+
+**Goal:** Establish the foundational backend components, including database models, the basic agent structure, and asynchronous task execution.
+
+1.  **Task: Define and Implement `ScriptNote` Database Model**
+    *   **Sub-Tasks:**
+        *   Define `ScriptNote` SQLAlchemy model in `backend/models.py`: (Status: `DONE`)
+            *   `id` (PK, Integer)
+            *   `vo_script_id` (FK to `vo_scripts.id`, Integer, Nullable=False, index=True)
+            *   `category_id` (FK to `vo_script_template_categories.id`, Integer, Nullable=True, index=True)
+            *   `line_id` (FK to `vo_script_lines.id`, Integer, Nullable=True, index=True)
+            *   `title` (String(255), Nullable=True)
+            *   `text_content` (Text, Nullable=False)
+            *   `created_at` (DateTime, server_default=func.now())
+            *   `updated_at` (DateTime, server_default=func.now(), onupdate=func.now())
+        *   Generate Alembic migration script for `ScriptNote`. (Status: `DONE`)
+        *   Apply migration to the development database. (Status: `DONE`)
+    *   **Status:** `DONE`
+    *   **Testing Strategy/Steps:**
+        *   Verify table creation in the dev database using a DB tool or `psql`. (Status: `DONE (Verified via psql)`)
+        *   Manually insert a sample `ScriptNote` record and verify. (Status: `Deferred (will be tested with 'add_to_scratchpad' tool implementation, vo_scripts table currently empty)`)
+        *   `Terminal Command (Example for applying migration): alembic upgrade head` (Actual command used: `docker-compose exec backend env FLASK_APP=backend.app flask db upgrade`)
+
+2.  **Task: Basic `ScriptCollaboratorAgent` Definition**
+    *   **Sub-Tasks:**
+        *   Create a new file, e.g., `backend/agents/script_collaborator_agent.py`. (Status: `DONE`)
+        *   Define the `ScriptCollaboratorAgent` class using `agents.Agent` from the OpenAI Agents SDK. (Status: `DONE`)
+        *   Implement initial agent instructions (system prompt) as per the tech spec. (Status: `DONE`)
+        *   Initialize the agent with a model (e.g., `gpt-4o`). (Status: `DONE`)
+    *   **Status:** `DONE`
+    *   **Testing Strategy/Steps:**
+        *   Instantiate the agent in a Python shell/script (locally, not via API yet). (Status: `DONE`)
+        *   Attempt a simple interaction using `Runner.run_sync(agent, "Hello")` to ensure it responds based on its instructions (without tools yet). (Status: `DONE`)
+
+3.  **Task: Celery Task for Agent Execution**
+    *   **Sub-Tasks:**
+        *   Define a new Celery task in `backend/tasks/script_tasks.py` (e.g., `run_script_collaborator_chat_task`). (Status: `DONE`)
+        *   This task will take `user_message`, `initial_prompt_context_from_prior_sessions`, `current_context`, and `script_id` as arguments. (Status: `DONE`)
+        *   Inside the task, instantiate `ScriptCollaboratorAgent`. (Status: `DONE`)
+        *   Call `Runner.run_sync(agent, combined_prompt)` where `combined_prompt` is constructed from user message and context. (Status: `DONE`)
+        *   The task should return the structured response (AI text, proposals, etc.) as defined in the tech spec. (Status: `DONE`)
+    *   **Status:** `DONE`
+    *   **Testing Strategy/Steps:**
+        *   Trigger the Celery task directly from a Python script with mock data. (Status: `DONE`)
+        *   Verify the task executes and returns a response (even if basic, as tools aren't implemented yet). (Status: `DONE`)
+        *   Check Celery worker logs for execution and any errors. (Status: `DONE`)
+
+4.  **Task: MVP Logging Setup**
+    *   **Sub-Tasks:**
+        *   Ensure basic logging is configured for the backend application. (Status: `DONE` - Verified in `app.py`)
+        *   Add specific log points for Celery task initiation/completion/errors. (Status: `DONE` - Implemented in `run_script_collaborator_chat_task`)
+        *   Add logging for API requests for this feature. (Status: `Pending` - To be done in Phase 3)
+        *   Add logging for agent/tool errors. (Status: `Pending` - To be done in Phase 2)
+    *   **Status:** `In Progress` (Core Celery task logging done)
+    *   **Testing Strategy/Steps:**
+        *   Trigger relevant actions (API calls, task execution) and verify logs are generated with expected information. (Status: `Partially DONE` - Celery task logs verified)
+
+--- 
+
+### Phase 2: Agent Tool Implementation & Testing
+
+**Goal:** Implement and test each of the four agent tools with robust Pydantic models and input validation.
+
+1.  **Task: Implement `get_script_context` Tool**
+    *   **Sub-Tasks:**
+        *   Define Pydantic models for parameters and return type. (Status: `DONE`)
+        *   Implement the tool logic in `backend/agents/script_collaborator_agent.py`. (Status: `DONE`)
+        *   Function should query the database for `VoScript`, `VoScriptTemplateCategory`, `VoScriptLine` based on inputs. (Status: `DONE`)
+        *   Include input validation (e.g., ensuring IDs are valid integers). (Status: `DONE` - Basic validation via Pydantic types, internal logic for num_surrounding)
+        *   Register the tool with the `ScriptCollaboratorAgent`. (Status: `DONE`)
+    *   **Status:** `DONE`
+    *   **Testing Strategy/Steps:**
+        *   **Unit Tests:** Test the tool function directly with mock database sessions/data, covering various scenarios (script only, with category, with line, line with surrounding lines, invalid IDs). (Status: `Pending` - More formal unit tests can be added)
+        *   **Integration Tests:** Create sample `VoScript` data in the dev database. Run the Celery task with the agent configured to use this tool, and craft a prompt that *should* invoke `get_script_context`. Verify the agent receives correct context from the database. (Status: `DONE` - Tested via direct agent script execution with seeded DB data. Celery task integration is later.)
+
+2.  **Task: Implement `propose_script_modification` Tool**
+    *   **Sub-Tasks:**
+        *   Define Pydantic models for parameters (including `modification_type` as an Enum if possible, `new_text` with max length) and return type. (Status: `DONE`)
+        *   Implement tool logic. This tool *does not* modify the DB; it returns a structured proposal. (Status: `DONE`)
+        *   Input validation (max lengths, valid IDs, valid `modification_type`). (Status: `DONE` - Basic validation in tool logic for required text; Pydantic handles type validation and `max_length` removed due to schema issues, will rely on LLM and agent prompt for now)
+        *   Register tool with the agent. (Status: `DONE`)
+    *   **Status:** `DONE`
+    *   **Testing Strategy/Steps:**
+        *   **Unit Tests:** Test the tool function directly, ensuring it correctly structures the proposal based on different inputs and validates parameters. (Status: `Pending` - More formal unit tests can be added)
+        *   **Integration Tests:** Create sample `VoScript` data in the dev database. Run Celery task with agent, prompt it to suggest a change to a line. Verify the agent calls the tool and the task returns a correctly structured `proposed_modifications` object. (Status: `DONE` - Tested via direct agent script execution with seeded DB data. Celery task integration is later.)
+
+3.  **Task: Implement `get_line_details` Tool**
+    *   **Sub-Tasks:**
+        *   Define Pydantic models for parameters and return type (mapping to `VoScriptLine` fields). (Status: `DONE`)
+        *   Implement tool logic to fetch a specific `VoScriptLine` by ID. (Status: `DONE`)
+        *   Input validation. (Status: `DONE` - Pydantic handles ID type; DB query handles existence)
+        *   Register tool with the agent. (Status: `DONE`)
+    *   **Status:** `DONE`
+    *   **Testing Strategy/Steps:**
+        *   **Unit Tests:** Mock DB session, test fetching existing and non-existing lines. (Status: `Pending` - More formal unit tests can be added)
+        *   **Integration Tests:** Create `VoScriptLine` data. Run Celery task with agent, prompt it to get details for a line. Verify correct data is returned in the agent's response (via the tool). (Status: `DONE` - Tested via direct agent script execution with seeded DB data. Celery task integration is later.)
+
+4.  **Task: Implement `add_to_scratchpad` Tool**
+    *   **Sub-Tasks:**
+        *   Define Pydantic models for parameters (with max lengths for text fields) and return type. (Status: `DONE`)
+        *   Implement tool logic to create and save a `ScriptNote` record in the database. (Status: `DONE`)
+        *   Input validation. (Status: `DONE` - Pydantic for types, internal logic for ID/type validation)
+        *   Register tool with the agent. (Status: `DONE`)
+    *   **Status:** `DONE`
+    *   **Testing Strategy/Steps:**
+        *   **Unit Tests:** Mock DB session, test `ScriptNote` creation logic and parameter validation. (Status: `Pending` - More formal unit tests can be added)
+        *   **Integration Tests:** Run Celery task with agent, prompt it to save a note. Verify a `ScriptNote` record is created in the dev database with correct content and associations. (Status: `DONE` - Tested via direct agent script execution & psql verification. Celery task integration is later.)
+
+--- 
+
+### Phase 3: API Endpoint Implementation & Testing
+
+**Goal:** Implement and test the API endpoints for initiating chat and checking task status.
+
+1.  **Task: Implement `POST /api/scripts/<script_id>/chat` Endpoint**
+    *   **Sub-Tasks:**
+        *   Create the Flask route in `backend/routes/vo_script_routes.py`. (Status: `DONE`)
+        *   Validate `script_id` and request body (using Pydantic model). (Status: `DONE`)
+        *   Extract `user_message`, `initial_prompt_context_from_prior_sessions`, `current_context`. (Status: `DONE`)
+        *   Call the Celery task (`run_script_collaborator_chat_task.delay(...)`) with these parameters. (Status: `DONE`)
+        *   Return the Celery `task_id` in the response. (Status: `DONE`)
+    *   **Status:** `DONE`
+    *   **Testing Strategy/Steps:**
+        *   Use an API client (Python script `test_chat_api.py`) to send POST requests to the endpoint with valid and invalid data. (Status: `DONE`)
+        *   Verify a Celery task is enqueued (check Celery logs/monitoring). (Status: `DONE`)
+        *   Verify the API returns a `202 OK` with a `task_id` for valid requests. (Status: `DONE`)
+        *   Verify appropriate error responses (e.g., 400, 404) for invalid inputs. (Status: `DONE`)
+
+2.  **Task: Implement Task Status Endpoint (e.g., `GET /api/chat-task-status/<task_id>`)**
+    *   **Sub-Tasks:**
+        *   Create the Flask route. (Status: `DONE` - Existing `/api/task/<task_id>/status` in `task_routes.py` is used)
+        *   Query Celery for the status of the given `task_id`. (Status: `DONE` - Handled by existing endpoint)
+        *   If task is `SUCCESS`, return the task result. (Status: `DONE` - Handled by existing endpoint)
+        *   If task is `PENDING` or `STARTED`, return a status indicating it's still processing. (Status: `DONE` - Handled by existing endpoint)
+        *   If task is `FAILURE`, return an error status and relevant error information. (Status: `DONE` - Handled by existing endpoint)
+    *   **Status:** `DONE`
+    *   **Testing Strategy/Steps:**
+        *   After successfully calling the chat initiation endpoint, use the returned `task_id` to poll this status endpoint. (Status: `DONE` - Via `test_chat_api.py`)
+        *   Simulate different task states (e.g., by adding delays or controlled failures in the Celery task for testing purposes). (Status: `Pending` - SUCCESS path tested; PENDING/FAILURE can be tested more explicitly if needed)
+        *   Verify the endpoint returns correct status and data for `PENDING`, `SUCCESS`, and `FAILURE` states. (Status: `Partially DONE` - SUCCESS path verified)
+        *   Test with invalid `task_id`. (Status: `Pending` - Can be added to `test_chat_api.py`)
+
+--- 
+
+### Phase 4: Frontend - Proposal Handling
+
+**Goal:** Enable the frontend to understand and display structured "proposed modifications" from the AI, and allow the user to "Accept & Commit", "Edit & Commit", or "Dismiss" these proposals.
+
+1.  **Task: Define Frontend Types for Proposals**
+    *   **Sub-Tasks:**
+        *   Define `ProposedModificationDetail` interface and `ModificationType` enum in `frontend/src/types.ts`. (Status: `DONE`)
+        *   Update `ChatTaskResult` in `types.ts` to use `ProposedModificationDetail[]`. (Status: `DONE`)
+    *   **Status:** `DONE`
+
+2.  **Task: Update `ChatModal.tsx` to Handle and Display Proposals**
+    *   **Sub-Tasks:**
+        *   Store Active Proposals: Add `activeProposals` state and actions (`setActiveProposals`, `removeProposal`, `clearActiveProposals`) to `chatStore.ts`. (Status: `DONE`)
+        *   Parse Proposals: In `ChatModal.tsx` polling logic, extract `proposed_modifications` from successful task results and call `setActiveProposals`. (Status: `DONE`)
+        *   Render Proposals: In `ChatModal.tsx`, if `activeProposals` is not empty, map over it and render each proposal in a distinct card, showing type, target, new text, reasoning. (Status: `DONE`)
+        *   Add placeholder action buttons ("Accept", "Edit", "Dismiss") to each proposal card. (Status: `DONE`)
+    *   **Status:** `DONE` (Display and placeholder actions implemented)
+
+3.  **Task: Implement "Accept & Commit" Logic**
+    *   **Sub-Tasks:**
+        *   Define API client function in `api.ts` to update/create script lines (Status: `DONE` - `api.updateLineText` used, `api.addVoScriptLine` exists for future use).
+        *   Implement `handleAcceptProposal` in `ChatModal.tsx`: (Status: `DONE`)
+            *   Based on `proposal.modification_type`, construct payload and call the appropriate existing backend API endpoint. (Status: `DONE` - Implemented for `REPLACE_LINE`)
+            *   On success: Invalidate React Query cache for `voScriptDetail`, call `removeProposal(proposal.proposal_id)`, show success notification. (Status: `DONE`)
+            *   Handle API errors with notifications. (Status: `DONE`)
+        *   Implement logic for `INSERT_LINE_AFTER`, `INSERT_LINE_BEFORE`, `NEW_LINE_IN_CATEGORY`. (Status: `Pending` - Deferred for MVP)
+    *   **Status:** `Partially DONE` (REPLACE_LINE implemented and working)
+
+4.  **Task: Implement "Dismiss" Logic**
+    *   **Sub-Tasks:**
+        *   Implement `handleDismissProposal` in `ChatModal.tsx` to call `removeProposal(proposal.proposal_id)` from the store. (Status: `DONE`)
+        *   Show confirmation notification. (Status: `DONE`)
+    *   **Status:** `DONE`
+
+5.  **Task: Implement "Edit & Commit" Logic (MVP - Simple Text Edit)**
+    *   **Sub-Tasks:**
+        *   When "Edit" is clicked, allow inline editing of the `new_text` in the proposal card (e.g., replace `Text` with `Textarea`).
+        *   Show "Save Edit" and "Cancel Edit" buttons for the editing mode.
+        *   "Save Edit": Use the edited text and existing proposal details to call the "Accept & Commit" logic/API.
+        *   "Cancel Edit": Revert to displaying the original proposed text.
+    *   **Status:** `Pending`
+
+--- 
+
+### Phase 5: Streaming Investigation & Implementation (MVP Stretch Goal)
+
+**Goal:** If feasible for MVP, implement real-time streaming of AI responses.
+
+1.  **Task: Investigate Agents SDK Streaming Capabilities**
+    *   **Sub-Tasks:**
+        *   Research if/how the OpenAI Agents SDK `Runner` can yield streamed events/tokens.
+    *   **Status:** `Pending`
+
+2.  **Task: Backend Changes for Streaming (if feasible)**
+    *   **Sub-Tasks:**
+        *   Modify Celery task and Flask endpoint to handle/forward a stream (e.g., using SSE).
+    *   **Status:** `Pending`
+
+3.  **Task: Frontend Changes for Streaming (if feasible)**
+    *   **Sub-Tasks:**
+        *   Update API client and UI to consume SSE/WebSocket stream and render tokens incrementally.
+    *   **Status:** `Pending`
+    *   **Testing Strategy/Steps:**
+        *   If implemented, test streaming from end-to-end. Verify tokens appear in near real-time.
+
+--- 
+
+### Phase 6: End-to-End Testing & Refinement (Adjusted phase number)
+
+**Goal:** Thoroughly test the entire feature workflow with realistic data and refine based on findings.
+
+1.  **Task: Comprehensive E2E Testing**
+    *   **Sub-Tasks:**
+        *   Create diverse test scripts and scenarios in the dev database (e.g., empty scripts, scripts with many lines, different categories).
+        *   Test all chat functionalities: initiating chat, sending various queries to trigger different tools, handling proposals, using scratchpad.
+        *   Test edge cases: network errors during polling, API errors from backend, invalid user inputs.
+        *   Verify context awareness (chatting about specific line vs. category vs. whole script).
+    *   **Status:** `Pending`
+    *   **Testing Strategy/Steps:**
+        *   Manually execute test scenarios as a user would.
+        *   Use browser dev tools and backend logs extensively.
+
+2.  **Task: UI/UX Review and Refinement**
+    *   **Sub-Tasks:**
+        *   Review chat flow, clarity of proposals, ease of committing/dismissing.
+        *   Address any awkward interactions or visual glitches.
+    *   **Status:** `Pending`
+
+--- 
+
+### Phase 7: Documentation Updates
+
+**Goal:** Ensure any necessary documentation is updated.
+
+1.  **Task: Update Internal Documentation**
+    *   **Sub-Tasks:**
+        *   Update `agentnotes.md` with details about the new agent, tools, and API endpoints.
+        *   Ensure code comments are thorough.
+    *   **Status:** `Pending`
+
+2.  **Task: User-Facing Documentation (if applicable)**
+    *   **Sub-Tasks:**
+        *   If needed, create a brief guide for game designers on how to use the new chat feature.
+    *   **Status:** `Pending`
+
+---

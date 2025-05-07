@@ -3,6 +3,7 @@
 Tasks for script generation and management.
 """
 from backend.celery_app import celery
+from celery.utils.log import get_task_logger # Import Celery task logger
 from backend import models
 from backend import utils_voscript
 from backend.script_agents.script_writer import ScriptWriterAgent
@@ -14,6 +15,13 @@ from datetime import datetime
 import os
 import logging
 import traceback
+from backend.agents.script_collaborator_agent import ScriptCollaboratorAgent, ProposedModificationResponse, AddToScratchpadResponse, GetLineDetailsResponse, ScriptContextResponse # Import all Pydantic response types from tools
+from agents import Runner
+# Attempt to import specific result item types if available, otherwise use attribute checking
+# from agents.results import ToolCallOutputItem # This import path is a guess
+
+# Get a logger for this module/task
+logger = get_task_logger(__name__)
 
 print("Celery Worker: Loading script_tasks.py...")
 
@@ -405,3 +413,86 @@ def generate_category_lines(self,
                 print(f"[Task ID: {task_id}] Database session closed")
             except:
                 pass 
+
+@celery.task(name="run_script_collaborator_chat")
+def run_script_collaborator_chat_task(script_id: int, user_message: str, initial_prompt_context_from_prior_sessions: list = None, current_context: dict = None):
+    logger.info(f"Starting ScriptCollaboratorAgent task for SID: {script_id}, Msg: '{user_message[:50]}...'")
+    if initial_prompt_context_from_prior_sessions is None: initial_prompt_context_from_prior_sessions = []
+    if current_context is None: current_context = {}
+
+    try:
+        agent = ScriptCollaboratorAgent()
+        logger.info(f"Running Agent with Msg: '{user_message}'")
+        agent_run_result = Runner.run_sync(agent, user_message)
+
+        proposals_for_frontend = []
+        scratchpad_updates_for_frontend = []
+        logger.info(f"Agent run finished. Final Output: {agent_run_result.final_output[:200]}...")
+
+        if hasattr(agent_run_result, 'new_items') and agent_run_result.new_items:
+            logger.info(f"Processing {len(agent_run_result.new_items)} new_items from agent run.")
+            for i, run_item_wrapper in enumerate(agent_run_result.new_items):
+                wrapper_type_name = type(run_item_wrapper).__name__
+                actual_item_content = getattr(run_item_wrapper, 'item', run_item_wrapper) # Use wrapper if item is not distinct
+                item_type_name = type(actual_item_content).__name__ if actual_item_content is not run_item_wrapper else wrapper_type_name
+                
+                logger.info(f"Item {i+1}: WrapperType='{wrapper_type_name}', ActualItemContentType='{item_type_name}'")
+
+                if wrapper_type_name == 'ToolCallOutputItem':
+                    logger.info(f"  [ToolCallOutputItem Wrapper Detected for item {i+1}]")
+                    logger.info(f"    Attributes of wrapper ({wrapper_type_name}): {dir(run_item_wrapper)}")
+                    
+                    tool_function_output = getattr(run_item_wrapper, 'output', None)
+                    logger.info(f"    run_item_wrapper.output: {str(tool_function_output)[:500]} (Type: {type(tool_function_output).__name__})")
+
+                    if hasattr(run_item_wrapper, 'raw_item'):
+                        raw_item_content = run_item_wrapper.raw_item
+                        logger.info(f"    run_item_wrapper.raw_item: {str(raw_item_content)[:500]} (Type: {type(raw_item_content).__name__})")
+                        if isinstance(raw_item_content, dict):
+                             raw_item_actual_output = raw_item_content.get('output')
+                             logger.info(f"    run_item_wrapper.raw_item['output']: {str(raw_item_actual_output)[:500]} (Type: {type(raw_item_actual_output).__name__})")
+                             if tool_function_output is None and raw_item_actual_output is not None:
+                                logger.info("    Using run_item_wrapper.raw_item['output'] as tool_function_output.")
+                                tool_function_output = raw_item_actual_output
+                    
+                    # This is where we process the extracted output
+                    if isinstance(tool_function_output, ProposedModificationResponse):
+                        if tool_function_output.proposal:
+                            logger.info(f"    Extracted PROPOSAL (Pydantic): {tool_function_output.proposal.proposal_id}")
+                            proposals_for_frontend.append(tool_function_output.proposal.model_dump())
+                    elif isinstance(tool_function_output, AddToScratchpadResponse):
+                        if tool_function_output.status == 'success':
+                            logger.info(f"    Extracted SCRATCHPAD_UPDATE (Pydantic): {tool_function_output.note_id}")
+                            scratchpad_updates_for_frontend.append(tool_function_output.model_dump())
+                    elif isinstance(tool_function_output, dict):
+                        logger.info(f"    Tool output is a dictionary: {str(tool_function_output)[:200]}")
+                        if 'proposal' in tool_function_output and isinstance(tool_function_output['proposal'], dict):
+                            proposals_for_frontend.append(tool_function_output['proposal'])
+                            logger.info(f"      Appended proposal from dict: {tool_function_output['proposal'].get('proposal_id')}")
+                        elif 'note_id' in tool_function_output and 'status' in tool_function_output:
+                            scratchpad_updates_for_frontend.append(tool_function_output)
+                            logger.info(f"      Appended scratchpad from dict: {tool_function_output.get('note_id')}")
+                    else:
+                        logger.warning(f"    ToolCallOutputItem's output was not a recognized Pydantic model or dict. Type: {type(tool_function_output).__name__}")
+                
+                elif wrapper_type_name == 'ToolCallItem' and actual_item_content is not run_item_wrapper:
+                    tool_name = getattr(actual_item_content, 'name', 'Unknown Tool')
+                    tool_args = getattr(actual_item_content, 'arguments', '{}')
+                    logger.info(f"  ToolCallItem: Called tool '{tool_name}' with args: {str(tool_args)[:200]}")
+                elif wrapper_type_name == 'MessageOutputItem' and actual_item_content is not run_item_wrapper:
+                    logger.info(f"  MessageOutputItem content: {str(actual_item_content)[:200]}")
+        else:
+            logger.warning("No 'new_items' attribute in agent_run_result, or it is empty.")
+        
+        response_data = {
+            "ai_response_text": agent_run_result.final_output,
+            "proposed_modifications": proposals_for_frontend,
+            "scratchpad_updates": scratchpad_updates_for_frontend, 
+            "updated_conversation_history": [] 
+        }
+        logger.info(f"ScriptCollaboratorAgent task completed for script_id: {script_id}. Proposals: {len(proposals_for_frontend)}, Scratchpad: {len(scratchpad_updates_for_frontend)}")
+        return response_data
+
+    except Exception as e:
+        logger.error(f"Error in ScriptCollaboratorAgent task for script_id {script_id}: {e}", exc_info=True)
+        raise 

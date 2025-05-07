@@ -10,7 +10,7 @@ from agents import Agent, Runner, function_tool
 # Local imports
 from backend import models
 from backend.models import get_db, SessionLocal
-from backend.app import model_to_dict
+from backend.utils.response_utils import model_to_dict # New import
 from sqlalchemy.orm import joinedload, selectinload, Session
 
 # --- Agent Tools --- #

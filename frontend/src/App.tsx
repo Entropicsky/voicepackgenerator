@@ -9,7 +9,7 @@ import JobsPage from './pages/JobsPage';
 import VoiceDesignPage from './pages/VoiceDesignPage';
 import ManageScriptsPage from './pages/ManageScriptsPage';
 import ScriptEditorPage from './pages/ScriptEditorPage';
-import TemplateManagerPage from '@/pages/TemplateManagerPage';
+import TemplateManagerPage from '@/pages/TemplateManagerPage'; // This path might need checking for actual file vs alias
 import { VoiceProvider } from './contexts/VoiceContext';
 import { RankingProvider } from './contexts/RankingContext';
 import { Notifications } from '@mantine/notifications';
@@ -21,24 +21,19 @@ import {
   QueryClient,
   QueryClientProvider,
 } from '@tanstack/react-query';
-import VoScriptListView from '@/pages/VoScriptListView';
-import VoScriptCreateView from '@/pages/VoScriptCreateView';
-import VoScriptDetailView from '@/pages/VoScriptDetailView';
+import VoScriptListView from '@/pages/VoScriptListView'; // Path alias check
+import VoScriptCreateView from '@/pages/VoScriptCreateView'; // Path alias check
+import VoScriptDetailView from '@/pages/VoScriptDetailView'; // Path alias check
+import { ChatDrawer } from './components/chat/ChatDrawer'; // Changed from ChatModal
 
-// Create a client
 const queryClient = new QueryClient();
 
-// NEW: Wrapper component to correctly call useParams
 const RankingPageRouteWrapper: React.FC = () => {
-  // Use '*' to access the wildcard parameter value
   const params = useParams<{ '*' : string }>();
-  const batchPrefix = params['*']; // Get the captured prefix
-
-  if (!batchPrefix) { // Check if the prefix exists
-    // Handle case where batchPrefix is missing, maybe redirect or show error
+  const batchPrefix = params['*'];
+  if (!batchPrefix) {
     return <p>Error: Missing Batch Prefix in URL.</p>;
   }
-  // Pass the full prefix to the provider/page
   return (
     <RankingProvider batchId={batchPrefix}> 
       <RankingPage />
@@ -46,18 +41,10 @@ const RankingPageRouteWrapper: React.FC = () => {
   );
 };
 
-// --- App Layout Component --- 
-// Contains the shell, header, navbar. Renders child routes via <Outlet />
 const AppLayout: React.FC = () => {
   const [opened, { toggle }] = useDisclosure();
-  const location = useLocation(); // Get current location
-
-  // Helper function to close navbar on mobile after click
-  const handleNavClick = () => {
-    if (opened) {
-      toggle();
-    }
-  };
+  const location = useLocation();
+  const handleNavClick = () => { if (opened) { toggle(); } };
 
   return (
     <AppShell
@@ -68,8 +55,7 @@ const AppLayout: React.FC = () => {
         main: {
           width: '100%',
           maxWidth: '100%',
-          // Ensure main area takes up space
-          minHeight: 'calc(100vh - 60px)' // Subtract header height
+          minHeight: 'calc(100vh - 60px)'
         }
       }}
     >
@@ -80,119 +66,24 @@ const AppLayout: React.FC = () => {
             <Image src="/images/color_normal.svg" alt="Logo" h={30} w="auto" mr="sm" />
             <Text size="lg" fw={500}>Voiceover Assistant</Text>
           </Box>
-          {/* Add any other header elements here if needed */}
         </Group>
       </AppShell.Header>
-
       <AppShell.Navbar p="md">
-        {/* --- NEW ORDER: Create Scripts (formerly VO Scripts) first --- */}
-        <NavLink 
-          label="Create Scripts" // RENAMED
-          component={Link} 
-          to="/vo-scripts" 
-          active={location.pathname.startsWith('/vo-scripts')} 
-          onClick={handleNavClick} 
-          style={(theme) => ({
-            borderLeft: location.pathname.startsWith('/vo-scripts') ? `3px solid ${theme.colors.blue[6]}` : 'none',
-            paddingLeft: location.pathname.startsWith('/vo-scripts') ? `calc(${theme.spacing.md} - 3px)` : theme.spacing.md,
-          })}
-        />
-        <NavLink 
-          label="Create Voices" 
-          component={Link} 
-          to="/voice-design" 
-          active={location.pathname === '/voice-design' || location.pathname === '/'} 
-          onClick={handleNavClick} 
-          style={(theme) => ({
-            borderLeft: (location.pathname === '/voice-design' || location.pathname === '/') ? `3px solid ${theme.colors.blue[6]}` : 'none',
-            paddingLeft: (location.pathname === '/voice-design' || location.pathname === '/') ? `calc(${theme.spacing.md} - 3px)` : theme.spacing.md,
-          })}
-        />
-        {/* --- HIDDEN: Legacy Manage Scripts --- */}
-        {/* 
-        <NavLink 
-          label="Manage Scripts" 
-          component={Link} 
-          to="/scripts" 
-          active={location.pathname.startsWith('/scripts')} 
-          onClick={handleNavClick} 
-          style={(theme) => ({
-            borderLeft: location.pathname.startsWith('/scripts') ? `3px solid ${theme.colors.blue[6]}` : 'none',
-            paddingLeft: location.pathname.startsWith('/scripts') ? `calc(${theme.spacing.md} - 3px)` : theme.spacing.md,
-          })}
-        />
-        */}
-        <NavLink 
-          label="Generate Recordings" 
-          component={Link} 
-          to="/generate" 
-          active={location.pathname === '/generate'} 
-          onClick={handleNavClick} 
-          style={(theme) => ({
-            borderLeft: location.pathname === '/generate' ? `3px solid ${theme.colors.blue[6]}` : 'none',
-            paddingLeft: location.pathname === '/generate' ? `calc(${theme.spacing.md} - 3px)` : theme.spacing.md,
-          })}
-        /> 
-        <NavLink 
-          label="Monitor Generations" 
-          component={Link} 
-          to="/jobs" 
-          active={location.pathname === '/jobs'} 
-          onClick={handleNavClick} 
-          style={(theme) => ({
-            borderLeft: location.pathname === '/jobs' ? `3px solid ${theme.colors.blue[6]}` : 'none',
-            paddingLeft: location.pathname === '/jobs' ? `calc(${theme.spacing.md} - 3px)` : theme.spacing.md,
-          })}
-        />
-        <NavLink 
-          label="Edit Recordings" 
-          component={Link} 
-          to="/batches" 
-          active={location.pathname.startsWith('/batch') || location.pathname === '/batches'} 
-          onClick={handleNavClick} 
-          style={(theme) => ({
-            borderLeft: (location.pathname.startsWith('/batch') || location.pathname === '/batches') ? `3px solid ${theme.colors.blue[6]}` : 'none',
-            paddingLeft: (location.pathname.startsWith('/batch') || location.pathname === '/batches') ? `calc(${theme.spacing.md} - 3px)` : theme.spacing.md,
-          })}
-        />
-        <NavLink 
-          label="Manage Templates" 
-          component={Link} 
-          to="/script-templates" 
-          active={location.pathname.startsWith('/script-templates')} 
-          onClick={handleNavClick} 
-          style={(theme) => ({
-            borderLeft: location.pathname.startsWith('/script-templates') ? `3px solid ${theme.colors.blue[6]}` : 'none',
-            paddingLeft: location.pathname.startsWith('/script-templates') ? `calc(${theme.spacing.md} - 3px)` : theme.spacing.md,
-          })}
-        />
-        {/* --- MOVED TO TOP --- */}
-        {/* 
-        <NavLink 
-          label="VO Scripts" 
-          component={Link} 
-          to="/vo-scripts" 
-          active={location.pathname.startsWith('/vo-scripts')} 
-          onClick={handleNavClick} 
-          style={(theme) => ({
-            borderLeft: location.pathname.startsWith('/vo-scripts') ? `3px solid ${theme.colors.blue[6]}` : 'none',
-            paddingLeft: location.pathname.startsWith('/vo-scripts') ? `calc(${theme.spacing.md} - 3px)` : theme.spacing.md,
-          })}
-        />
-        */}
+        <NavLink label="Create Scripts" component={Link} to="/vo-scripts" active={location.pathname.startsWith('/vo-scripts')} onClick={handleNavClick} style={(theme) => ({ borderLeft: location.pathname.startsWith('/vo-scripts') ? `3px solid ${theme.colors.blue[6]}` : 'none', paddingLeft: location.pathname.startsWith('/vo-scripts') ? `calc(${theme.spacing.md} - 3px)` : theme.spacing.md, })} />
+        <NavLink label="Create Voices" component={Link} to="/voice-design" active={location.pathname === '/voice-design' || location.pathname === '/'} onClick={handleNavClick} style={(theme) => ({ borderLeft: (location.pathname === '/voice-design' || location.pathname === '/') ? `3px solid ${theme.colors.blue[6]}` : 'none', paddingLeft: (location.pathname === '/voice-design' || location.pathname === '/') ? `calc(${theme.spacing.md} - 3px)` : theme.spacing.md, })} />
+        <NavLink label="Generate Recordings" component={Link} to="/generate" active={location.pathname === '/generate'} onClick={handleNavClick} style={(theme) => ({ borderLeft: location.pathname === '/generate' ? `3px solid ${theme.colors.blue[6]}` : 'none', paddingLeft: location.pathname === '/generate' ? `calc(${theme.spacing.md} - 3px)` : theme.spacing.md, })} /> 
+        <NavLink label="Monitor Generations" component={Link} to="/jobs" active={location.pathname === '/jobs'} onClick={handleNavClick} style={(theme) => ({ borderLeft: location.pathname === '/jobs' ? `3px solid ${theme.colors.blue[6]}` : 'none', paddingLeft: location.pathname === '/jobs' ? `calc(${theme.spacing.md} - 3px)` : theme.spacing.md, })} />
+        <NavLink label="Edit Recordings" component={Link} to="/batches" active={location.pathname.startsWith('/batch') || location.pathname === '/batches'} onClick={handleNavClick} style={(theme) => ({ borderLeft: (location.pathname.startsWith('/batch') || location.pathname === '/batches') ? `3px solid ${theme.colors.blue[6]}` : 'none', paddingLeft: (location.pathname.startsWith('/batch') || location.pathname === '/batches') ? `calc(${theme.spacing.md} - 3px)` : theme.spacing.md, })} />
+        <NavLink label="Manage Templates" component={Link} to="/script-templates" active={location.pathname.startsWith('/script-templates')} onClick={handleNavClick} style={(theme) => ({ borderLeft: location.pathname.startsWith('/script-templates') ? `3px solid ${theme.colors.blue[6]}` : 'none', paddingLeft: location.pathname.startsWith('/script-templates') ? `calc(${theme.spacing.md} - 3px)` : theme.spacing.md, })} />
       </AppShell.Navbar>
-
-      {/* Render the matched child route's element here */}
       <AppShell.Main>
         <Outlet /> 
       </AppShell.Main>
+      <ChatDrawer />
     </AppShell>
   );
 }
 
-// --- Main App Component --- 
-// Sets up providers, Router, and defines the route structure
-// Force rebuild comment: 2025-04-27 12:00 PM
 const App: React.FC = () => {
   return (
     <MantineProvider>
@@ -201,30 +92,21 @@ const App: React.FC = () => {
         <VoiceProvider>
           <Router>
             <Routes>
-              {/* Route defining the main layout */}
               <Route path="/" element={<AppLayout />}>
-                {/* Nested routes that will render inside AppLayout's Outlet */}
-                <Route index element={<VoiceDesignPage />} /> {/* Default page for '/' */}
+                <Route index element={<VoiceDesignPage />} />
                 <Route path="voice-design" element={<VoiceDesignPage />} />
                 <Route path="scripts" element={<ManageScriptsPage />} />
                 <Route path="scripts/new" element={<ScriptEditorPage />} />
                 <Route path="scripts/:scriptId" element={<ScriptEditorPage />} />
                 <Route path="script-templates" element={<TemplateManagerPage />} />
-                
-                {/* --- VO Script Routes --- */}
                 <Route path="vo-scripts" element={<VoScriptListView />} />
                 <Route path="vo-scripts/new" element={<VoScriptCreateView />} />
                 <Route path="vo-scripts/:scriptId" element={<VoScriptDetailView />} />
-                {/* --- End VO Script Routes --- */}
-
                 <Route path="batch/*" element={<RankingPageRouteWrapper />} />
                 <Route path="batches" element={<BatchesPage />} />
                 <Route path="jobs" element={<JobsPage />} />
                 <Route path="generate" element={<GenerationPage />} />
-                {/* Add a catch-all or Not Found route if desired */}
-                {/* <Route path="*" element={<NotFoundPage />} /> */}
               </Route>
-              {/* Routes outside the main layout (if any) could go here */}
             </Routes>
           </Router>
         </VoiceProvider>

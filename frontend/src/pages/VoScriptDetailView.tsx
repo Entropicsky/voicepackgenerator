@@ -18,6 +18,7 @@ import { api } from '../api';
 import { VoScript, VoScriptLineData, JobSubmissionResponse, SubmitFeedbackPayload, RunAgentPayload, UpdateVoScriptPayload, UpdateVoScriptTemplateCategoryPayload, VoScriptCategoryData, RefineLinePayload, RefineLineResponse, RefineCategoryPayload, RefineMultipleLinesResponse, RefineScriptPayload, DeleteResponse, AddVoScriptLinePayload, VoScriptTemplate, VoScriptTemplateCategory } from '../types';
 // Import custom AppModal
 import AppModal from '../components/common/AppModal'; // Adjust path relative to pages/
+import { ChatFab } from '../components/chat/ChatFab'; // NEW: Import ChatFab
 
 const POLLING_INTERVAL = 5000; // Poll every 5 seconds
 
@@ -1830,6 +1831,61 @@ const VoScriptDetailView: React.FC = () => {
                 </Group>
             </Stack>
         </AppModal>
+
+        {/* Instantiate Lines Modal */}
+        {templateCategoriesData && (
+            <AppModal
+                opened={instantiateModalOpened}
+                onClose={closeInstantiateModal}
+                title="Instantiate Target Lines"
+                size="lg"
+            >
+                <Stack>
+                    <Select 
+                        label="Target Category"
+                        placeholder="Select category to add lines to"
+                        data={templateCategoriesData.map(cat => ({ value: String(cat.id), label: cat.name }))}
+                        value={targetCategoryId}
+                        onChange={setTargetCategoryId}
+                        searchable
+                        nothingFoundMessage="No categories found"
+                        disabled={isLoadingTemplateCategories}
+                    />
+                    <Textarea
+                        label="Target Names (one per line)"
+                        placeholder="Enter each target name on a new line...\nExample:\nCommander Rex\nSergeant Ironhide\nDr. Elara Vance"
+                        value={targetNamesInput}
+                        onChange={(event) => setTargetNamesInput(event.currentTarget.value)}
+                        minRows={5}
+                        autosize
+                    />
+                    <TextInput 
+                        label="Line Key Prefix (Optional)"
+                        value={targetLineKeyPrefix}
+                        onChange={(event) => setTargetLineKeyPrefix(event.currentTarget.value)}
+                    />
+                    <Textarea
+                        label="Prompt Hint Template (Optional)"
+                        description="Use {TargetName} as a placeholder for the target name."
+                        value={targetPromptHintTemplate}
+                        onChange={(event) => setTargetPromptHintTemplate(event.currentTarget.value)}
+                        minRows={2}
+                        autosize
+                    />
+                    <Button 
+                        onClick={handleSubmitInstantiateLines} 
+                        loading={instantiateLinesMutation.isPending}
+                        disabled={instantiateLinesMutation.isPending}
+                    >
+                        Create Lines & Start Generation
+                    </Button>
+                </Stack>
+            </AppModal>
+        )}
+
+        {/* Chat FAB - Placed here so it's within the main Stack but will be fixed position */}
+        {numericScriptId && <ChatFab scriptId={numericScriptId} />}
+
     </Stack>
   );
 };

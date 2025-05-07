@@ -13,6 +13,7 @@ from datetime import datetime
 from . import utils_elevenlabs
 from . import utils_r2
 from . import models
+from .utils.response_utils import make_api_response, model_to_dict
 
 # Load environment variables from .env file for local development
 # Within Docker, env vars are passed by docker-compose
@@ -50,28 +51,12 @@ except Exception as e:
 print(f"Flask App: ELEVENLABS_API_KEY loaded? {'Yes' if os.getenv('ELEVENLABS_API_KEY') else 'No'}")
 
 # --- Helper Function --- #
-def make_api_response(data: dict | List[dict] = None, error: str = None, status_code: int = 200) -> Response:
-    if error:
-        response_data = {"error": error}
-        status_code = status_code if status_code >= 400 else 500
-    else:
-        response_data = {"data": data if data is not None else {}}
-    return jsonify(response_data), status_code
+# def make_api_response(...): # REMOVE THIS DEFINITION
+#     ...
 
 # --- Helper to convert model instance to dict --- #
-def model_to_dict(instance, keys=None):
-    """Converts a SQLAlchemy model instance into a dictionary."""
-    if instance is None:
-        return None
-    data = {}
-    columns = instance.__table__.columns.keys() if keys is None else keys
-    for column in columns:
-        value = getattr(instance, column)
-        # Convert datetime objects to ISO format string
-        if isinstance(value, datetime):
-            value = value.isoformat()
-        data[column] = value
-    return data
+# def model_to_dict(...): # REMOVE THIS DEFINITION
+#     ...
 
 # --- API Endpoints --- #
 

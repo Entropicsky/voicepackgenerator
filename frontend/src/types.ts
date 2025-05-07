@@ -294,14 +294,15 @@ export interface VoScriptTemplateCategory {
 export interface VoScriptTemplateLine {
   id: number;
   template_id: number;
-  category_id: number;
+  category_id?: number | null;
   line_key: string;
   order_index: number;
   prompt_hint?: string | null;
-  static_text?: string | null;  // NEW: Static text field that bypasses LLM generation
+  static_text?: string | null; // Added based on backend model
   is_deleted: boolean;
   created_at: string;
   updated_at: string;
+  // category?: VoScriptTemplateCategory; // If it has nested category object
 }
 
 // Represents a full VO Script Template including categories and lines
@@ -462,3 +463,59 @@ export interface AddVoScriptLinePayload {
   initial_text?: string | null;
   prompt_hint?: string | null;
 }
+
+// --- NEW TYPES FOR CHAT FEATURE ---
+export interface ChatMessageContext {
+    role: 'user' | 'assistant';
+    content: string;
+}
+
+export interface ChatRequestContext { 
+    category_id?: number | null;
+    line_id?: number | null;
+}
+
+export interface InitiateChatPayload {
+    user_message: string;
+    initial_prompt_context_from_prior_sessions?: ChatMessageContext[];
+    current_context?: ChatRequestContext;
+}
+
+export interface InitiateChatResponseData { // What the backend {data: HERE} contains
+    task_id: string;
+}
+
+// --- NEW OR UPDATED TYPES FOR CHAT PROPOSAL HANDLING ---
+
+// Matches the backend Enum for modification types
+export enum ModificationType {
+    REPLACE_LINE = "REPLACE_LINE",
+    INSERT_LINE_AFTER = "INSERT_LINE_AFTER",
+    INSERT_LINE_BEFORE = "INSERT_LINE_BEFORE",
+    NEW_LINE_IN_CATEGORY = "NEW_LINE_IN_CATEGORY",
+}
+
+export interface ProposedModificationDetail {
+    proposal_id: string; 
+    script_id: number;
+    modification_type: ModificationType;
+    target_id: number; 
+    new_text?: string | null;
+    character_id?: number | null;
+    metadata_notes?: string | null;
+    reasoning?: string | null;
+    suggested_line_key?: string | null;
+    suggested_order_index?: number | null;
+}
+
+// Update existing ChatTaskResult
+export interface ChatTaskResult { // The 'info' field of a successful chat task
+    ai_response_text: string;
+    proposed_modifications: ProposedModificationDetail[]; // Use the new detailed type
+    scratchpad_updates: any[];   // TODO: Define more strictly based on backend tool output (e.g., AddToScratchpadResponse)
+    updated_conversation_history: any[]; // TODO: Define more strictly based on backend agent output (e.g., ChatMessageContext[])
+}
+
+// ChatTaskStatusData already uses ChatTaskResult, so it will benefit from this update.
+
+// --- END NEW TYPES FOR CHAT FEATURE ---
