@@ -83,8 +83,8 @@ export interface RegenerateLinePayload {
 
 // Response from starting any async job (generate, regenerate, STS)
 export interface JobSubmissionResponse {
-  task_id: string | null; // Celery Task ID (can be null if submit fails)
-  job_id: number;        // Database Job ID
+  task_id: string | null; // USE snake_case
+  job_id: number;        // USE snake_case
 }
 
 // Represents detailed batch info from the LIST endpoint /api/batches
@@ -517,5 +517,12 @@ export interface ChatTaskResult { // The 'info' field of a successful chat task
 }
 
 // ChatTaskStatusData already uses ChatTaskResult, so it will benefit from this update.
+
+// --- ADDED Type for Chat History Items ---
+export interface ChatHistoryItem {
+    role: string;
+    content: string;
+    timestamp: string; // Use string for ISO date format from backend
+}
 
 // --- END NEW TYPES FOR CHAT FEATURE ---

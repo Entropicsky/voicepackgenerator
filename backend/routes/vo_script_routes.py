@@ -14,8 +14,8 @@ from openpyxl.styles import Font, Alignment, PatternFill # For formatting
 from openpyxl.utils import get_column_letter # For setting column width
 import re # Import regex for natural sort
 import sqlalchemy as sa # Added import
-from pydantic import BaseModel, ValidationError
-from typing import List, Optional, Dict, Any # Ensure these are imported
+from pydantic import BaseModel, Field, ValidationError
+from typing import List, Optional, Dict, Any # Ensure Any is imported
 
 # Assuming models and helpers are accessible, adjust imports as necessary
 from backend import models # Added tasks import
@@ -2332,8 +2332,18 @@ def instantiate_target_lines(script_id: int):
 # --- Pydantic model for Chat Request Body ---
 class ChatRequestBody(BaseModel):
     user_message: str
-    initial_prompt_context_from_prior_sessions: Optional[List[Dict[str, Any]]] = None
-    current_context: Optional[Dict[str, Any]] = None
+    current_context: Optional[Dict[str, Any]] = None # Keep this for focus
+
+# --- Pydantic model for Chat History Response Item ---
+class ChatHistoryItem(BaseModel):
+    role: str
+    content: str
+    timestamp: datetime
+
+    class Config:
+        from_attributes = True # Use from_attributes instead of orm_mode for Pydantic v2
+
+# --- Chat Endpoints --- #
 
 @vo_script_bp.route("/vo-scripts/<int:script_id>/chat", methods=["POST"])
 def handle_chat_interaction(script_id: int):
@@ -2359,7 +2369,7 @@ def handle_chat_interaction(script_id: int):
         task = run_script_collaborator_chat_task.delay(
             script_id=script_id,
             user_message=request_data.user_message,
-            initial_prompt_context_from_prior_sessions=request_data.initial_prompt_context_from_prior_sessions or [],
+            initial_prompt_context_from_prior_sessions=None, # Pass None or empty list, it's ignored by task now
             current_context=request_data.current_context or {}
         )
         
@@ -2369,6 +2379,31 @@ def handle_chat_interaction(script_id: int):
     except Exception as e:
         current_app.logger.error(f"Error in chat interaction endpoint for script {script_id}: {e}", exc_info=True)
         return make_api_response(error="Internal server error during chat interaction.", status_code=500)
+    finally:
+        if db:
+            db.close()
+
+@vo_script_bp.route("/vo-scripts/<int:script_id>/chat/history", methods=["GET"])
+def get_chat_history(script_id: int):
+    """Endpoint to retrieve chat history for a specific VO Script."""
+    db = next(models.get_db())
+    try:
+        history_records = db.query(models.ChatMessageHistory).filter(
+            models.ChatMessageHistory.vo_script_id == script_id
+        ).order_by(
+            models.ChatMessageHistory.timestamp.asc() # Fetch in chronological order
+        ).all()
+
+        # Use Pydantic model for response structure
+        # Ensure correct parsing from ORM object
+        history_response = [ChatHistoryItem.model_validate(record).model_dump() for record in history_records]
+
+        current_app.logger.info(f"Retrieved {len(history_response)} chat history messages for script {script_id}")
+        return make_api_response(data=history_response, status_code=200)
+
+    except Exception as e:
+        current_app.logger.error(f"Error retrieving chat history for script {script_id}: {e}", exc_info=True)
+        return make_api_response(error="Internal server error retrieving chat history.", status_code=500)
     finally:
         if db:
             db.close()

@@ -1,7 +1,7 @@
 import { Text, Stack, Textarea, Button, Group, ScrollArea, Paper, Loader, Alert, Card, ActionIcon, Box, Tooltip, Grid } from '@mantine/core';
-import { IconSend, IconX, IconBulb, IconCheck, IconEdit, IconTrash } from '@tabler/icons-react';
+import { IconSend, IconX, IconBulb, IconCheck, IconEdit, IconTrash, IconAlertCircle } from '@tabler/icons-react';
 import { useChatStore, ChatState, ChatMessage, getChatHistoryForContext } from '../../stores/chatStore';
-import { ChatTaskResult, ProposedModificationDetail, ModificationType, VoScriptLineData } from '../../types';
+import { ChatTaskResult, ProposedModificationDetail, ModificationType, VoScriptLineData, InitiateChatPayload, ChatHistoryItem } from '../../types';
 import { api } from '../../api';
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -14,7 +14,8 @@ export function ChatPanelContent() {
     const {
         isChatOpen, toggleChatOpen, chatDisplayHistory, currentMessage, setCurrentMessage,
         isLoading, setLoading, error, setError, currentFocus, currentAgentTaskID,
-        setCurrentAgentTaskID, addMessageToHistory, activeProposals, setActiveProposals, removeProposal
+        setCurrentAgentTaskID, addMessageToHistory, activeProposals, setActiveProposals, removeProposal,
+        setChatDisplayHistory
     } = useChatStore((state: ChatState) => state);
 
     console.log("[ChatPanelContent] Rendering. Active proposals from store:", JSON.parse(JSON.stringify(activeProposals)));
@@ -30,26 +31,64 @@ export function ChatPanelContent() {
     const [editingProposals, setEditingProposals] = useState<Record<string, string>>({});
     const [isAcceptingAll, setIsAcceptingAll] = useState(false);
 
+    // Add state for initial history loading
+    const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+    const [historyError, setHistoryError] = useState<string | null>(null);
+
     useEffect(() => {
         if (viewport.current) {
             viewport.current.scrollTo({ top: viewport.current.scrollHeight, behavior: 'smooth' });
         }
     }, [chatDisplayHistory, activeProposals]);
 
+    // --- Fetch Chat History on Mount/Script Change --- //
+    useEffect(() => {
+        if (currentFocus.scriptId) {
+            console.log(`[ChatPanelContent] Script ID changed to ${currentFocus.scriptId}, fetching history...`);
+            setIsHistoryLoading(true);
+            setHistoryError(null);
+            setChatDisplayHistory([]); 
+            setActiveProposals([]);
+
+            api.getChatHistory(currentFocus.scriptId)
+                .then(history => {
+                    console.log(`[ChatPanelContent] SUCCESSFULLY FETCHED ${history.length} history messages for script ${currentFocus.scriptId}.`);
+                    const formattedHistory: ChatMessage[] = history.map(item => ({ 
+                        role: item.role as 'user' | 'assistant',
+                        content: item.content 
+                    }));
+                    setChatDisplayHistory(formattedHistory); // UNCOMMENTED
+                })
+                .catch(err => {
+                    console.error("[ChatPanelContent] Failed to fetch chat history:", err);
+                    setHistoryError(`Failed to load chat history: ${err.message}`);
+                    setChatDisplayHistory([]); // Ensure history is empty on error
+                })
+                .finally(() => {
+                    setIsHistoryLoading(false);
+                });
+        } else {
+             console.log("[ChatPanelContent] No script ID in focus, clearing display states.");
+             setChatDisplayHistory([]); 
+             setActiveProposals([]);
+             setIsHistoryLoading(false);
+             setHistoryError(null);
+        }
+    }, [currentFocus.scriptId, setChatDisplayHistory, setActiveProposals]); // RESTORED dependency array
+
     const handleSendMessage = async () => {
-        if (!currentMessage.trim() || isLoading || !currentFocus.scriptId) return;
-        const userMessage: ChatMessage = { role: 'user', content: currentMessage.trim() };
-        addMessageToHistory(userMessage);
-        const messageForApi = currentMessage.trim();
+        if (!currentMessage.trim() || isLoading || isHistoryLoading || !currentFocus.scriptId) return;
+        const userMessageText = currentMessage.trim();
+        const userMessage: ChatMessage = { role: 'user', content: userMessageText };
+        addMessageToHistory(userMessage); // Optimistic UI update
         setCurrentMessage('');
         setLoading(true);
         setError(null);
         setActiveProposals([]);
+
         try {
-            const recentHistory = getChatHistoryForContext(chatDisplayHistory, 6);
-            const payload = {
-                user_message: messageForApi,
-                initial_prompt_context_from_prior_sessions: recentHistory,
+            const payload: InitiateChatPayload = {
+                user_message: userMessageText,
                 current_context: { category_id: currentFocus.categoryId, line_id: currentFocus.lineId }
             };
             const response = await api.initiateChatSession(currentFocus.scriptId, payload);
@@ -65,80 +104,140 @@ export function ChatPanelContent() {
             if (pollingIntervalRef.current) {
                 clearInterval(pollingIntervalRef.current);
                 pollingIntervalRef.current = null;
+                console.log("[ChatPanelContent] Polling stopped."); // Log stop
             }
         };
-        let attempts = 0; // Initialize attempt counter
+        let attempts = 0; 
+        let initialDelayTimer: NodeJS.Timeout | null = null;
 
         if (currentAgentTaskID) {
-            setLoading(true);
-            pollingIntervalRef.current = setInterval(async () => {
-                attempts++; // Increment on each polling execution
+            const taskIdBeingPolled = currentAgentTaskID; 
+            console.log(`[ChatPanelContent] New task ID detected: ${taskIdBeingPolled}. Setting up polling with initial delay.`);
+            setLoading(true); // Set loading immediately
+            setError(null); // Clear previous errors
+            setActiveProposals([]); // Clear previous proposals
 
-                if (attempts > MAX_POLLING_ATTEMPTS) {
-                    stopPolling();
-                    setLoading(false);
-                    const timeoutMessage = "The AI is taking longer than expected to respond. Please try sending your message again shortly.";
-                    setError(timeoutMessage);
-                    // Add a message to chat history to inform the user in the chat UI
-                    addMessageToHistory({role: 'assistant', content: timeoutMessage});
-                    setCurrentAgentTaskID(null); // Clear the task ID as we've timed out on it
-                    return; // Stop further execution in this interval
-                }
-
-                try {
-                    const statusResponse = await api.getChatTaskStatus(currentAgentTaskID);
-                    if (statusResponse.status === 'SUCCESS' && statusResponse.info) {
-                        stopPolling();
-                        setCurrentAgentTaskID(null);
-                        setLoading(false);
-
-                        const successInfo = statusResponse.info as ChatTaskResult;
-                        
-                        console.log("[ChatPanelContent] Task SUCCESS. Raw successInfo:", JSON.parse(JSON.stringify(successInfo)));
-
-                        const aiResponse: ChatMessage = {
-                            role: 'assistant',
-                            content: successInfo.ai_response_text || "(AI did not provide a text response)"
-                        };
-                        addMessageToHistory(aiResponse);
-
-                        if (successInfo.proposed_modifications && successInfo.proposed_modifications.length > 0) {
-                            console.log("[ChatPanelContent] Received proposals to sort and set:", JSON.parse(JSON.stringify(successInfo.proposed_modifications)));
-                            const sortedProposals = [...successInfo.proposed_modifications].sort((a, b) => {
-                                const orderA = a.suggested_order_index ?? Infinity;
-                                const orderB = b.suggested_order_index ?? Infinity;
-
-                                if (orderA !== orderB) {
-                                    return orderA - orderB;
-                                }
-
-                                const keyA = a.suggested_line_key || '';
-                                const keyB = b.suggested_line_key || '';
-                                return keyA.localeCompare(keyB);
-                            });
-                            setActiveProposals(sortedProposals);
-                        } else {
-                            console.log("[ChatPanelContent] No proposals received, or array empty. Setting loading to false.");
-                            setActiveProposals([]);
-                        }
-                    } else if (statusResponse.status === 'FAILURE') {
-                        stopPolling(); setLoading(false); setCurrentAgentTaskID(null);
-                        const errorInfo = statusResponse.info as { error?: string; message?: string; };
-                        const errorMessage = errorInfo?.error || errorInfo?.message || 'Task failed.';
-                        setError(errorMessage);
-                        addMessageToHistory({role: 'assistant', content: `Sorry, I encountered an error: ${errorMessage}`});
-                    } else if (statusResponse.status === 'PENDING' || statusResponse.status === 'STARTED'){
-                        console.log(`Task ${currentAgentTaskID} is ${statusResponse.status}`);
-                    } else {
-                         console.warn("Unexpected task status:", statusResponse.status);
+            // --- Add Initial Delay --- 
+            initialDelayTimer = setTimeout(() => {
+                console.log(`[ChatPanelContent] Initial delay finished for ${taskIdBeingPolled}. Starting interval polling.`);
+                // Start the interval polling ONLY after the delay
+                pollingIntervalRef.current = setInterval(async () => {
+                    // Early exit if the task ID has changed or cleared 
+                    if (useChatStore.getState().currentAgentTaskID !== taskIdBeingPolled || !taskIdBeingPolled) {
+                        console.log(`[ChatPanelContent] Task ID mismatch or cleared (${useChatStore.getState().currentAgentTaskID} vs ${taskIdBeingPolled}). Stopping polling interval.`);
+                        stopPolling(); 
+                        return;
                     }
-                } catch (err: any) {
-                    stopPolling(); setLoading(false); setCurrentAgentTaskID(null);
-                    setError(err.message || 'Failed to get task update.');
-                }
-            }, POLLING_INTERVAL);
+                    
+                    attempts++; 
+
+                    if (attempts > MAX_POLLING_ATTEMPTS) {
+                         console.log(`[ChatPanelContent] Max polling attempts reached for ${taskIdBeingPolled}.`);
+                        stopPolling();
+                        setLoading(false);
+                        const timeoutMessage = "The AI is taking longer than expected to respond. Please try sending your message again shortly.";
+                        setError(timeoutMessage);
+                        addMessageToHistory({role: 'assistant', content: timeoutMessage});
+                        setCurrentAgentTaskID(null); 
+                        return; 
+                    }
+
+                    try {
+                        console.log(`[ChatPanelContent] Polling task: ${taskIdBeingPolled}, Attempt: ${attempts}`); 
+                        const statusResponse = await api.getChatTaskStatus(taskIdBeingPolled);
+                        console.log(`[ChatPanelContent] Poll response for ${taskIdBeingPolled}:`, statusResponse); // Log response
+                        
+                        // Re-check task ID after await 
+                        if (useChatStore.getState().currentAgentTaskID !== taskIdBeingPolled) {
+                            console.log(`[ChatPanelContent] Task ID changed during poll for ${taskIdBeingPolled}, aborting processing.`);
+                            stopPolling();
+                            return;
+                        }
+                        
+                        // Process status ONLY if the status field exists
+                        if (statusResponse && typeof statusResponse.status !== 'undefined') {
+                            if (statusResponse.status === 'SUCCESS' && statusResponse.info) {
+                                console.log(`[ChatPanelContent] SUCCESS received for task ${taskIdBeingPolled}`); 
+                                stopPolling();
+                                setCurrentAgentTaskID(null); 
+                                setLoading(false);
+
+                                const successInfo = statusResponse.info as ChatTaskResult;
+                                
+                                console.log("[ChatPanelContent] Task SUCCESS. Raw successInfo:", JSON.parse(JSON.stringify(successInfo)));
+
+                                const aiResponse: ChatMessage = {
+                                    role: 'assistant',
+                                    content: successInfo.ai_response_text || "(AI did not provide a text response)"
+                                };
+                                addMessageToHistory(aiResponse);
+
+                                if (successInfo.proposed_modifications && successInfo.proposed_modifications.length > 0) {
+                                    console.log("[ChatPanelContent] Received proposals to sort and set:", JSON.parse(JSON.stringify(successInfo.proposed_modifications)));
+                                    const sortedProposals = [...successInfo.proposed_modifications].sort((a, b) => {
+                                        const orderA = a.suggested_order_index ?? Infinity;
+                                        const orderB = b.suggested_order_index ?? Infinity;
+
+                                        if (orderA !== orderB) {
+                                            return orderA - orderB;
+                                        }
+
+                                        const keyA = a.suggested_line_key || '';
+                                        const keyB = b.suggested_line_key || '';
+                                        return keyA.localeCompare(keyB);
+                                    });
+                                    setActiveProposals(sortedProposals);
+                                } else {
+                                    console.log("[ChatPanelContent] No proposals received, or array empty. Setting loading to false.");
+                                    setActiveProposals([]);
+                                }
+                            } else if (statusResponse.status === 'FAILURE') {
+                                console.log(`[ChatPanelContent] FAILURE received for task ${taskIdBeingPolled}`); 
+                                stopPolling(); 
+                                setLoading(false); 
+                                setCurrentAgentTaskID(null);
+                                const errorInfo = statusResponse.info as { error?: string; message?: string; };
+                                const errorMessage = errorInfo?.error || errorInfo?.message || 'Task failed.';
+                                setError(errorMessage);
+                                addMessageToHistory({role: 'assistant', content: `Sorry, I encountered an error: ${errorMessage}`});
+                            } else if (statusResponse.status === 'PENDING' || statusResponse.status === 'STARTED'){
+                                console.log(`Task ${taskIdBeingPolled} is ${statusResponse.status}`);
+                                if (!useChatStore.getState().isLoading) setLoading(true);
+                            } else {
+                                console.warn(`[ChatPanelContent] Unexpected task status for ${taskIdBeingPolled}:`, statusResponse.status);
+                            }
+                        } else {
+                             console.error(`[ChatPanelContent] Received invalid status response for ${taskIdBeingPolled}:`, statusResponse);
+                             // Optionally stop polling on invalid response or just log and continue?
+                             // stopPolling();
+                             // setLoading(false);
+                             // setError("Received an invalid status response from the server.");
+                             // setCurrentAgentTaskID(null);
+                        }
+                    } catch (err: any) {
+                        console.error(`[ChatPanelContent] Error polling task ${taskIdBeingPolled}:`, err); // Add logging
+                        // --- Re-check task ID after await/error --- 
+                        if (useChatStore.getState().currentAgentTaskID !== taskIdBeingPolled) {
+                             console.log(`[ChatPanelContent] Task ID changed during error handling for ${taskIdBeingPolled}, aborting state update.`);
+                             stopPolling(); // Stop this interval
+                             return;
+                        }
+                        // --- End Re-check --- 
+                        stopPolling(); 
+                        setLoading(false); 
+                        setCurrentAgentTaskID(null);
+                        setError(err.message || 'Failed to get task update.');
+                    }
+                }, POLLING_INTERVAL);
+            }, 500); // Start polling after 500ms delay
         }
-        return () => stopPolling();
+        
+        // Cleanup function
+        return () => {
+            console.log("[ChatPanelContent] Cleanup polling useEffect.");
+            if (initialDelayTimer) clearTimeout(initialDelayTimer);
+            stopPolling(); // Ensure interval is cleared on unmount or dependency change
+        };
     }, [currentAgentTaskID, addMessageToHistory, setLoading, setError, setCurrentAgentTaskID, setActiveProposals]);
 
     const prevScriptIdRef = useRef<number | null>(null);
@@ -291,6 +390,9 @@ export function ChatPanelContent() {
         });
     };
 
+    // Add final check log before returning JSX
+    console.log(`[ChatPanelContent] FINAL RENDER CHECK - isLoading: ${isLoading}, isHistoryLoading: ${isHistoryLoading}, historyError: ${historyError}`);
+
     return (
         <Stack h="100%" justify="space-between" gap="xs">
             <Group justify="space-between" p="xs" style={{ borderBottom: '1px solid var(--mantine-color-gray-3)' }}>
@@ -303,8 +405,13 @@ export function ChatPanelContent() {
             </Group>
             
             <ScrollArea style={{ flex: 1 }} viewportRef={viewport} p="xs">
-                {chatDisplayHistory.length === 0 && <Text c="dimmed" ta="center" mt="xl">Start conversation...</Text>}
-                {chatDisplayHistory.map((msg: ChatMessage, index: number) => (
+                {isHistoryLoading && <Group justify="center" mt="xl"><Loader size="sm" /> <Text size="sm" c="dimmed" ml="xs">Loading history...</Text></Group>}
+                {historyError && <Alert color="orange" title="History Error" icon={<IconAlertCircle />}>{historyError}</Alert>}
+                
+                {!isHistoryLoading && !historyError && chatDisplayHistory.length === 0 && 
+                    <Text c="dimmed" ta="center" mt="xl">Start conversation...</Text>
+                }
+                {!isHistoryLoading && !historyError && chatDisplayHistory.map((msg: ChatMessage, index: number) => (
                     <Paper key={index} shadow={msg.role === 'user' ? "xs" : "sm"} p="sm" mb="xs" radius="md" withBorder bg={msg.role === 'user' ? 'blue.0' : 'gray.0'}
                         style={{ marginLeft: msg.role === 'user' ? 'auto' : undefined, marginRight: msg.role === 'assistant' ? 'auto' : undefined, maxWidth: '80%',
                             borderBottomLeftRadius: msg.role === 'user' ? 'md' : 'sm', borderBottomRightRadius: msg.role === 'assistant' ? 'md' : 'sm' }}>
@@ -314,7 +421,8 @@ export function ChatPanelContent() {
                         </Text>
                     </Paper>
                 ))}
-                {isLoading && !activeProposals.length && <Group justify="center" mt="md"><Loader size="sm" /></Group>}
+                {isLoading && !isHistoryLoading && !activeProposals.length && 
+                    <Group justify="center" mt="md"><Loader size="sm" /></Group>}
             </ScrollArea>
 
             {/* Display Active Proposals - Restoring full card with buttons */}
@@ -438,11 +546,22 @@ export function ChatPanelContent() {
                 </Alert>
             )}
             <Group wrap="nowrap" gap="xs" style={{padding: 'var(--mantine-spacing-xs)', borderTop: '1px solid var(--mantine-color-gray-3)'}}>
-                <Textarea placeholder="Type your message..." value={currentMessage} onChange={(event) => setCurrentMessage(event.currentTarget.value)}
-                    style={{ flexGrow: 1 }} minRows={1} maxRows={4} autosize disabled={isLoading}
+                <Textarea 
+                    placeholder="Type your message..." 
+                    value={currentMessage} 
+                    onChange={(event) => setCurrentMessage(event.currentTarget.value)}
+                    style={{ flexGrow: 1 }} 
+                    minRows={1} 
+                    maxRows={4} 
+                    autosize 
+                    disabled={isLoading || isHistoryLoading} // Restore history loading check
                     onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); handleSendMessage(); }}}
                 />
-                <Button onClick={handleSendMessage} disabled={!currentMessage.trim() || isLoading} loading={isLoading} variant="filled">
+                <Button 
+                    onClick={handleSendMessage} 
+                    disabled={!currentMessage.trim() || isLoading || isHistoryLoading} // Restore history loading check
+                    loading={isLoading} 
+                    variant="filled">
                     <IconSend size={18} />
                 </Button>
             </Group>

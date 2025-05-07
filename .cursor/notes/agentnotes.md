@@ -295,24 +295,28 @@ curl http://localhost:5001/api/voices
     - Multiple proposals are handled and displayed, sorted by script order (`suggested_order_index` then `suggested_line_key`).
     - "Accept All" button allows batch acceptance of proposals.
     - Line key (`suggested_line_key`) is displayed on proposal cards for clarity.
-    - Conversational history is passed back to the agent on subsequent turns.
+    - **Chat History Persistence:**
+        - Backend: `ChatMessageHistory` table stores all messages.
+        - Backend: Celery task loads history from DB for agent, saves new turn to DB.
+        - Backend: `GET /api/vo-scripts/:id/chat/history` endpoint provides history.
+        - Frontend: Loads history on panel open for current script, displays it, and chat is persistent across refreshes.
 - **Resilience:**
-    - Frontend includes a polling timeout (`MAX_POLLING_ATTEMPTS`) to prevent infinite spinners.
-    - Backend agent uses default `openai` library timeout/retry settings; attempts to configure these via the `openai-agents` SDK failed.
+    - Frontend includes a polling timeout (`MAX_POLLING_ATTEMPTS`) as a user-facing safeguard.
+    - Backend agent uses default `openai` library timeout/retry settings.
 
 ## Next Steps / Focus Areas (AI Chat)
-- Implement frontend handling for other proposal types (INSERT_*, NEW_LINE_*).
-- Implement backend agent logic/tools to *generate* these other proposal types.
+- Thoroughly test current `REPLACE_LINE` proposals and history persistence.
+- Implement frontend handling and backend agent logic for other proposal types (INSERT_*, NEW_LINE_*).
 - Implement agent's use of `add_to_scratchpad` tool and corresponding frontend display.
 - Enhance agent proactivity and contextual understanding based on instructions.
 
 ## Pointers to Key Files
 - Chat UI: `frontend/src/components/chat/ChatDrawer.tsx`
-- Chat State: `frontend/src/stores/chatStore.ts`
+- Chat Store: `frontend/src/stores/chatStore.ts`
 - Chat API Client: `frontend/src/api.ts`, `frontend/src/types.ts` (Chat types)
-- Chat Backend API Route: `backend/routes/vo_script_routes.py` (`/vo-scripts/<id>/chat`)
-- Chat Celery Task: `backend/tasks/script_tasks.py` (`run_script_collaborator_chat_task`)
-- Chat Agent Definition: `backend/agents/script_collaborator_agent.py`
-- Agent Tools: Defined within `backend/agents/script_collaborator_agent.py`
+- Chat Backend API Routes: `backend/routes/vo_script_routes.py`
+- Chat Celery Task: `backend/tasks/script_tasks.py`
+- Chat Agent Definition & Tools: `backend/agents/script_collaborator_agent.py`
+- Chat History DB Model: `backend/models.py` (`ChatMessageHistory`)
 - Checklist: `.cursor/notes/project_checklist.md`
 - Notebook: `.cursor/notes/notebook.md` 

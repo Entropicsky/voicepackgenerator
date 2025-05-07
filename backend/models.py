@@ -1,7 +1,7 @@
 # backend/models.py
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, JSON, ForeignKey, func, Boolean, Index
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, JSON, ForeignKey, func, Boolean, Index, UniqueConstraint
 from sqlalchemy import sql
-from sqlalchemy.orm import sessionmaker, declarative_base, relationship
+from sqlalchemy.orm import sessionmaker, declarative_base, relationship, declared_attr, joinedload
 from sqlalchemy.dialects import postgresql # Import postgresql dialect
 from datetime import datetime
 import os
@@ -144,6 +144,7 @@ class VoScript(Base):
 
     template = relationship("VoScriptTemplate", back_populates="vo_scripts")
     lines = relationship("VoScriptLine", back_populates="vo_script", cascade="all, delete-orphan", order_by="VoScriptLine.id") # Order by ID or join template line order?
+    chat_history = relationship("ChatMessageHistory", back_populates="vo_script")
 
 class VoScriptLine(Base):
     __tablename__ = "vo_script_lines"
@@ -190,6 +191,24 @@ class ScriptNote(Base):
     line = relationship("VoScriptLine") # Add back_populates if VoScriptLine will link back
 
 # --- End ScriptNote Model --- #
+
+# NEW MODEL for storing chat history
+class ChatMessageHistory(Base):
+    __tablename__ = 'chat_message_history'
+
+    id = Column(Integer, primary_key=True, index=True)
+    vo_script_id = Column(Integer, ForeignKey('vo_scripts.id', ondelete='CASCADE'), nullable=False, index=True)
+    # Optional: Add user_id if user authentication is implemented later
+    # user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True) 
+    role = Column(String(50), nullable=False) # 'user' or 'assistant' or potentially 'tool' if storing tool steps
+    content = Column(Text, nullable=False)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+    # Relationship back to the VoScript (optional but can be useful)
+    vo_script = relationship("VoScript", back_populates="chat_history")
+
+    def __repr__(self):
+        return f"<ChatMessageHistory(id={self.id}, script_id={self.vo_script_id}, role='{self.role}', ts='{self.timestamp}')>"
 
 def init_db():
     """Create database tables if they don't exist."""

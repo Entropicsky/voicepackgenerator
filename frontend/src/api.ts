@@ -11,8 +11,8 @@ import {
     // NEW: Import chat types from types.ts
     InitiateChatPayload,
     InitiateChatResponseData,
-    ChatTaskStatusData,
     ChatTaskResult,
+    ChatHistoryItem,
     // Add new types for chat if they are in types.ts
     // InitiateChatPayload, InitiateChatResponse, ChatTaskStatusResponse (assuming they'd be in types.ts)
 } from './types'; // Ensure all necessary types are imported
@@ -64,7 +64,7 @@ const handleApiResponse = <T,>(response: AxiosResponse<{ data: T } | { error: st
     }
 };
 
-// --- Specific API Function Definitions --- //
+// --- API Functions --- //
 
 // Voices
 const getVoices = async (options?: GetVoicesOptions): Promise<VoiceOption[]> => {
@@ -311,10 +311,10 @@ const triggerGenerateCategoryBatch = async (scriptId: number, categoryName: stri
         payload
     );
     const data = handleApiResponse(response);
-    // Map snake_case to camelCase
+    // Return the snake_case object directly, matching JobSubmissionResponse type
     return {
-        taskId: data.task_id,
-        jobId: data.job_id
+        task_id: data.task_id, 
+        job_id: data.job_id
     };
 };
 
@@ -578,31 +578,10 @@ interface SpeechToSpeechPayload {
     settings: any; // Define more specific type? e.g., VoiceSettings
     replace_existing: boolean;
 }
-const startSpeechToSpeech = async (batchPrefix: string, payload: SpeechToSpeechPayload): Promise<GenerationResponse> => {
-    try {
-        console.log(`api.startSpeechToSpeech called with batchPrefix=${batchPrefix}`);
-        const encodedPrefix = batchPrefix.split('/').map(encodeURIComponent).join('/');
-        const response = await apiClient.post<{ data: { task_id: string; job_id: number } }>(`/batch/${encodedPrefix}/speech_to_speech`, payload);
-        
-        console.log(`api.startSpeechToSpeech raw response:`, response.data);
-        const data = handleApiResponse(response);
-        console.log(`api.startSpeechToSpeech processed data:`, data);
-        
-        // EXPLICIT CHECK: Verify task_id exists before mapping to camelCase 
-        if (!data || !data.task_id) {
-            console.error("api.startSpeechToSpeech: Missing task_id in API response");
-            throw new Error("Missing task ID in API response");
-        }
-        
-        // Map snake_case to camelCase with explicit checks
-        return {
-            taskId: data.task_id,  // Explicitly map snake_case to camelCase
-            jobId: data.job_id || 0
-        };
-    } catch (error) {
-        console.error(`api.startSpeechToSpeech ERROR:`, error);
-        throw error;
-    }
+const startSpeechToSpeech = async (scriptId: number, batchPrefix: string, payload: SpeechToSpeechPayload): Promise<JobSubmissionResponse> => {
+    const response = await apiClient.post<{ data: JobSubmissionResponse }>(`/vo-scripts/${scriptId}/batches/${encodeURIComponent(batchPrefix)}/sts`, payload);
+    // Assuming backend returns { data: { task_id: ..., job_id: ... } } matching JobSubmissionResponse type
+    return response.data.data; // Return the object matching the type directly
 };
 
 // Add missing getVoicePreview function
@@ -678,14 +657,68 @@ const getVoScriptTemplateLine = async (lineId: number): Promise<VoScriptTemplate
 // --- NEW: Chat API Functions --- //
 const initiateChatSession = async (scriptId: number, payload: InitiateChatPayload): Promise<InitiateChatResponseData> => {
     const response = await apiClient.post<{ data: InitiateChatResponseData }>(`/vo-scripts/${scriptId}/chat`, payload);
-    return handleApiResponse(response);
+    return response.data.data; // Assuming backend wraps in { data: ... }
 };
 
-const getChatTaskStatus = async (taskId: string): Promise<ChatTaskStatusData> => {
-    const response = await apiClient.get<{ data: ChatTaskStatusData }>(`/task/${taskId}/status`);
-    return handleApiResponse(response);
+const getChatTaskStatus = async (taskId: string): Promise<TaskStatus> => {
+    // Check for invalid taskId 
+    if (!taskId || taskId === 'undefined') { 
+        console.error(`api.getChatTaskStatus: Invalid taskId: ${taskId}`);
+        return {
+            taskId: taskId || 'unknown',
+            status: 'FAILURE',
+            info: { error: 'Invalid task ID provided' }
+        };
+    }
+    try {
+        console.log(`api.getTaskStatus called with taskId=${taskId}`);
+        // Expect the backend /task/{taskId}/status to return the TaskStatus object directly
+        // or potentially wrapped in { data: TaskStatus } by default axios behavior / backend wrapper.
+        const response = await apiClient.get<any>(`/task/${taskId}/status`); // Use <any> initially to inspect
+
+        let taskData: TaskStatus | null = null;
+
+        // Check if backend wrapped the response in a 'data' field
+        if (response.data && typeof response.data === 'object' && 'data' in response.data && response.data.data?.status) {
+             console.log(`api.getTaskStatus: Response was wrapped in 'data' for ${taskId}`);
+             taskData = response.data.data as TaskStatus;
+        } 
+        // Check if the response *is* the TaskStatus object directly
+        else if (response.data && typeof response.data === 'object' && response.data.status) {
+            console.log(`api.getTaskStatus: Response was direct TaskStatus object for ${taskId}`);
+            taskData = response.data as TaskStatus;
+        } else {
+             console.error(`api.getTaskStatus: Received unexpected response structure for ${taskId}:`, response.data);
+             throw new Error('Received unexpected response structure from task status endpoint.');
+        }
+
+        // --- PARSING LOGIC (Applied to taskData) ---
+        if (taskData.status === 'SUCCESS' && typeof taskData.info === 'string') {
+            try { taskData.info = JSON.parse(taskData.info); } catch (e) { console.error("Failed to parse task success info:", e); }
+        } else if (taskData.status === 'FAILURE' && typeof taskData.info === 'string') {
+            try { taskData.info = JSON.parse(taskData.info); } catch (e) { console.error("Failed to parse task failure info:", e); }
+        }
+        // --- END PARSING --- //
+        
+        console.log(`api.getTaskStatus: Returning data for ${taskId}:`, taskData);
+        return taskData; 
+
+    } catch (error: any) {
+        console.error(`api.getTaskStatus ERROR for ${taskId}:`, error);
+        return {
+            taskId: taskId || 'unknown',
+            status: 'FETCH_ERROR', 
+            info: { error: `Failed to fetch task status: ${error.message || error}` }
+        };
+    }
 };
-// --- END: Chat API Functions --- //
+
+const getChatHistory = async (scriptId: number): Promise<ChatHistoryItem[]> => {
+    const response = await apiClient.get<{ data: ChatHistoryItem[] }>(`/vo-scripts/${scriptId}/chat/history`);
+    // Assuming backend wraps list in { data: [...] }
+    // If backend sends array directly, change to: const response = await apiClient.get<ChatHistoryItem[]>(...);
+    return response.data.data;
+};
 
 // --- Consolidate into single export --- //
 // Group functions logically
@@ -782,4 +815,5 @@ export const api = {
     // Add new function
     initiateChatSession,
     getChatTaskStatus,
+    getChatHistory,
 };

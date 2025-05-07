@@ -9,6 +9,7 @@ import 'rc-slider/assets/index.css';
 import AppModal from '../common/AppModal';
 
 interface SpeechToSpeechModalProps {
+  scriptId: number;
   batchId: string;
   lineKey: string;
   onClose: () => void;
@@ -23,6 +24,7 @@ const DEFAULT_STABILITY = 0.5;
 const DEFAULT_SIMILARITY = 0.9;
 
 const SpeechToSpeechModal: React.FC<SpeechToSpeechModalProps> = ({ 
+    scriptId,
     batchId, lineKey, onClose, onRegenJobStarted, opened 
 }) => {
   const [sourceAudioFile, setSourceAudioFile] = useState<File | null>(null);
@@ -228,18 +230,18 @@ const SpeechToSpeechModal: React.FC<SpeechToSpeechModalProps> = ({
 
     try {
         console.log("SpeechToSpeechModal: Starting STS job...");
-        const response = await api.startSpeechToSpeech(batchId, payload);
+        const response = await api.startSpeechToSpeech(scriptId, batchId, payload);
         console.log("SpeechToSpeechModal: Got API response:", response);
         
-        if (!response.taskId) {
-            console.error("SpeechToSpeechModal: Received response without taskId!");
+        if (!response.task_id) {
+            console.error("SpeechToSpeechModal: Received response without task_id!");
             setSubmitError("Failed to start STS: Missing task ID in response");
             setIsSubmitting(false);
             return;
         }
         
-        console.log(`SpeechToSpeechModal: Calling onRegenJobStarted with lineKey=${lineKey}, taskId=${response.taskId}`);
-        onRegenJobStarted(lineKey, response.taskId);
+        console.log(`SpeechToSpeechModal: Calling onRegenJobStarted with lineKey=${lineKey}, taskId=${response.task_id}`);
+        onRegenJobStarted(lineKey, response.task_id);
         
         console.log("SpeechToSpeechModal: Closing modal");
         onClose();

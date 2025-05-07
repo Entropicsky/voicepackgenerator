@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import { create, StateCreator } from 'zustand';
 import { ProposedModificationDetail } from '../types'; // Import the new type
 
 export interface ChatMessage {
@@ -26,6 +26,7 @@ export interface ChatState {
     toggleChatOpen: () => void;
     openChatWithFocus: (focus: ChatFocus) => void;
     addMessageToHistory: (message: ChatMessage) => void;
+    setChatDisplayHistory: (history: ChatMessage[]) => void;
     setCurrentMessage: (message: string) => void;
     setLoading: (loading: boolean) => void;
     setCurrentFocus: (focus: ChatFocus) => void;
@@ -37,7 +38,8 @@ export interface ChatState {
     clearActiveProposals: () => void;
 }
 
-export const useChatStore = create<ChatState>((set, get) => ({
+// Explicitly type the creator function for better type safety
+const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
     isChatOpen: false,
     chatDisplayHistory: [],
     currentMessage: '',
@@ -52,8 +54,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
     openChatWithFocus: (focus) => set({
         isChatOpen: true,
         currentFocus: focus, 
-        // chatDisplayHistory: [], // Optionally clear history when focus changes, or manage this separately
-        // currentMessage: '', 
         error: null, 
         isLoading: false, 
         currentAgentTaskID: null 
@@ -61,6 +61,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     addMessageToHistory: (message) => 
         set((state) => ({ chatDisplayHistory: [...state.chatDisplayHistory, message] })),
+    
+    setChatDisplayHistory: (history: ChatMessage[]) => set({ 
+        chatDisplayHistory: history 
+        // Consider if isLoading or error should be reset here too, if related to history load
+    }),
     
     setCurrentMessage: (message) => set({ currentMessage: message }),
     
@@ -76,18 +81,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
         chatDisplayHistory: [],
         currentMessage: '',
         isLoading: false,
-        // currentFocus: { scriptId: null, categoryId: null, lineId: null }, // Keep focus or clear?
         currentAgentTaskID: null,
         error: null
     }),
 
-    setActiveProposals: (proposals) => set({ activeProposals: proposals, isLoading: false }), // Also turn off loading when proposals are set
+    setActiveProposals: (proposals) => set({ activeProposals: proposals, isLoading: false }),
     removeProposal: (proposalId) => 
         set((state) => ({ 
             activeProposals: state.activeProposals.filter(p => p.proposal_id !== proposalId) 
         })),
     clearActiveProposals: () => set({ activeProposals: [] }),
-}));
+});
+
+export const useChatStore = create<ChatState>(chatStoreCreator);
 
 // Example of how to get part of the history for context (e.g., last N messages)
 // This can be a selector or a helper function used by components.

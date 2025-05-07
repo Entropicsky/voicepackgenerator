@@ -1,12 +1,13 @@
 # Project Checklist: AI Script Collaborator Chat
 
-**Overall Status:** Phase 5 (Frontend Interaction Logic) largely complete, basic chat flow operational. Ready for more advanced interaction patterns or deployment prep.
+**Overall Status:** Phase 5 (Frontend Interaction Logic) & Chat History Persistence complete. Basic chat flow operational and robust. Ready for more advanced interaction patterns or deployment prep.
 
 **Phase 1: Backend Foundation (DONE)**
 - [X] Task 1: Define `ScriptNote` model & migration (`backend/models.py`) - DONE
 - [X] Task 2: Define `ScriptCollaboratorAgent` (`backend/agents/script_collaborator_agent.py`) - DONE
-- [X] Task 3: Define Celery task `run_script_collaborator_chat_task` (`backend/tasks/script_tasks.py`) - DONE (Includes history passing)
+- [X] Task 3: Define Celery task `run_script_collaborator_chat_task` (`backend/tasks/script_tasks.py`) - DONE (Includes DB history loading & saving)
 - [X] Task 4: Basic Logging Setup (`backend/app.py`, task logger) - DONE
+- [X] Task 5: Add `ChatMessageHistory` model & migration - DONE
 
 **Phase 2: Agent Tools (DONE)**
 - [X] Task 1: Implement `get_script_context` tool - DONE (Enhanced with template context)
@@ -16,59 +17,61 @@
 - [X] Task 5: Seed test data for tools (`seed_chat_test_data.py`) - DONE
 
 **Phase 3: API Endpoints (DONE)**
-- [X] Task 1: Implement `POST /api/vo-scripts/<script_id>/chat` endpoint (`backend/routes/vo_script_routes.py`) - DONE
+- [X] Task 1: Implement `POST /api/vo-scripts/<script_id>/chat` endpoint (`backend/routes/vo_script_routes.py`) - DONE (Now uses DB history)
 - [X] Task 2: Verify `GET /api/task/<task_id>/status` endpoint (`backend/routes/task_routes.py`) - DONE
+- [X] Task 3: Implement `GET /api/vo-scripts/<script_id>/chat/history` endpoint - DONE
 
 **Phase 4: Frontend UI Shell (DONE)**
 - [X] Task 1: Create Chat FAB (`ChatFab.tsx`) - DONE
-- [X] Task 2: Implement Chat UI container (Initially Modal, Refactored to `AppShell.Aside` via `ChatPanelContent` in `ChatDrawer.tsx`) - DONE
-- [X] Task 3: Setup Zustand store (`chatStore.ts`) - DONE
-- [X] Task 4: Implement API client functions (`api.ts`) - DONE
+- [X] Task 2: Implement Chat UI container (`AppShell.Aside` via `ChatPanelContent` in `ChatDrawer.tsx`) - DONE
+- [X] Task 3: Setup Zustand store (`chatStore.ts`) - DONE (Actions for history implemented)
+- [X] Task 4: Implement API client functions (`api.ts`) - DONE (Including `getChatHistory`)
 
-**Phase 5: Frontend Interaction Logic (Largely DONE)**
+**Phase 5: Frontend Interaction Logic & History (DONE)**
 - [X] Task 1: Implement message sending & display (`ChatPanelContent`) - DONE
-- [X] Task 2: Implement polling for task results (`ChatPanelContent`) - DONE
+- [X] Task 2: Implement polling for task results (`ChatPanelContent`) - DONE (Robustness improved)
 - [X] Task 3: Display active proposals (`ChatPanelContent`) - DONE
 - [X] Task 4: Implement proposal actions (Dismiss, Accept REPLACE_LINE) (`ChatPanelContent`) - DONE
 - [X] Task 5: Implement inline editing for REPLACE_LINE proposals (`ChatPanelContent`) - DONE
 - [X] Task 6: Display `line_key` on proposal cards - DONE
 - [X] Task 7: Add "Accept All" functionality - DONE
 - [X] Task 8: Sort proposals by `suggested_order_index` / `suggested_line_key` - DONE
-- [ ] Task 9: Implement actions for other proposal types (INSERT_*, NEW_LINE_*) - TODO
+- [X] Task 9: Implement Chat History Persistence (DB backend, API, Frontend Load/Display) - DONE
+- [ ] Task 10: Implement actions for other proposal types (INSERT_*, NEW_LINE_*) - TODO
 
 **Phase 6: Frontend Refinements (Partially Done)**
 - [X] Task 1: Improve proposal card display (UI polish) - Addressed during Phase 5
-- [ ] Task 2: Enhance error handling and user feedback - Partially addressed with polling timeout
+- [X] Task 2: Enhance error handling and user feedback - Partially addressed with polling timeout
 - [ ] Task 3: Handle scratchpad display/interaction - TODO
 - [ ] Task 4: Visual indication of focused line/category in main script view? - TODO
 
 **Phase 7: Advanced Agent Interactions & Context (TODO)**
 - [ ] Task 1: Implement agent ability to propose INSERT_LINE_AFTER / INSERT_LINE_BEFORE / NEW_LINE_IN_CATEGORY modifications.
 - [ ] Task 2: Implement agent ability to use `add_to_scratchpad` tool.
-- [ ] Task 3: Enhance agent instructions/prompts for more proactivity and contextual depth (e.g., summarizing category themes, asking clarifying questions before proposing).
-- [ ] Task 4: Handle category-wide feedback/requests (e.g., "Make all lines in category X more aggressive").
+- [ ] Task 3: Enhance agent instructions/prompts for more proactivity and contextual depth.
+- [ ] Task 4: Handle category-wide feedback/requests.
 
 **Phase 8: Testing & Deployment (TODO)**
 - [ ] Task 1: Write comprehensive frontend tests (unit, integration).
 - [ ] Task 2: Write comprehensive backend tests (unit, integration).
 - [ ] Task 3: Manual end-to-end testing.
-- [ ] Task 4: Prepare for Heroku deployment (environment variables, buildpacks, etc.).
+- [ ] Task 4: Prepare for Heroku deployment.
 - [ ] Task 5: Deployment to staging/production.
 
 **Resilience Notes:**
 - Added frontend polling timeout (`MAX_POLLING_ATTEMPTS`) as a user-facing safeguard.
-- Attempts to configure backend OpenAI client `timeout` / `max_retries` via `Agent` constructor failed due to `TypeError`s with the `openai-agents` SDK.
-- Current implementation relies on default timeout/retry behavior of the underlying `openai` library. Backend resilience enhancement deferred for now.
+- Backend OpenAI client resilience (timeout/retries) uses library defaults; explicit configuration attempts with `openai-agents` SDK were unsuccessful. Deferred.
 
-**Known Issues/Debugging Notes:**
-- (Resolved) Initial `openai-agents` tool decorator was `@tool`, needed `@function_tool`.
-- (Resolved) Pydantic `Field` constraints (min/max length) caused issues with OpenAI tool schema parsing; removed and handled in tool logic.
-- (Resolved) Celery task import/logging issues (`ImportError`, logger setup).
-- (Resolved) Flask `db upgrade` issues (Docker exec path, stamping revisions).
-- (Resolved) Frontend modal display ("blank page") fixed using `AppModal`. Refactored to `AppShell.Aside`.
-- (Resolved) Multiple proposals display logic fixed in Celery task result processing.
-- (Resolved) Agent init `TypeError` loop (`max_retries`, `client` args).
-- (Resolved) `Runner.run_sync` `TypeError` (`messages` keyword).
+**Known Issues/Debugging Notes (Resolved):**
+- Initial `openai-agents` tool decorator was `@tool`, needed `@function_tool`.
+- Pydantic `Field` constraints caused OpenAI tool schema parsing issues.
+- Celery task import/logging issues.
+- Flask `db upgrade` issues (Docker exec path, stamping revisions).
+- Frontend modal display ("blank page") fixed using `AppModal`, then refactored to `AppShell.Aside`.
+- Multiple proposals display logic fixed in Celery task.
+- Agent init `TypeError` loop (`max_retries`, `client` args).
+- `Runner.run_sync` `TypeError` (`messages` keyword).
+- Frontend blank screen due to history fetching (`setChatDisplayHistory` in store, `useEffect` dependencies).
 
 ## Housekeeping / Setup
 
