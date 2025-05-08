@@ -2478,3 +2478,81 @@ def commit_character_description_update(script_id: int):
         return make_api_response(error="Failed to update character description", status_code=500)
     finally:
         if db and db.is_active: db.close()
+
+# --- Pydantic model for Scratchpad Note Response --- #
+class ScriptNoteResponseItem(BaseModel):
+    id: int
+    vo_script_id: int
+    category_id: Optional[int] = None
+    line_id: Optional[int] = None
+    title: Optional[str] = None
+    text_content: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True # Pydantic v2
+
+# --- NEW Endpoint to get scratchpad notes --- #
+@vo_script_bp.route("/vo-scripts/<int:script_id>/scratchpad-notes", methods=["GET"])
+def get_scratchpad_notes(script_id: int):
+    """Fetches all scratchpad notes for a specific VO Script."""
+    db = next(models.get_db())
+    try:
+        # Verify script exists (optional)
+        script_exists = db.query(models.VoScript.id).filter(models.VoScript.id == script_id).scalar() is not None
+        if not script_exists:
+            return make_api_response(error=f"VO Script with ID {script_id} not found", status_code=404)
+        
+        notes = db.query(models.ScriptNote).filter(
+            models.ScriptNote.vo_script_id == script_id
+        ).order_by(
+            models.ScriptNote.updated_at.desc() # Show most recently updated first
+        ).all()
+
+        # Serialize using Pydantic model
+        notes_response = [ScriptNoteResponseItem.model_validate(note).model_dump() for note in notes]
+
+        current_app.logger.info(f"Retrieved {len(notes_response)} scratchpad notes for script {script_id}")
+        return make_api_response(data=notes_response)
+
+    except Exception as e:
+        current_app.logger.error(f"Error retrieving scratchpad notes for script {script_id}: {e}", exc_info=True)
+        return make_api_response(error="Internal server error retrieving scratchpad notes.", status_code=500)
+    finally:
+        if db:
+            db.close()
+
+# --- NEW Endpoint to delete a scratchpad note --- #
+@vo_script_bp.route("/vo-scripts/<int:script_id>/scratchpad-notes/<int:note_id>", methods=["DELETE"])
+def delete_scratchpad_note(script_id: int, note_id: int):
+    """Deletes a specific scratchpad note."""
+    db = next(models.get_db())
+    try:
+        # Find the note, ensuring it belongs to the correct script
+        note = db.query(models.ScriptNote).filter(
+            models.ScriptNote.id == note_id,
+            models.ScriptNote.vo_script_id == script_id
+        ).first()
+
+        if not note:
+            # Check if the script exists at all to give a better error
+            script_exists = db.query(models.VoScript.id).filter(models.VoScript.id == script_id).scalar() is not None
+            if not script_exists:
+                return make_api_response(error=f"VO Script with ID {script_id} not found", status_code=404)
+            else:
+                 return make_api_response(error=f"Scratchpad note with ID {note_id} not found for script {script_id}", status_code=404)
+
+        # Delete the note
+        db.delete(note)
+        db.commit()
+        current_app.logger.info(f"Deleted scratchpad note {note_id} for script {script_id}")
+        return make_api_response(data={"message": "Scratchpad note deleted successfully."}, status_code=200)
+
+    except Exception as e:
+        db.rollback()
+        current_app.logger.error(f"Error deleting scratchpad note {note_id} for script {script_id}: {e}", exc_info=True)
+        return make_api_response(error="Internal server error deleting scratchpad note.", status_code=500)
+    finally:
+        if db:
+            db.close()

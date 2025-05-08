@@ -49,10 +49,11 @@ This project generates voice packs. It consists of three main components orchest
 *   **PostgreSQL Migration:** Complete and deployed.
 *   **Frontend:** Updated for R2 prefixes and batch context. AI Wizard text optimization feature added (`RegenerationModal.tsx`). VO Script feature UI (List, Create, Detail) implemented.
 *   **Backend:** VO Script feature backend (Models, Migrations, API Endpoints, Agent Task) implemented, including category refinement and refinement prompts.
-*   **Testing:** Basic structure exists (`tests/` - confirmed non-existent), but requires test implementation for core features and VO Script feature.
+*   **Testing:** Backend tests exist in `backend/tests/` and appear comprehensive. Frontend testing status needs investigation.
 *   **Authentication:** Cloudflare Access setup deferred (requires custom domain).
 *   **Audio Cropping Feature:** Spec created, implementation backlogged.
 *   **AI Text Optimization:** Implemented backend/frontend, needs end-to-end testing and prompt refinement.
+*   **File Size Issues:** Several files significantly exceed the 500-line guideline (`VoScriptDetailView.tsx`, `vo_script_routes.py`, `api.ts`, potentially `tasks.py`), suggesting refactoring opportunities.
 
 ## Next Steps / Current Focus (As of [Current Date])
 
@@ -60,9 +61,10 @@ This project generates voice packs. It consists of three main components orchest
 2.  **VO Script Feature Polish:** Address TODOs in `VoScriptDetailView` (metadata edit, status display, audio player, etc.).
 3.  **Template Manager UI:** Implement editing capabilities for VO Script Templates.
 4.  **Testing:** Implement comprehensive testing (Unit, Integration, Feature) for backend & frontend, especially the VO Script feature.
-5.  Test and refine the AI Wizard text optimization feature.
-6.  Implement Cloudflare Access (requires custom domain setup).
-7.  Address Audio Cropping feature from backlog.
+5.  **Refactoring:** Prioritize refactoring large files (`VoScriptDetailView.tsx`, `vo_script_routes.py`) to improve maintainability.
+6.  Test and refine the AI Wizard text optimization feature.
+7.  Implement Cloudflare Access (requires custom domain setup).
+8.  Address Audio Cropping feature from backlog.
 
 ## Long Term Direction
 

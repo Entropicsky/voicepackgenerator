@@ -13,6 +13,7 @@ import {
     InitiateChatResponseData,
     ChatTaskResult,
     ChatHistoryItem,
+    ScriptNoteData,
     // Add new types for chat if they are in types.ts
     // InitiateChatPayload, InitiateChatResponse, ChatTaskStatusResponse (assuming they'd be in types.ts)
 } from './types'; // Ensure all necessary types are imported
@@ -720,7 +721,20 @@ const getChatHistory = async (scriptId: number): Promise<ChatHistoryItem[]> => {
 
 const clearChatHistory = async (scriptId: number): Promise<{ message: string }> => {
     const response = await apiClient.delete<{ data: { message: string } }>(`/vo-scripts/${scriptId}/chat/history`);
-    return response.data.data; // Assuming backend wraps in { data: ... }
+    return response.data.data; 
+};
+
+// --- NEW Function to get scratchpad notes ---
+const getScratchpadNotes = async (scriptId: number): Promise<ScriptNoteData[]> => {
+    const response = await apiClient.get<{ data: ScriptNoteData[] }>(`/vo-scripts/${scriptId}/scratchpad-notes`);
+    return handleApiResponse(response); // Use handler which assumes {data: [...]} wrapper
+};
+
+// --- NEW Function to delete a scratchpad note ---
+const deleteScratchpadNote = async (scriptId: number, noteId: number): Promise<{ message: string }> => {
+    const response = await apiClient.delete<{ data: { message: string } }>(`/vo-scripts/${scriptId}/scratchpad-notes/${noteId}`);
+    // Use handleApiResponse or access directly depending on backend wrapper consistency
+    return handleApiResponse(response); 
 };
 
 // --- NEW Function to commit description update ---
@@ -827,6 +841,10 @@ export const api = {
     getChatTaskStatus,
     getChatHistory,
     clearChatHistory,
+    // --- NEW Function to get scratchpad notes ---
+    getScratchpadNotes,
+    // --- NEW Function to delete a scratchpad note ---
+    deleteScratchpadNote,
     // --- NEW Function to commit description update ---
     commitCharacterDescription,
 };

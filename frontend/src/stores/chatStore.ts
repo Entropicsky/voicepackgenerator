@@ -1,5 +1,5 @@
 import { create, StateCreator } from 'zustand';
-import { ProposedModificationDetail, StagedCharacterDescriptionData } from '../types'; // Import the new type
+import { ProposedModificationDetail, StagedCharacterDescriptionData, ScriptNoteData } from '../types'; // Import the new type
 
 export interface ChatMessage {
     role: 'user' | 'assistant';
@@ -23,6 +23,7 @@ export interface ChatState {
     error: string | null;
     activeProposals: ProposedModificationDetail[];
     stagedDescriptionUpdate: StagedCharacterDescriptionData | null;
+    scratchpadNotes: ScriptNoteData[];
 
     toggleChatOpen: () => void;
     openChatWithFocus: (focus: ChatFocus) => void;
@@ -39,6 +40,7 @@ export interface ChatState {
     clearActiveProposals: () => void;
     setStagedDescriptionUpdate: (update: StagedCharacterDescriptionData | null) => void;
     clearStagedDescriptionUpdate: () => void;
+    setScratchpadNotes: (notes: ScriptNoteData[]) => void;
 }
 
 // Explicitly type the creator function for better type safety
@@ -52,6 +54,7 @@ const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
     error: null,
     activeProposals: [],
     stagedDescriptionUpdate: null,
+    scratchpadNotes: [],
 
     toggleChatOpen: () => set((state) => ({ isChatOpen: !state.isChatOpen })),
     
@@ -98,6 +101,8 @@ const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
 
     setStagedDescriptionUpdate: (update) => set({ stagedDescriptionUpdate: update }),
     clearStagedDescriptionUpdate: () => set({ stagedDescriptionUpdate: null }),
+
+    setScratchpadNotes: (notes) => set({ scratchpadNotes: notes }),
 });
 
 export const useChatStore = create<ChatState>(chatStoreCreator);

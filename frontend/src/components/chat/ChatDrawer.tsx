@@ -1,16 +1,23 @@
-import { Text, Stack, Textarea, Button, Group, ScrollArea, Paper, Loader, Alert, Card, ActionIcon, Box, Tooltip, Grid } from '@mantine/core';
-import { IconSend, IconX, IconBulb, IconCheck, IconEdit, IconTrash, IconAlertCircle, IconClearAll } from '@tabler/icons-react';
+import { Text, Stack, Textarea, Button, Group, ScrollArea, Paper, Loader, Alert, Card, ActionIcon, Box, Tooltip, Grid, Tabs, Modal } from '@mantine/core';
+import { IconSend, IconX, IconBulb, IconCheck, IconEdit, IconTrash, IconAlertCircle, IconClearAll, IconMessage, IconNotebook } from '@tabler/icons-react';
 import { useChatStore, ChatState, ChatMessage, getChatHistoryForContext } from '../../stores/chatStore';
-import { ChatTaskResult, ProposedModificationDetail, ModificationType, VoScriptLineData, InitiateChatPayload, ChatHistoryItem, StagedCharacterDescriptionData } from '../../types';
+import { ChatTaskResult, ProposedModificationDetail, ModificationType, VoScriptLineData, InitiateChatPayload, ChatHistoryItem, StagedCharacterDescriptionData, ScriptNoteData, VoScriptCategoryData, VoScript } from '../../types';
 import { api } from '../../api';
 import { useEffect, useRef, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { notifications } from '@mantine/notifications';
+import { ScratchpadModal } from './ScratchpadModal';
 
 const POLLING_INTERVAL = 3000;
 const MAX_POLLING_ATTEMPTS = 40; // Approx 2 minutes (40 attempts * 3 seconds/attempt)
 
-export function ChatPanelContent() {
+// Define Props for the component
+interface ChatPanelContentProps {
+  // voScriptData prop is no longer needed here as the component will fetch its own
+  // voScriptData: VoScript | null | undefined; 
+}
+
+export function ChatPanelContent(/* { voScriptData }: ChatPanelContentProps */) {
     const {
         isChatOpen, toggleChatOpen, chatDisplayHistory, currentMessage, setCurrentMessage,
         isLoading, setLoading, error, setError, currentFocus, currentAgentTaskID,
@@ -18,7 +25,9 @@ export function ChatPanelContent() {
         setChatDisplayHistory,
         stagedDescriptionUpdate,
         setStagedDescriptionUpdate,
-        clearStagedDescriptionUpdate
+        clearStagedDescriptionUpdate,
+        scratchpadNotes,
+        setScratchpadNotes
     } = useChatStore((state: ChatState) => state);
 
     console.log("[ChatPanelContent] Rendering. Active proposals from store:", JSON.parse(JSON.stringify(activeProposals)));
@@ -27,6 +36,20 @@ export function ChatPanelContent() {
     const queryClient = useQueryClient();
     const viewport = useRef<HTMLDivElement>(null);
     const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+    // --- Fetch voScriptData for the current script in focus ---
+    const numericScriptIdForQuery = currentFocus.scriptId ? parseInt(currentFocus.scriptId.toString(), 10) : undefined;
+    const { 
+        data: voScriptData, // This will now be the source of voScript data
+        isLoading: isLoadingVoScript, 
+        // error: voScriptError, // Optionally handle voScript fetch error
+    } = useQuery<VoScript, Error>({
+        queryKey: ['voScriptDetail', numericScriptIdForQuery],
+        queryFn: () => api.getVoScript(numericScriptIdForQuery!),
+        enabled: !!numericScriptIdForQuery,
+        // staleTime: 1000 * 60 * 5, // Optional: 5 minutes
+    });
+    // --- End fetch voScriptData ---
 
     // NEW state for managing inline editing of proposals
     const [editingProposalId, setEditingProposalId] = useState<string | null>(null);
@@ -44,6 +67,8 @@ export function ChatPanelContent() {
     const [isCommittingDescription, setIsCommittingDescription] = useState(false);
     const [currentProgressMessage, setCurrentProgressMessage] = useState<string | null>(null);
 
+    const [isScratchpadOpen, setIsScratchpadOpen] = useState(false);
+
     useEffect(() => {
         if (viewport.current) {
             viewport.current.scrollTo({ top: viewport.current.scrollHeight, behavior: 'smooth' });
@@ -58,6 +83,7 @@ export function ChatPanelContent() {
             setHistoryError(null);
             setChatDisplayHistory([]); 
             setActiveProposals([]);
+            // voScriptData will be refetched by its own useQuery hook due to numericScriptIdForQuery change
 
             api.getChatHistory(currentFocus.scriptId)
                 .then(history => {
@@ -83,10 +109,10 @@ export function ChatPanelContent() {
              setIsHistoryLoading(false);
              setHistoryError(null);
         }
-    }, [currentFocus.scriptId, setChatDisplayHistory, setActiveProposals]); // RESTORED dependency array
+    }, [currentFocus.scriptId, setChatDisplayHistory, setActiveProposals]);
 
     const handleSendMessage = async () => {
-        if (!currentMessage.trim() || isLoading || isHistoryLoading || !currentFocus.scriptId) return;
+        if (!currentMessage.trim() || isLoading || isHistoryLoading || isLoadingVoScript || !currentFocus.scriptId) return;
         const userMessageText = currentMessage.trim();
         const userMessage: ChatMessage = { role: 'user', content: userMessageText };
         addMessageToHistory(userMessage); // Optimistic UI update
@@ -218,7 +244,6 @@ export function ChatPanelContent() {
                                     // For now, let's be simple: if the response *doesn't* have a new staged update, don't clear an existing one.
                                     // The commit/dismiss actions below will handle clearing.
                                 }
-                                // --- END NEW --- 
                             } else if (statusResponse.status === 'FAILURE') {
                                 console.log(`[ChatPanelContent] FAILURE received for task ${taskIdBeingPolled}`); 
                                 stopPolling(); 
@@ -304,15 +329,80 @@ export function ChatPanelContent() {
         },
     });
 
+    const addLineMutation = useMutation<
+        VoScriptLineData,
+        Error,
+        { 
+            scriptId: number; 
+            payload: {
+                line_key: string;
+                category_name: string;
+                order_index: number;
+                initial_text?: string | null;
+                prompt_hint?: string | null;
+            } 
+        }
+    >({
+        mutationFn: ({ scriptId, payload }) => api.addVoScriptLine(scriptId, payload),
+        onSuccess: (newLine) => {
+            queryClient.invalidateQueries({ queryKey: ['voScriptDetail', currentFocus.scriptId] });
+            notifications.show({
+                title: 'Line Added',
+                message: `Line '${newLine.line_key}' added successfully.`,
+                color: 'green'
+            });
+        },
+        onError: (error) => {
+            notifications.show({ title: 'Error Adding Line', message: error.message, color: 'red' });
+        },
+    });
+
     const handleAcceptProposal = async (proposal: ProposedModificationDetail) => {
-        if (!currentFocus.scriptId) return;
+        if (!currentFocus.scriptId || !voScriptData) {
+            notifications.show({ title: 'Error', message: 'Cannot accept proposal: Script data not loaded.', color: 'red' });
+            return;
+        }
+
         if (proposal.modification_type === ModificationType.REPLACE_LINE && proposal.new_text != null) {
             setLoading(true);
-            try { await updateLineTextMutation.mutateAsync({ lineId: proposal.target_id, newText: proposal.new_text }); removeProposal(proposal.proposal_id); } 
-            catch (e) { /* error handled by mutation */ } 
+            try { 
+                await updateLineTextMutation.mutateAsync({ lineId: proposal.target_id, newText: proposal.new_text }); 
+                removeProposal(proposal.proposal_id); 
+            } catch (e) { /* error handled by mutation */ } 
             finally { setLoading(false); }
-        } else { notifications.show({ title: 'Action Error', message: 'Cannot accept this proposal type or missing text.', color: 'orange' }); }
+        }
+        else if (proposal.modification_type === ModificationType.NEW_LINE_IN_CATEGORY && proposal.new_text && proposal.suggested_line_key) {
+            setLoading(true);
+            try {
+                const category = voScriptData?.categories?.find((cat: VoScriptCategoryData) => cat.id === proposal.target_id);
+                if (!category || !category.lines) {
+                    throw new Error(`Could not find category details or lines for ID ${proposal.target_id} to add line.`);
+                }
+                const maxOrderIndex = category.lines.reduce((max: number, line: VoScriptLineData) => Math.max(max, line.order_index ?? -1), -1);
+                const newOrderIndex = maxOrderIndex + 1;
+                
+                const payload = {
+                    line_key: proposal.suggested_line_key,
+                    category_name: category.name,
+                    order_index: proposal.suggested_order_index ?? newOrderIndex,
+                    initial_text: proposal.new_text,
+                    prompt_hint: null
+                };
+
+                await addLineMutation.mutateAsync({ scriptId: currentFocus.scriptId, payload });
+                removeProposal(proposal.proposal_id);
+            } catch (err: any) {
+                setError(err.message || 'Failed to add new line.');
+                notifications.show({ title: 'Error Adding Line', message: err.message || 'Could not add line based on proposal.', color: 'red' });
+            } finally {
+                setLoading(false);
+            }
+        }
+        else {
+            notifications.show({ title: 'Action Error', message: 'Cannot accept this proposal type yet or missing required data.', color: 'orange' });
+        }
     };
+
     const handleEditProposal = (proposal: ProposedModificationDetail) => {
         console.log("Editing proposal:", proposal.proposal_id);
         notifications.show({ title: 'Edit Proposal (Not Implemented)', message: `Editing ${proposal.proposal_id}`, color: 'yellow' });
@@ -497,6 +587,11 @@ export function ChatPanelContent() {
             <Group justify="space-between" p="xs" style={{ borderBottom: '1px solid var(--mantine-color-gray-3)' }}>
                 <Text fw={500}>AI Script Collaborator</Text>
                 <Group gap="xs">
+                    <Tooltip label="View Scratchpad">
+                        <ActionIcon onClick={() => setIsScratchpadOpen(true)} variant="subtle" size="sm" color="blue" disabled={isLoading || isHistoryLoading}>
+                            <IconNotebook />
+                        </ActionIcon>
+                    </Tooltip>
                     <Tooltip label="Clear Chat History">
                         <ActionIcon onClick={handleClearHistory} variant="subtle" size="sm" color="red" disabled={isLoading || isHistoryLoading}>
                             <IconClearAll />
@@ -559,118 +654,18 @@ export function ChatPanelContent() {
                 )}
             </ScrollArea>
 
-            {/* Display Active Proposals - Restoring full card with buttons */}
             {activeProposals.length > 0 && (
                 <Paper withBorder p="xs" radius="sm" mt="xs" shadow="sm" style={{maxHeight: '40%', overflowY: 'auto', flexShrink: 0}}>
-                    <Group justify="space-between" mb="sm">
-                        <Text fw={500}>AI Suggestions ({activeProposals.length})</Text>
-                        {activeProposals.length > 1 && (
-                            <Button 
-                                size="xs" 
-                                variant="gradient" 
-                                gradient={{ from: 'teal', to: 'lime', deg: 105 }}
-                                onClick={handleAcceptAllProposals}
-                                disabled={isAcceptingAll || isLoading}
-                                loading={isAcceptingAll}
-                            >
-                                Accept All
-                            </Button>
-                        )}
-                    </Group>
-                    <Stack gap="xs">
-                        {activeProposals.map((proposal: ProposedModificationDetail, index: number) => {
-                            const isEditingThis = editingProposals[proposal.proposal_id] !== undefined;
-                            const isEditingThisProposal = editingProposals[proposal.proposal_id] !== undefined;
-                            return (
-                                <Card key={proposal.proposal_id || index} withBorder p="xs" radius="sm">
-                                    <Text size="xs" fw={500}><IconBulb size={14} style={{ marginRight: 4, verticalAlign: 'middle'}} /> {proposal.modification_type.replace('_',' ')}</Text>
-                                    
-                                    {isEditingThis ? (
-                                        <Textarea
-                                            value={editedProposalText}
-                                            onChange={(event) => setEditedProposalText(event.currentTarget.value)}
-                                            minRows={2}
-                                            autosize
-                                            mt="xs"
-                                            placeholder="Edit proposed text..."
-                                        />
-                                    ) : (
-                                        proposal.new_text && <Text size="xs" mt={1}>New Text: <Text span style={{fontFamily: 'monospace', backgroundColor: 'var(--mantine-color-gray-1)', padding: '1px 3px', borderRadius: '2px'}}>{proposal.new_text}</Text></Text>
-                                    )}
-                                    
-                                    <Text size="sm" c="dimmed" mb="xs">
-                                        Reasoning: {proposal.reasoning || 'N/A'}
-                                    </Text>
-                                    {proposal.suggested_line_key && (
-                                        <Text size="xs" c="blue" tt="uppercase" fw={700} mb="xs">
-                                            Line Key: {proposal.suggested_line_key}
-                                        </Text>
-                                    )}
-                                    
-                                    {/* Main Action Buttons for the proposal card */}
-                                    <Group justify="flex-end" mt="sm" gap="xs">
-                                        <Button
-                                            size="xs"
-                                            onClick={() => {
-                                                const textToCommit = editingProposals[proposal.proposal_id] ?? proposal.new_text;
-                                                const proposalToAccept: ProposedModificationDetail = {
-                                                    ...proposal,
-                                                    new_text: textToCommit
-                                                };
-                                                if (isEditingThisProposal) {
-                                                    // If it was being edited, commit this version then clear editing state for this specific proposal.
-                                                    handleAcceptProposal(proposalToAccept).then(() => {
-                                                        setEditingProposals(prev => {
-                                                            const newState = {...prev};
-                                                            delete newState[proposal.proposal_id];
-                                                            return newState;
-                                                        });
-                                                    });
-                                                } else {
-                                                    handleAcceptProposal(proposalToAccept);
-                                                }
-                                            }}
-                                            disabled={isAcceptingAll || isLoading || (isEditingThisProposal && !editingProposals[proposal.proposal_id]?.trim())}
-                                            loading={isLoading && updateLineTextMutation.isPending && updateLineTextMutation.variables?.lineId === proposal.target_id} // Show loading on this specific button if its line is being updated
-                                        >
-                                            {isEditingThisProposal ? 'Save & Commit' : 'Accept & Commit'}
-                                        </Button>
-                                        <Tooltip label={isEditingThisProposal ? "Cancel Edit" : "Edit this suggestion before committing"}>
-                                            <ActionIcon
-                                                variant="outline"
-                                                onClick={() => {
-                                                    if (isEditingThisProposal) {
-                                                        // Cancel edit for this specific proposal
-                                                        setEditingProposals(prev => {
-                                                            const newState = {...prev};
-                                                            delete newState[proposal.proposal_id];
-                                                            return newState;
-                                                        });
-                                                    } else {
-                                                        // Start editing this specific proposal
-                                                        setEditingProposals(prev => ({...prev, [proposal.proposal_id]: proposal.new_text || ''}));
-                                                    }
-                                                }}
-                                                disabled={isAcceptingAll || isLoading}
-                                            >
-                                                {isEditingThisProposal ? <IconX size={16} /> : <IconEdit size={16} />}
-                                            </ActionIcon>
-                                        </Tooltip>
-                                        <Tooltip label="Dismiss this suggestion">
-                                            <ActionIcon
-                                                variant="outline"
-                                                color="red"
-                                                onClick={() => handleDismissProposal(proposal.proposal_id)}
-                                                disabled={isAcceptingAll || isLoading}
-                                            >
-                                                <IconTrash size={16} />
-                                            </ActionIcon>
-                                        </Tooltip>
-                                    </Group>
-                                </Card>
-                            );
-                        })}
-                    </Stack>
+                    {activeProposals.map((proposal: ProposedModificationDetail) => (
+                        <Paper key={proposal.proposal_id} withBorder p="sm" radius="sm" shadow="xs">
+                            <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>{proposal.new_text}</Text>
+                            <Group justify="flex-end" mt="xs">
+                                <Button variant="subtle" size="xs" onClick={() => handleAcceptProposal(proposal)}>Accept</Button>
+                                <Button variant="subtle" size="xs" onClick={() => handleEditProposal(proposal)}>Edit</Button>
+                                <Button variant="subtle" size="xs" onClick={() => handleDismissProposal(proposal.proposal_id)}>Dismiss</Button>
+                            </Group>
+                        </Paper>
+                    ))}
                 </Paper>
             )}
             
@@ -679,6 +674,7 @@ export function ChatPanelContent() {
                     <Text size="xs">{error}</Text>
                 </Alert>
             )}
+
             <Group wrap="nowrap" gap="xs" style={{padding: 'var(--mantine-spacing-xs)', borderTop: '1px solid var(--mantine-color-gray-3)'}}>
                 <Textarea 
                     placeholder="Type your message..." 
@@ -688,17 +684,23 @@ export function ChatPanelContent() {
                     minRows={1} 
                     maxRows={4} 
                     autosize 
-                    disabled={isLoading || isHistoryLoading} // Restore history loading check
+                    disabled={isLoading || isHistoryLoading || isLoadingVoScript}
                     onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); handleSendMessage(); }}}
                 />
                 <Button 
                     onClick={handleSendMessage} 
-                    disabled={!currentMessage.trim() || isLoading || isHistoryLoading} // Restore history loading check
+                    disabled={!currentMessage.trim() || isLoading || isHistoryLoading || isLoadingVoScript}
                     loading={isLoading} 
                     variant="filled">
                     <IconSend size={18} />
                 </Button>
             </Group>
+            
+            <ScratchpadModal 
+                opened={isScratchpadOpen} 
+                onClose={() => setIsScratchpadOpen(false)} 
+                scriptId={currentFocus.scriptId}
+            />
         </Stack>
     );
 } 

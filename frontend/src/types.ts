@@ -539,4 +539,16 @@ export interface ChatHistoryItem {
     timestamp: string; // Use string for ISO date format from backend
 }
 
+// --- ADDED Type for Scratchpad Note Item --- //
+export interface ScriptNoteData {
+    id: number;
+    vo_script_id: number;
+    category_id?: number | null;
+    line_id?: number | null;
+    title?: string | null;
+    text_content: string;
+    created_at: string; // Assuming ISO string from backend
+    updated_at: string; // Assuming ISO string from backend
+}
+
 // --- END NEW TYPES FOR CHAT FEATURE ---
