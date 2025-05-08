@@ -2,16 +2,18 @@
 """
 Routes for batch management, including listing, retrieving, and modifying batches.
 """
-from flask import Blueprint, request, send_file, jsonify
+from flask import Blueprint, request, send_file, jsonify, Response, stream_with_context, abort
 from sqlalchemy.orm import Session
-from backend import models, utils_r2
-from backend.app import make_api_response
+from backend import models, utils_r2, tasks
+from backend.models import get_db
+from backend.utils.response_utils import make_api_response
 from backend.tasks import regenerate_line_takes, run_speech_to_speech_line
 import logging
 import json
 from datetime import datetime, timezone
 import io
 import zipfile
+from urllib.parse import unquote_plus # Use unquote_plus for path decoding
 
 batch_bp = Blueprint('batch', __name__, url_prefix='/api')
 
