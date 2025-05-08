@@ -3,7 +3,7 @@ Routes for audio serving and streaming.
 """
 from flask import Blueprint, redirect
 from backend import utils_r2
-from backend.app import make_api_response
+from backend.utils.response_utils import make_api_response
 import logging
 
 audio_bp = Blueprint('audio', __name__)

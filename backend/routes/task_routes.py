@@ -3,7 +3,7 @@ Routes for Celery task status checking.
 """
 from flask import Blueprint
 from celery.result import AsyncResult
-from backend.app import make_api_response
+from backend.utils.response_utils import make_api_response
 from backend.celery_app import celery
 import logging
 
