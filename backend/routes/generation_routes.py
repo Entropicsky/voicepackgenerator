@@ -4,11 +4,12 @@ Routes for voice generation and job management.
 """
 from flask import Blueprint, request, jsonify
 from backend import models
-from backend.app import make_api_response
+from backend.utils.response_utils import make_api_response
 import json
 from datetime import datetime
 from sqlalchemy.orm import Session
 from backend.models import GenerationJob
+import logging
 
 generation_bp = Blueprint('generation', __name__, url_prefix='/api')
 
