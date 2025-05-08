@@ -5,12 +5,13 @@ from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.exc import IntegrityError
 import logging
 from datetime import datetime, timezone
+import json # Added import
 
 # Assuming models and helpers are accessible, adjust imports as necessary
 # Might need to adjust relative paths depending on final structure
 from backend import models
 from backend.models import get_db # Import get_db specifically
-from backend.app import make_api_response, model_to_dict # Example: Import helpers from app
+from backend.utils.response_utils import make_api_response, model_to_dict # Import from utils
 
 vo_template_bp = Blueprint('vo_template_api', __name__, url_prefix='/api')
 
