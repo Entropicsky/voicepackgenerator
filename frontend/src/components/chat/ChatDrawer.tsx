@@ -1,4 +1,4 @@
-import { Text, Stack, Textarea, Button, Group, ScrollArea, Paper, Loader, Alert, Card, ActionIcon, Box, Tooltip, Grid, Tabs, Modal } from '@mantine/core';
+import { Text, Stack, Textarea, Button, Group, ScrollArea, Paper, Loader, Alert, Card, ActionIcon, Box, Tooltip, Grid, Tabs, Modal, Code } from '@mantine/core';
 import { IconSend, IconX, IconBulb, IconCheck, IconEdit, IconTrash, IconAlertCircle, IconClearAll, IconMessage, IconNotebook } from '@tabler/icons-react';
 import { useChatStore, ChatState, ChatMessage, getChatHistoryForContext } from '../../stores/chatStore';
 import { ChatTaskResult, ProposedModificationDetail, ModificationType, VoScriptLineData, InitiateChatPayload, ChatHistoryItem, StagedCharacterDescriptionData, ScriptNoteData, VoScriptCategoryData, VoScript } from '../../types';
@@ -7,7 +7,6 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { notifications } from '@mantine/notifications';
 import { ScratchpadModal } from './ScratchpadModal';
-import { CodeHighlight } from '@mantine/code-highlight';
 
 const POLLING_INTERVAL = 3000;
 const MAX_POLLING_ATTEMPTS = 40; // Approx 2 minutes (40 attempts * 3 seconds/attempt)
@@ -698,7 +697,7 @@ export function ChatPanelContent(/* { voScriptData }: ChatPanelContentProps */) 
                                 {/* Display Action and Line Key */}
                                 <Group justify="space-between" mb={3}>
                                     <Text size="xs" fw={500}>{displayActionText}</Text>
-                                    <CodeHighlight code={displayLineKey} language="txt" style={{fontSize: 'var(--mantine-font-size-xs)'}}/>
+                                    <Code style={{fontSize: 'var(--mantine-font-size-xs)'}}>{displayLineKey}</Code>
                                 </Group>
                                 {/* Display Proposed Text */}
                                 <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>{proposal.new_text}</Text>
