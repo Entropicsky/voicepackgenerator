@@ -10,10 +10,10 @@ from typing import Dict, List
 from datetime import datetime
 
 # Import utility modules
-from . import utils_elevenlabs
-from . import utils_r2
-from . import models
-from .utils.response_utils import make_api_response, model_to_dict
+from backend import utils_elevenlabs
+from backend import utils_r2
+from backend import models
+from backend.utils.response_utils import make_api_response, model_to_dict
 
 # Load environment variables from .env file for local development
 # Within Docker, env vars are passed by docker-compose
