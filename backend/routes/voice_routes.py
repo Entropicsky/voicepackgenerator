@@ -4,7 +4,7 @@ Routes for voice-related operations.
 """
 from flask import Blueprint, request, current_app
 from backend import utils_elevenlabs
-from backend.app import make_api_response
+from backend.utils.response_utils import make_api_response
 
 voice_bp = Blueprint('voice', __name__, url_prefix='/api')
 
