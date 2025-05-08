@@ -500,70 +500,69 @@ def run_script_collaborator_chat_task(self, script_id: int, user_message: str, i
         # Process tool calls and outputs
         if hasattr(agent_run_result, 'new_items') and agent_run_result.new_items:
             logger.info(f"Task {self.request.id}: Processing {len(agent_run_result.new_items)} new_items from agent run.")
-            # Iterate through steps to find tool calls and their outputs
-            for i, item_wrapper in enumerate(agent_run_result.new_items):
-                logger.info(f"Task {self.request.id}: Item {i+1}: WrapperType='{item_wrapper.type}', ActualItemContentType='{type(item_wrapper.item).__name__}'")
-                
-                if isinstance(item_wrapper.item, ToolCallItem):
-                    tool_name = getattr(item_wrapper.item, 'name', 'N/A') # Should be present in raw_item?
-                    raw_args_str = getattr(item_wrapper.item, 'arguments', '{}') # Should be present in raw_item?
+            # Iterate through the items directly
+            for i, actual_item in enumerate(agent_run_result.new_items): # Renamed loop variable
+                # --- Fix: Check type of actual_item directly --- 
+                item_type_name = type(actual_item).__name__
+                # Log the type name, not the object itself directly unless needed
+                logger.info(f"Task {self.request.id}: Item {i+1}: Type='{item_type_name}'") 
+                # --- End Fix --- 
+
+                # --- Fix: Use actual_item in isinstance checks and attribute access --- 
+                if isinstance(actual_item, ToolCallItem):
+                    tool_name = getattr(actual_item, 'name', 'N/A') # Access attributes on actual_item
+                    raw_args_str = getattr(actual_item, 'arguments', '{}') # Access attributes on actual_item
                     logger.info(f"Task {self.request.id}:   [ToolCallItem Details] Name: {tool_name}, Raw Arguments String: {raw_args_str}")
                     try:
-                         # Ensure arguments are parsed safely if they are JSON string
-                         # The SDK might already parse it based on the Pydantic model
-                         # Let's assume item.arguments might already be a dict if parsed by SDK
-                         parsed_args = getattr(item_wrapper.item, 'arguments', {})
+                         parsed_args = getattr(actual_item, 'arguments', {}) # Access attributes on actual_item
                          if isinstance(parsed_args, str):
                               parsed_args = json.loads(parsed_args)
                          logger.info(f"Task {self.request.id}:     Parsed Arguments: {parsed_args}")
                     except Exception as parse_err:
                          logger.error(f"Task {self.request.id}:     Error parsing tool arguments: {parse_err}. Raw: {raw_args_str}")
                 
-                elif isinstance(item_wrapper.item, ToolCallOutputItem):
+                elif isinstance(actual_item, ToolCallOutputItem):
                     logger.info(f"Task {self.request.id}:   [ToolCallOutputItem Details]")
-                    # The actual output is often nested, potentially already parsed Pydantic model or raw string/dict
-                    tool_output = getattr(item_wrapper.item, 'output', None)
-                    raw_item_info = getattr(item_wrapper.item, 'raw_item', {})
+                    tool_output = getattr(actual_item, 'output', None) # Access attributes on actual_item
+                    raw_item_info = getattr(actual_item, 'raw_item', {}) # Access attributes on actual_item
                     logger.info(f"Task {self.request.id}:     item.output (Pydantic if parsed): {tool_output} (Type: {type(tool_output).__name__})")
                     logger.info(f"Task {self.request.id}:     item.raw_item (from SDK): {raw_item_info} (Type: {type(raw_item_info).__name__})")
 
-                    # Process based on known response types
+                    # Process based on known response types (using tool_output)
                     if isinstance(tool_output, ProposedModificationResponse):
                         if tool_output.proposal:
                             logger.info(f"Task {self.request.id}:     >>> Added 1 proposal from SINGLE ProposedModificationResponse.")
                             proposed_modifications_list.append(tool_output.proposal)
-                    elif isinstance(tool_output, ProposeMultipleModificationsResponse): # Handle BATCH response
+                    elif isinstance(tool_output, ProposeMultipleModificationsResponse):
                         if tool_output.proposals_staged:
                             logger.info(f"Task {self.request.id}:     >>> Added {len(tool_output.proposals_staged)} proposals from BATCH ProposeMultipleModificationsResponse.")
                             proposed_modifications_list.extend(tool_output.proposals_staged)
                     elif isinstance(tool_output, AddToScratchpadResponse):
                         if tool_output.status == 'success' and tool_output.note_id is not None:
                             scratchpad_updates_list.append({"note_id": tool_output.note_id, "message": tool_output.message})
-                    elif isinstance(tool_output, StageCharacterDescriptionToolResponse): # Handle new staged description tool
+                    elif isinstance(tool_output, StageCharacterDescriptionToolResponse):
                         if tool_output.staged_update:
                             logger.info(f"Task {self.request.id}:     >>> Staged character description update received.")
-                            staged_description_update_result = tool_output.staged_update # Store it
+                            staged_description_update_result = tool_output.staged_update
                         if tool_output.error:
                              logger.warning(f"Task {self.request.id}:     Tool stage_character_description_update reported an error: {tool_output.error}")
-                    # Add checks for other tool output types if needed (GetScriptContextResponse, GetLineDetailsResponse, etc.)
-                    # These usually don't add directly to the final task result lists, but good to log/verify
                     elif isinstance(tool_output, (ScriptContextResponse, GetLineDetailsResponse, UpdateCharacterDescriptionResponse)):
-                         pass # Expected tool outputs, no specific action needed for final result lists
+                         pass # Expected tool outputs, no specific action needed
                     else:
                          logger.warning(f"Task {self.request.id}:     ToolCallOutputItem.output was not a recognized Pydantic model or dict. Type: {type(tool_output).__name__}")
 
-                elif isinstance(item_wrapper.item, MessageOutputItem):
-                     # This is usually the final AI text message, already captured in agent_run_result.final_output
-                    pass
+                elif isinstance(actual_item, MessageOutputItem):
+                     pass # Already handled via final_output
                 else:
-                    logger.warning(f"Task {self.request.id}: Unhandled item type in new_items: {type(item_wrapper.item).__name__}")
+                    logger.warning(f"Task {self.request.id}: Unhandled item type in new_items: {item_type_name}")
+                # --- End Fix --- 
 
         logger.info(f"Task {self.request.id}: Completed. Proposals: {len(proposed_modifications_list)}, StagedDesc: {staged_description_update_result is not None}")
         return {
             "ai_response_text": ai_response_text,
-            "proposed_modifications": [p.model_dump() for p in proposed_modifications_list], # Serialize Pydantic models
-            "scratchpad_updates": scratchpad_updates_list, # Already dicts
-            "staged_description_update": staged_description_update_result.model_dump() if staged_description_update_result else None # Serialize if present
+            "proposed_modifications": [p.model_dump() for p in proposed_modifications_list],
+            "scratchpad_updates": scratchpad_updates_list,
+            "staged_description_update": staged_description_update_result.model_dump() if staged_description_update_result else None
         }
 
     except Exception as e:
