@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { notifications } from '@mantine/notifications';
 import { ScratchpadModal } from './ScratchpadModal';
+import { CodeHighlight } from '@mantine/code-highlight';
 
 const POLLING_INTERVAL = 3000;
 const MAX_POLLING_ATTEMPTS = 40; // Approx 2 minutes (40 attempts * 3 seconds/attempt)
@@ -656,16 +657,64 @@ export function ChatPanelContent(/* { voScriptData }: ChatPanelContentProps */) 
 
             {activeProposals.length > 0 && (
                 <Paper withBorder p="xs" radius="sm" mt="xs" shadow="sm" style={{maxHeight: '40%', overflowY: 'auto', flexShrink: 0}}>
-                    {activeProposals.map((proposal: ProposedModificationDetail) => (
-                        <Paper key={proposal.proposal_id} withBorder p="sm" radius="sm" shadow="xs">
-                            <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>{proposal.new_text}</Text>
-                            <Group justify="flex-end" mt="xs">
-                                <Button variant="subtle" size="xs" onClick={() => handleAcceptProposal(proposal)}>Accept</Button>
-                                <Button variant="subtle" size="xs" onClick={() => handleEditProposal(proposal)}>Edit</Button>
-                                <Button variant="subtle" size="xs" onClick={() => handleDismissProposal(proposal.proposal_id)}>Dismiss</Button>
-                            </Group>
-                        </Paper>
-                    ))}
+                    <Group justify="flex-end" mb="xs">
+                        <Button 
+                            size="xs" 
+                            variant="light" 
+                            color="teal" 
+                            onClick={handleAcceptAllProposals} 
+                            loading={isAcceptingAll} 
+                            disabled={isLoading || isHistoryLoading || isLoadingVoScript || isAcceptingAll}
+                        >
+                            Accept All Proposals
+                        </Button>
+                    </Group>
+
+                    {activeProposals.map((proposal: ProposedModificationDetail) => {
+                        // --- Determine the relevant line key to display --- 
+                        let displayLineKey = '(Unknown Line Key)';
+                        let displayActionText = 'Proposal';
+
+                        if (proposal.modification_type === ModificationType.REPLACE_LINE) {
+                            displayActionText = 'Replace Line:';
+                            const originalLine = voScriptData?.categories?.flatMap(cat => cat.lines).find(line => line.id === proposal.target_id);
+                            displayLineKey = originalLine?.line_key || `(Line ID: ${proposal.target_id})`;
+                        } else if (proposal.modification_type === ModificationType.NEW_LINE_IN_CATEGORY) {
+                            displayActionText = 'Add New Line:';
+                            displayLineKey = proposal.suggested_line_key || '(Suggests New Key)';
+                        } else if (proposal.modification_type === ModificationType.INSERT_LINE_AFTER) {
+                            displayActionText = 'Insert After:';
+                            const targetLine = voScriptData?.categories?.flatMap(cat => cat.lines).find(line => line.id === proposal.target_id);
+                            displayLineKey = `${targetLine?.line_key || `(Line ID: ${proposal.target_id})`} (Suggests: ${proposal.suggested_line_key || 'New Key'})`;
+                        } else if (proposal.modification_type === ModificationType.INSERT_LINE_BEFORE) {
+                            displayActionText = 'Insert Before:';
+                            const targetLine = voScriptData?.categories?.flatMap(cat => cat.lines).find(line => line.id === proposal.target_id);
+                            displayLineKey = `${targetLine?.line_key || `(Line ID: ${proposal.target_id})`} (Suggests: ${proposal.suggested_line_key || 'New Key'})`;
+                        }
+                        // --- End determine line key --- 
+                        
+                        return (
+                            <Paper key={proposal.proposal_id} withBorder p="sm" radius="sm" shadow="xs" mb="xs">
+                                {/* Display Action and Line Key */}
+                                <Group justify="space-between" mb={3}>
+                                    <Text size="xs" fw={500}>{displayActionText}</Text>
+                                    <CodeHighlight code={displayLineKey} language="txt" style={{fontSize: 'var(--mantine-font-size-xs)'}}/>
+                                </Group>
+                                {/* Display Proposed Text */}
+                                <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>{proposal.new_text}</Text>
+                                {proposal.reasoning && (
+                                    <Text size="xs" c="dimmed" mt={5}>Reasoning: {proposal.reasoning}</Text>
+                                )}
+                                <Group justify="flex-end" mt="xs">
+                                    <Button variant="subtle" size="xs" onClick={() => handleAcceptProposal(proposal)} disabled={isLoadingVoScript || isLoading || isAcceptingAll}>Accept</Button> 
+                                    {proposal.modification_type === ModificationType.REPLACE_LINE && (
+                                        <Button variant="subtle" size="xs" onClick={() => handleStartEditProposal(proposal)} disabled={isAcceptingAll}>Edit</Button>
+                                    )}
+                                    <Button variant="subtle" size="xs" onClick={() => handleDismissProposal(proposal.proposal_id)} disabled={isAcceptingAll}>Dismiss</Button>
+                                </Group>
+                            </Paper>
+                        );
+                    })}
                 </Paper>
             )}
             
