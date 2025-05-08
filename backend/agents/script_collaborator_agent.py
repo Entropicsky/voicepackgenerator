@@ -127,6 +127,10 @@ def get_script_context(params: GetScriptContextParams) -> ScriptContextResponse:
     If line_id is given, focuses on that line and its surroundings within its category (if any).
     If only script_id is given, returns all lines and general script info.
     """
+    # --- ADDED: Log received parameters --- 
+    logger.info(f"[get_script_context] TOOL CALLED. Received params: {params}")
+    # --- END ADDED --- 
+    
     db_session_gen = get_db_session()
     db: Session = next(db_session_gen)
     
