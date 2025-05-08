@@ -23,11 +23,11 @@ from backend.agents.script_collaborator_agent import (
     ScriptContextResponse,
     StageCharacterDescriptionToolResponse, # Import new response type
     StagedCharacterDescriptionData, # Import new data type
-    ProposeMultipleModificationsResponse # Import new response type
+    ProposeMultipleModificationsResponse, # Import new response type
+    UpdateCharacterDescriptionResponse, # Added UpdateCharacterDescriptionResponse
+    ProposedModificationDetail, # Also need the detail model
 )
-from agents import Runner
-# Attempt to import specific result item types if available, otherwise use attribute checking
-# from agents.results import ToolCallOutputItem # This import path is a guess
+from agents import Runner, ToolCallItem, ToolCallOutputItem, MessageOutputItem # Adjust imports as needed
 from typing import List, Dict, Any, Optional
 from sqlalchemy import desc # For ordering history
 
@@ -434,169 +434,143 @@ def generate_category_lines(self,
                 pass 
 
 @celery.task(bind=True, name='run_script_collaborator_chat')
-def run_script_collaborator_chat_task(self, script_id: int, user_message: str, 
-                                    initial_prompt_context_from_prior_sessions: List[Dict[str, str]],
-                                    current_context: Dict[str, Any]):
+def run_script_collaborator_chat_task(self, script_id: int, user_message: str, initial_prompt_context_from_prior_sessions: Optional[List[Dict]] = None, current_context: Optional[Dict] = None):
+    """Celery task to run the AI script collaborator agent."""
     logger.info(f"Starting ScriptCollaboratorAgent task SID: {script_id}, TaskID: {self.request.id}, Msg: '{user_message[:50]}...'")
-    logger.info(f"Context: CategoryID: {current_context.get('category_id')}, LineID: {current_context.get('line_id')}")
+    logger.info(f"Context: CategoryID: {current_context.get('category_id') if current_context else 'N/A'}, LineID: {current_context.get('line_id') if current_context else 'N/A'}")
     
-    db = next(models.get_db())
+    # Initialize state
+    ai_response_text = ""
+    proposed_modifications_list = []
+    scratchpad_updates_list = []
+    staged_description_update_result: Optional[StagedCharacterDescriptionData] = None
+    
+    db: Optional[Session] = None
     try:
-        self.update_state(state='PROGRESS', meta={'status_message': 'Initializing AI Agent...'})
+        # --- Instantiate Agent --- 
         logger.info(f"Task {self.request.id}: Instantiating ScriptCollaboratorAgent with default client settings.")
         agent = ScriptCollaboratorAgent()
 
-        self.update_state(state='PROGRESS', meta={'status_message': 'Agent processing request...'}) # Generic message before run
-        # --- 1. Load recent history from DB --- #
-        db_history = db.query(models.ChatMessageHistory).filter(
+        # --- Prepare Input History --- 
+        db = next(models.get_db())
+        # 1. Load actual history from DB
+        history_records = db.query(models.ChatMessageHistory).filter(
             models.ChatMessageHistory.vo_script_id == script_id
-        ).order_by(
-            desc(models.ChatMessageHistory.timestamp)
-        ).limit(CHAT_HISTORY_LIMIT_FOR_AGENT).all()
+        ).order_by(models.ChatMessageHistory.timestamp.asc()).all()
         
-        # Reverse to get chronological order for the agent
-        db_history.reverse()
-        
-        formatted_history_from_db = [
-            {'role': msg.role, 'content': msg.content} for msg in db_history
+        db_history_messages = [
+            {"role": record.role, "content": record.content} 
+            for record in history_records
         ]
-        logger.info(f"Loaded {len(formatted_history_from_db)} messages from DB history for script {script_id}.")
+        logger.info(f"Loaded {len(db_history_messages)} messages from DB history for script {script_id}.")
         
-        # --- 2. Construct Agent Input --- #
-        # Combine DB history with the *current* user message
-        full_input_history = formatted_history_from_db + [{'role': 'user', 'content': user_message}]
+        # 2. Construct the input list for the agent
+        full_input_history = []
+        # ** NEW: Prepend system message with current script ID **
+        full_input_history.append({"role": "system", "content": f"Current context is for Script ID: {script_id}"})
+        # Add historical messages
+        full_input_history.extend(db_history_messages)
+        # Add the latest user message
+        full_input_history.append({"role": "user", "content": user_message})
+
         logger.info(f"Running Agent with {len(full_input_history)} total messages in input history.")
+        # Update task state to PROGRESS
+        self.update_state(state='PROGRESS', meta={'status_message': 'Agent processing request...'})
 
-        # --- 3. Run Agent --- #
-        agent_run_result = Runner.run_sync(agent, full_input_history)
+        # --- Run Agent --- 
+        # agent_run_result = Runner.run_sync(agent, messages=full_input_history) # Old call
+        agent_run_result = Runner.run_sync(agent, full_input_history) # Corrected call
+        logger.info(f"Task {self.request.id}: Agent run finished. Final Output: {agent_run_result.final_output[:100]}...")
+        
+        # --- Save History --- 
+        # Save the user message and the final AI response to the DB history
+        try:
+            user_msg_record = models.ChatMessageHistory(vo_script_id=script_id, role='user', content=user_message)
+            ai_msg_record = models.ChatMessageHistory(vo_script_id=script_id, role='assistant', content=agent_run_result.final_output)
+            db.add_all([user_msg_record, ai_msg_record])
+            db.commit()
+            logger.info(f"Task {self.request.id}: Saved user and assistant messages to history for script {script_id}.")
+        except Exception as hist_err:
+            logger.error(f"Task {self.request.id}: Failed to save chat history for script {script_id}: {hist_err}")
+            db.rollback() # Rollback history save if it fails, but proceed with task result
+
+        # --- Process Agent Result --- 
         ai_response_text = agent_run_result.final_output
-        logger.info(f"Task {self.request.id}: Agent run finished. Final Output: {ai_response_text[:100]}...")
-        self.update_state(state='PROGRESS', meta={'status_message': 'Agent processing complete. Finalizing results...'}) # After run
-
-        # --- 4. Save current turn to DB History --- #
-        # Save User Message
-        user_msg_record = models.ChatMessageHistory(
-            vo_script_id=script_id,
-            role='user',
-            content=user_message
-            # timestamp defaults to now
-        )
-        db.add(user_msg_record)
         
-        # Save Assistant Response
-        if ai_response_text: # Only save if there was a response
-            assistant_msg_record = models.ChatMessageHistory(
-                vo_script_id=script_id,
-                role='assistant',
-                content=ai_response_text
-            )
-            db.add(assistant_msg_record)
-        
-        db.commit() # Commit both messages
-        logger.info(f"Task {self.request.id}: Saved user and assistant messages to history for script {script_id}.")
-
-        # --- 5. Process Agent Results for Frontend --- #
-        proposals_for_frontend = []
-        scratchpad_updates_for_frontend = []
-        staged_description_update_for_frontend: Optional[StagedCharacterDescriptionData] = None
-
+        # Process tool calls and outputs
         if hasattr(agent_run_result, 'new_items') and agent_run_result.new_items:
-            logger.info(f"Processing {len(agent_run_result.new_items)} new_items from agent run.")
-            for i, run_item_wrapper in enumerate(agent_run_result.new_items):
-                item = getattr(run_item_wrapper, 'item', run_item_wrapper)
-                wrapper_type_name = type(run_item_wrapper).__name__
-                item_type_name = type(item).__name__ if item is not run_item_wrapper else wrapper_type_name
-                logger.info(f"Item {i+1}: WrapperType='{wrapper_type_name}', ActualItemContentType='{item_type_name}'")
-
-                # Detailed logging for tool calls and outputs
-                if wrapper_type_name == 'ToolCallItem' and item:
-                    tool_call_name = getattr(item, 'name', 'N/A')
-                    tool_call_args_raw = getattr(item, 'arguments', '{}') # arguments is usually a string
-                    logger.info(f"  [ToolCallItem Details] Name: {tool_call_name}, Raw Arguments String: {tool_call_args_raw}")
+            logger.info(f"Task {self.request.id}: Processing {len(agent_run_result.new_items)} new_items from agent run.")
+            # Iterate through steps to find tool calls and their outputs
+            for i, item_wrapper in enumerate(agent_run_result.new_items):
+                logger.info(f"Task {self.request.id}: Item {i+1}: WrapperType='{item_wrapper.type}', ActualItemContentType='{type(item_wrapper.item).__name__}'")
+                
+                if isinstance(item_wrapper.item, ToolCallItem):
+                    tool_name = getattr(item_wrapper.item, 'name', 'N/A') # Should be present in raw_item?
+                    raw_args_str = getattr(item_wrapper.item, 'arguments', '{}') # Should be present in raw_item?
+                    logger.info(f"Task {self.request.id}:   [ToolCallItem Details] Name: {tool_name}, Raw Arguments String: {raw_args_str}")
                     try:
-                        # Attempt to parse arguments if they are a JSON string
-                        tool_call_args_parsed = json.loads(tool_call_args_raw)
-                        logger.info(f"    Parsed Arguments: {json.dumps(tool_call_args_parsed, indent=2)}")
-                    except json.JSONDecodeError:
-                        logger.warning(f"    Could not parse ToolCallItem arguments as JSON: {tool_call_args_raw}")
+                         # Ensure arguments are parsed safely if they are JSON string
+                         # The SDK might already parse it based on the Pydantic model
+                         # Let's assume item.arguments might already be a dict if parsed by SDK
+                         parsed_args = getattr(item_wrapper.item, 'arguments', {})
+                         if isinstance(parsed_args, str):
+                              parsed_args = json.loads(parsed_args)
+                         logger.info(f"Task {self.request.id}:     Parsed Arguments: {parsed_args}")
+                    except Exception as parse_err:
+                         logger.error(f"Task {self.request.id}:     Error parsing tool arguments: {parse_err}. Raw: {raw_args_str}")
+                
+                elif isinstance(item_wrapper.item, ToolCallOutputItem):
+                    logger.info(f"Task {self.request.id}:   [ToolCallOutputItem Details]")
+                    # The actual output is often nested, potentially already parsed Pydantic model or raw string/dict
+                    tool_output = getattr(item_wrapper.item, 'output', None)
+                    raw_item_info = getattr(item_wrapper.item, 'raw_item', {})
+                    logger.info(f"Task {self.request.id}:     item.output (Pydantic if parsed): {tool_output} (Type: {type(tool_output).__name__})")
+                    logger.info(f"Task {self.request.id}:     item.raw_item (from SDK): {raw_item_info} (Type: {type(raw_item_info).__name__})")
 
-                if wrapper_type_name == 'ToolCallOutputItem' and item:
-                    tool_output = getattr(item, 'output', None)
-                    raw_item_details = getattr(item, 'raw_item', None)
-                    logger.info(f"  [ToolCallOutputItem Details]")
-                    logger.info(f"    item.output (Pydantic if parsed): {str(tool_output)[:1000]} (Type: {type(tool_output).__name__})")
-                    logger.info(f"    item.raw_item (from SDK): {str(raw_item_details)[:1000]} (Type: {type(raw_item_details).__name__})")
-                    
-                    # This is where we determine if it's a proposal
-                    actual_output_to_check = tool_output 
-                    
-                    # --- Handle SINGLE Proposal Response --- #
-                    if isinstance(actual_output_to_check, ProposedModificationResponse):
-                        if actual_output_to_check.proposal:
-                             proposals_for_frontend.append(actual_output_to_check.proposal.model_dump())
-                             logger.info(f"    >>> Added SINGLE proposal from Pydantic ProposedModificationResponse: {actual_output_to_check.proposal.proposal_id}")
-                        else:
-                             logger.warning("    ToolCallOutputItem was ProposedModificationResponse but .proposal was None/empty.")
-                    
-                    # --- Handle BATCH Proposal Response --- #
-                    elif isinstance(actual_output_to_check, ProposeMultipleModificationsResponse):
-                        if actual_output_to_check.proposals_staged:
-                            # Extend the list with all staged proposals from the batch response
-                            proposals_for_frontend.extend([p.model_dump() for p in actual_output_to_check.proposals_staged])
-                            logger.info(f"    >>> Added {len(actual_output_to_check.proposals_staged)} proposals from BATCH ProposeMultipleModificationsResponse.")
-                        elif actual_output_to_check.error:
-                             logger.warning(f"    Tool 'propose_multiple_line_modifications' returned an error: {actual_output_to_check.error}")
-                        else:
-                             logger.warning("    Tool 'propose_multiple_line_modifications' returned validly but without staged proposals or error.")
-                    
-                    # --- Handle Scratchpad Response --- #
-                    elif isinstance(actual_output_to_check, AddToScratchpadResponse):
-                        if actual_output_to_check.status == 'success': 
-                            scratchpad_updates_for_frontend.append(actual_output_to_check.model_dump())
-                            logger.info(f"    >>> Added scratchpad update: {actual_output_to_check.note_id}")
-                    elif isinstance(actual_output_to_check, StageCharacterDescriptionToolResponse): # NEW
-                        if actual_output_to_check.staged_update:
-                            staged_description_update_for_frontend = actual_output_to_check.staged_update
-                            logger.info(f"    >>> Captured staged character description update for script {actual_output_to_check.staged_update.script_id}")
-                        elif actual_output_to_check.error:
-                            logger.warning(f"    Tool 'stage_character_description_update' returned an error: {actual_output_to_check.error}")
-                        else:
-                            logger.warning("    Tool 'stage_character_description_update' returned validly but without staged_update data or error.")
-                    elif isinstance(actual_output_to_check, dict): # Fallback for direct dict from raw_item maybe
-                        logger.info(f"    ToolCallOutputItem.output was a dict. Keys: {list(actual_output_to_check.keys())}")
-                        if 'proposal' in actual_output_to_check and isinstance(actual_output_to_check['proposal'], dict):
-                            proposals_for_frontend.append(actual_output_to_check['proposal'])
-                            logger.info(f"    >>> Added proposal from dict: {actual_output_to_check['proposal'].get('proposal_id')}")
-                        elif 'note_id' in actual_output_to_check and 'status' in actual_output_to_check:
-                            scratchpad_updates_for_frontend.append(actual_output_to_check)
-                            logger.info(f"    >>> Added scratchpad update from dict: {actual_output_to_check.get('note_id')}")
-                        else:
-                            logger.warning("    ToolCallOutputItem.output was dict, but not a recognized proposal/scratchpad structure.")
+                    # Process based on known response types
+                    if isinstance(tool_output, ProposedModificationResponse):
+                        if tool_output.proposal:
+                            logger.info(f"Task {self.request.id}:     >>> Added 1 proposal from SINGLE ProposedModificationResponse.")
+                            proposed_modifications_list.append(tool_output.proposal)
+                    elif isinstance(tool_output, ProposeMultipleModificationsResponse): # Handle BATCH response
+                        if tool_output.proposals_staged:
+                            logger.info(f"Task {self.request.id}:     >>> Added {len(tool_output.proposals_staged)} proposals from BATCH ProposeMultipleModificationsResponse.")
+                            proposed_modifications_list.extend(tool_output.proposals_staged)
+                    elif isinstance(tool_output, AddToScratchpadResponse):
+                        if tool_output.status == 'success' and tool_output.note_id is not None:
+                            scratchpad_updates_list.append({"note_id": tool_output.note_id, "message": tool_output.message})
+                    elif isinstance(tool_output, StageCharacterDescriptionToolResponse): # Handle new staged description tool
+                        if tool_output.staged_update:
+                            logger.info(f"Task {self.request.id}:     >>> Staged character description update received.")
+                            staged_description_update_result = tool_output.staged_update # Store it
+                        if tool_output.error:
+                             logger.warning(f"Task {self.request.id}:     Tool stage_character_description_update reported an error: {tool_output.error}")
+                    # Add checks for other tool output types if needed (GetScriptContextResponse, GetLineDetailsResponse, etc.)
+                    # These usually don't add directly to the final task result lists, but good to log/verify
+                    elif isinstance(tool_output, (ScriptContextResponse, GetLineDetailsResponse, UpdateCharacterDescriptionResponse)):
+                         pass # Expected tool outputs, no specific action needed for final result lists
                     else:
-                        logger.warning(f"    ToolCallOutputItem.output was not a recognized Pydantic model or dict. Type: {type(actual_output_to_check).__name__}")
-        else: logger.warning("No 'new_items' attribute in agent_run_result, or it is empty.")
-        
-        # --- 6. Prepare Response --- #
-        response_data = {
+                         logger.warning(f"Task {self.request.id}:     ToolCallOutputItem.output was not a recognized Pydantic model or dict. Type: {type(tool_output).__name__}")
+
+                elif isinstance(item_wrapper.item, MessageOutputItem):
+                     # This is usually the final AI text message, already captured in agent_run_result.final_output
+                    pass
+                else:
+                    logger.warning(f"Task {self.request.id}: Unhandled item type in new_items: {type(item_wrapper.item).__name__}")
+
+        logger.info(f"Task {self.request.id}: Completed. Proposals: {len(proposed_modifications_list)}, StagedDesc: {staged_description_update_result is not None}")
+        return {
             "ai_response_text": ai_response_text,
-            "proposed_modifications": proposals_for_frontend,
-            "scratchpad_updates": scratchpad_updates_for_frontend,
-            "staged_description_update": staged_description_update_for_frontend.model_dump() if staged_description_update_for_frontend else None 
+            "proposed_modifications": [p.model_dump() for p in proposed_modifications_list], # Serialize Pydantic models
+            "scratchpad_updates": scratchpad_updates_list, # Already dicts
+            "staged_description_update": staged_description_update_result.model_dump() if staged_description_update_result else None # Serialize if present
         }
-        logger.info(f"Task {self.request.id}: Completed. Proposals: {len(proposals_for_frontend)}, StagedDesc: {staged_description_update_for_frontend is not None}")
-        return response_data
 
     except Exception as e:
-        logger.error(f"Error in ScriptCollaboratorAgent task SID {script_id}, TaskID {self.request.id}: {e}", exc_info=True)
-        db.rollback()
-        # Update state to FAILURE with error message for frontend
-        self.update_state(state='FAILURE', meta={
-            'status_message': 'An internal error occurred.', 
-            'error': str(e),
-            'exc_type': type(e).__name__,
-            # 'traceback': traceback.format_exc() # Be careful with sending full tracebacks
-            })
-        raise # Re-raise for Celery to mark as failure
+        logger.exception(f"Task {self.request.id}: Error running ScriptCollaboratorAgent task for script {script_id}: {e}")
+        # Optionally save error to history?
+        # Raise the exception so Celery marks the task as FAILURE
+        raise
     finally:
-        if db:
-            db.close() # Ensure session is closed 
+        if db and db.is_active:
+            db.close() 
