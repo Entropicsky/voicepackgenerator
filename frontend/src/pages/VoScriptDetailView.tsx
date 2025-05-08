@@ -19,6 +19,7 @@ import { VoScript, VoScriptLineData, JobSubmissionResponse, SubmitFeedbackPayloa
 // Import custom AppModal
 import AppModal from '../components/common/AppModal'; // Adjust path relative to pages/
 import { ChatFab } from '../components/chat/ChatFab'; // NEW: Import ChatFab
+import { useChatStore } from '../stores/chatStore'; // NEW: Import chat store
 
 const POLLING_INTERVAL = 5000; // Poll every 5 seconds
 
@@ -94,6 +95,9 @@ const VoScriptDetailView: React.FC = () => {
   const [pollingTaskId, setPollingTaskId] = useState<string | null>(null);
   const [pollingCategoryName, setPollingCategoryName] = useState<string | null>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null); // Ref for interval ID
+
+  // Get chat open state
+  const isChatOpen = useChatStore((state) => state.isChatOpen);
 
   // --- 1. Fetch VO Script Details --- //
   const { 
@@ -1883,8 +1887,8 @@ const VoScriptDetailView: React.FC = () => {
             </AppModal>
         )}
 
-        {/* Chat FAB - Placed here so it's within the main Stack but will be fixed position */}
-        {numericScriptId && <ChatFab scriptId={numericScriptId} />}
+        {/* Render Chat FAB conditionally */}
+        {!isChatOpen && numericScriptId && <ChatFab scriptId={numericScriptId} />}
 
     </Stack>
   );
