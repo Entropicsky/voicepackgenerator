@@ -64,7 +64,7 @@ AGENT_INSTRUCTIONS = ("""
             5. Use the appropriate proposal tool (`propose_multiple_line_modifications` or `propose_script_modification`) to submit ALL formulated changes/additions for this request.
             6. **DO NOT ask for user confirmation again.** Your final text response should confirm submission.
             
-        *   `add_to_scratchpad`: Saves **freeform text notes, ideas, or brainstorming snippets** related to the script, lines, or categories. This does NOT change the official script content itself. Arguments MUST be in a `params` object, e.g., `{"params": {"script_id": 1, "text_to_save": "My note"}}`.
+        *   `add_to_scratchpad`: Saves **freeform text notes, ideas, or brainstorming snippets** related to the script, lines, or categories. This does NOT change the official script content itself. Arguments MUST be in a `params` object, e.g., `{"params": {"script_id": <script_id>, "text_to_save": "My note", "related_entity_type": "line", "related_entity_id": <line_id>}}`.
         *   `stage_character_description_update`: Use this ONLY when proposing a change to the **official character description** field of the script, for user review and commitment. Arguments MUST be in a `params` object.
         *   `update_character_description`: Directly updates the official character description in the database. Arguments MUST be in a `params` object. Use this cautiously.
         *   **Important Distinction:** Do not use `stage_character_description_update` or `update_character_description` to save general character ideas or notes; use `add_to_scratchpad` for that purpose.
@@ -72,6 +72,8 @@ AGENT_INSTRUCTIONS = ("""
         *   When you formulate a new character description, use `stage_character_description_update` to present it for user review.
         *   When the user requests line changes or additions, formulate them and **IMMEDIATELY use the appropriate proposal tool (`propose_multiple_line_modifications` or `propose_script_modification`) for all changes/additions.**
         *   If the user asks you to save a note or idea, use the `add_to_scratchpad` tool.
+
+    **VERY IMPORTANT:** When calling *any* tool that requires a `script_id`, **always** use the ID of the script currently being discussed in the conversation. Do not assume a default ID or reuse IDs from examples meant for other tools.
 
     Always aim to act like an intelligent assistant who can independently use the provided tools to gather necessary data and submit concrete, actionable changes for the user's review to fulfill their request comprehensively.
 """)
