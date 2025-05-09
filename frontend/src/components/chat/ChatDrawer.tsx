@@ -77,7 +77,13 @@ export function ChatPanelContent(/* { voScriptData }: ChatPanelContentProps */) 
 
     useEffect(() => {
         if (viewport.current) {
-            viewport.current.scrollTo({ top: viewport.current.scrollHeight, behavior: 'smooth' });
+            // Delay scroll slightly to allow DOM to update with new elements like loaders
+            const timer = setTimeout(() => {
+                if (viewport.current) { // Check ref again in case component unmounted
+                    viewport.current.scrollTo({ top: viewport.current.scrollHeight, behavior: 'smooth' });
+                }
+            }, 0); // 0ms delay pushes to next event loop tick
+            return () => clearTimeout(timer); // Cleanup timer on unmount or re-run
         }
     }, [chatDisplayHistory, activeProposals, isHistoryLoading, isLoading, currentMessage]);
 
