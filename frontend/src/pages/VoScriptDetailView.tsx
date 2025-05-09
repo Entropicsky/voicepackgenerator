@@ -19,7 +19,7 @@ import { VoScript, VoScriptLineData, JobSubmissionResponse, SubmitFeedbackPayloa
 // Import custom AppModal
 import AppModal from '../components/common/AppModal'; // Adjust path relative to pages/
 import { ChatFab } from '../components/chat/ChatFab'; // NEW: Import ChatFab
-import { useChatStore } from '../stores/chatStore'; // NEW: Import chat store
+import { useChatStore, ChatState } from '../stores/chatStore'; // NEW: Import chat store
 
 const POLLING_INTERVAL = 5000; // Poll every 5 seconds
 
@@ -96,8 +96,26 @@ const VoScriptDetailView: React.FC = () => {
   const [pollingCategoryName, setPollingCategoryName] = useState<string | null>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null); // Ref for interval ID
 
+  // --- Chat Store Actions ---
+  const setCurrentChatFocus = useChatStore((state: ChatState) => state.setCurrentFocus);
+  // const clearChatState = useChatStore((state: ChatState) => state.clearChat); // clearChat will be handled by setCurrentFocus
+
   // Get chat open state
-  const isChatOpen = useChatStore((state) => state.isChatOpen);
+  const isChatOpen = useChatStore((state: ChatState) => state.isChatOpen); // Explicitly type state
+
+  // --- Effect to update chat focus when scriptId changes --- 
+  useEffect(() => {
+    if (numericScriptId) {
+        console.log(`[VoScriptDetailView] Script ID in view: ${numericScriptId}. Updating chat focus.`);
+        setCurrentChatFocus({ scriptId: numericScriptId, categoryId: null, lineId: null });
+    } else {
+        // If no script is in view (e.g., navigating away or to a list view)
+        // Set scriptId to null. The setCurrentFocus action in store will handle clearing other chat states.
+        // console.log('[VoScriptDetailView] No Script ID in view. Clearing chat focus via store action.');
+        // setCurrentChatFocus({ scriptId: null, categoryId: null, lineId: null });
+        // No need to call clearChatState() directly if setCurrentFocus handles it.
+    }
+  }, [numericScriptId, setCurrentChatFocus]);
 
   // --- 1. Fetch VO Script Details --- //
   const { 
@@ -1894,4 +1912,4 @@ const VoScriptDetailView: React.FC = () => {
   );
 };
 
-export default VoScriptDetailView; 
+export default VoScriptDetailView;

@@ -79,7 +79,35 @@ const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
     
     setLoading: (loading) => set({ isLoading: loading }),
     
-    setCurrentFocus: (focus) => set({ currentFocus: focus }),
+    setCurrentFocus: (focus) => set((state) => {
+        if (state.currentFocus.scriptId !== focus.scriptId && focus.scriptId !== null) { // Check if scriptId is actually changing to a new one
+            // Script ID is changing, clear relevant chat state
+            return { 
+                currentFocus: focus,
+                chatDisplayHistory: [],
+                activeProposals: [],
+                currentMessage: '', // Optionally clear input message
+                isLoading: false,
+                currentAgentTaskID: null,
+                error: null,
+                stagedDescriptionUpdate: null // Also clear staged updates
+            };
+        } else if (focus.scriptId === null && state.currentFocus.scriptId !== null) {
+            // Script ID is being cleared (e.g., navigating away from a script view)
+            return { 
+                currentFocus: focus, // which is { scriptId: null, ... }
+                chatDisplayHistory: [],
+                activeProposals: [],
+                currentMessage: '',
+                isLoading: false,
+                currentAgentTaskID: null,
+                error: null,
+                stagedDescriptionUpdate: null
+            };
+        }
+        // Only update focus if scriptId is the same or was initially null and now gets a value
+        return { currentFocus: focus }; 
+    }),
     
     setCurrentAgentTaskID: (taskId) => set({ currentAgentTaskID: taskId }),
 
