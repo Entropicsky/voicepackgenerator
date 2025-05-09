@@ -30,6 +30,7 @@ from backend.agents.script_collaborator_agent import (
 from agents import Runner, ToolCallItem, ToolCallOutputItem, MessageOutputItem # Adjust imports as needed
 from typing import List, Dict, Any, Optional
 from sqlalchemy import desc # For ordering history
+from backend.utils_openai import get_image_description # NEW: Import image description util
 
 # Get a logger for this module/task
 logger = get_task_logger(__name__)
@@ -438,6 +439,7 @@ def run_script_collaborator_chat_task(self, script_id: int, user_message: str,
                                      initial_prompt_context_from_prior_sessions: Optional[List[Dict]] = None, 
                                      current_context: Optional[Dict] = None, 
                                      image_base64_data: Optional[str] = None):
+    """Celery task to run the AI script collaborator agent."""
     logger.info(f"Starting ScriptCollaboratorAgent task SID: {script_id}, TaskID: {self.request.id}, Msg: '{user_message[:50]}...', Image Provided: {image_base64_data is not None}")
     logger.info(f"Context: CategoryID: {current_context.get('category_id') if current_context else 'N/A'}, LineID: {current_context.get('line_id') if current_context else 'N/A'}")
     
@@ -448,19 +450,30 @@ def run_script_collaborator_chat_task(self, script_id: int, user_message: str,
     
     db: Optional[Session] = None
     try:
-        # --- Instantiate Agent --- # RE-ADD THIS BLOCK
+        # --- Instantiate Agent --- # Ensure this is present and correct
         logger.info(f"Task {self.request.id}: Instantiating ScriptCollaboratorAgent with default client settings.")
         agent = ScriptCollaboratorAgent()
         # --- End Instantiate Agent ---
 
+        # --- Image Description Handling (from feat/chat-image-analysis) ---
         effective_user_message = user_message
         if image_base64_data:
             logger.info(f"Task {self.request.id}: Image data provided, attempting to get description.")
-            # ... (rest of image handling)
+            self.update_state(state='PROGRESS', meta={'status_message': 'Analyzing image...'})
+            image_description = get_image_description(image_base64_data, model_name=os.getenv("OPENAI_IMAGE_MODEL", "gpt-4o"))
+            if image_description and not image_description.startswith("Error:"):
+                logger.info(f"Task {self.request.id}: Successfully got image description.")
+                effective_user_message = f"System Information: An image was uploaded by the user. Its AI-generated description is: \n'''{image_description}'''\n\nOriginal user message: {user_message}"
+            elif image_description: # Contains an error message from the util
+                logger.warning(f"Task {self.request.id}: Failed to get image description: {image_description}")
+                effective_user_message = f"System Information: Image analysis failed - '{image_description}'.\n\nOriginal user message: {user_message}"
+            else: 
+                logger.error(f"Task {self.request.id}: Image description was unexpectedly None or empty from util.")
+                effective_user_message = f"System Information: Image analysis returned no data.\n\nOriginal user message: {user_message}"
+        # --- END: Image Description Handling ---
 
-        # --- Prepare Input History --- 
+        # --- Prepare Input History (using effective_user_message) --- 
         db = next(models.get_db())
-        # 1. Load actual history from DB
         history_records = db.query(models.ChatMessageHistory).filter(
             models.ChatMessageHistory.vo_script_id == script_id
         ).order_by(models.ChatMessageHistory.timestamp.asc()).all()
@@ -471,71 +484,58 @@ def run_script_collaborator_chat_task(self, script_id: int, user_message: str,
         ]
         logger.info(f"Loaded {len(db_history_messages)} messages from DB history for script {script_id}.")
         
-        # 2. Construct the input list for the agent
         full_input_history = []
-        # ** NEW: Prepend system message with current script ID **
         full_input_history.append({"role": "system", "content": f"Current context is for Script ID: {script_id}"})
-        # Add historical messages
         full_input_history.extend(db_history_messages)
-        # Add the latest user message
-        full_input_history.append({"role": "user", "content": effective_user_message})
+        full_input_history.append({"role": "user", "content": effective_user_message}) # Use effective_user_message
 
         logger.info(f"Running Agent with {len(full_input_history)} total messages in input history.")
-        # Update task state to PROGRESS
         self.update_state(state='PROGRESS', meta={'status_message': 'Agent processing request...'})
 
-        # --- Run Agent --- 
-        # agent_run_result = Runner.run_sync(agent, messages=full_input_history) # Old call
-        agent_run_result = Runner.run_sync(agent, full_input_history) # Corrected call
+        agent_run_result = Runner.run_sync(agent, full_input_history)
         logger.info(f"Task {self.request.id}: Agent run finished. Final Output: {agent_run_result.final_output[:100]}...")
         
-        # --- Save History --- 
-        # Save the user message and the final AI response to the DB history
+        # --- Save History (user_message is the original one, ai_response is agent's final output) --- 
         try:
-            user_msg_record = models.ChatMessageHistory(vo_script_id=script_id, role='user', content=effective_user_message)
+            # Use original user_message for history to not clutter it with prepended system info
+            user_msg_record = models.ChatMessageHistory(vo_script_id=script_id, role='user', content=user_message) 
             ai_msg_record = models.ChatMessageHistory(vo_script_id=script_id, role='assistant', content=agent_run_result.final_output)
             db.add_all([user_msg_record, ai_msg_record])
             db.commit()
             logger.info(f"Task {self.request.id}: Saved user and assistant messages to history for script {script_id}.")
         except Exception as hist_err:
             logger.error(f"Task {self.request.id}: Failed to save chat history for script {script_id}: {hist_err}")
-            db.rollback() # Rollback history save if it fails, but proceed with task result
+            db.rollback()
 
-        # --- Process Agent Result --- 
+        # --- Process Agent Result (as before) --- 
         ai_response_text = agent_run_result.final_output
-        
-        # Process tool calls and outputs
+        # Ensure these are initialized for the return statement
+        # proposed_modifications_list = [] 
+        # scratchpad_updates_list = [] 
+        # staged_description_update_result: Optional[StagedCharacterDescriptionData] = None
+
         if hasattr(agent_run_result, 'new_items') and agent_run_result.new_items:
             logger.info(f"Task {self.request.id}: Processing {len(agent_run_result.new_items)} new_items from agent run.")
-            # Iterate through the items directly
-            for i, actual_item in enumerate(agent_run_result.new_items): # Renamed loop variable
-                # --- Fix: Check type of actual_item directly --- 
+            for i, actual_item in enumerate(agent_run_result.new_items):
                 item_type_name = type(actual_item).__name__
-                # Log the type name, not the object itself directly unless needed
                 logger.info(f"Task {self.request.id}: Item {i+1}: Type='{item_type_name}'") 
-                # --- End Fix --- 
-
-                # --- Fix: Use actual_item in isinstance checks and attribute access --- 
                 if isinstance(actual_item, ToolCallItem):
-                    tool_name = getattr(actual_item, 'name', 'N/A') # Access attributes on actual_item
-                    raw_args_str = getattr(actual_item, 'arguments', '{}') # Access attributes on actual_item
+                    tool_name = getattr(actual_item, 'name', 'N/A') 
+                    raw_args_str = getattr(actual_item, 'arguments', '{}') 
                     logger.info(f"Task {self.request.id}:   [ToolCallItem Details] Name: {tool_name}, Raw Arguments String: {raw_args_str}")
                     try:
-                         parsed_args = getattr(actual_item, 'arguments', {}) # Access attributes on actual_item
+                         parsed_args = getattr(actual_item, 'arguments', {}) 
                          if isinstance(parsed_args, str):
                               parsed_args = json.loads(parsed_args)
                          logger.info(f"Task {self.request.id}:     Parsed Arguments: {parsed_args}")
                     except Exception as parse_err:
                          logger.error(f"Task {self.request.id}:     Error parsing tool arguments: {parse_err}. Raw: {raw_args_str}")
-                
                 elif isinstance(actual_item, ToolCallOutputItem):
                     logger.info(f"Task {self.request.id}:   [ToolCallOutputItem Details]")
-                    tool_output = getattr(actual_item, 'output', None) # Access attributes on actual_item
-                    raw_item_info = getattr(actual_item, 'raw_item', {}) # Access attributes on actual_item
+                    tool_output = getattr(actual_item, 'output', None) 
+                    raw_item_info = getattr(actual_item, 'raw_item', {}) 
                     logger.info(f"Task {self.request.id}:     item.output (Pydantic if parsed): {tool_output} (Type: {type(tool_output).__name__})")
                     logger.info(f"Task {self.request.id}:     item.raw_item (from SDK): {raw_item_info} (Type: {type(raw_item_info).__name__})")
-
-                    # Process based on known response types (using tool_output)
                     if isinstance(tool_output, ProposedModificationResponse):
                         if tool_output.proposal:
                             logger.info(f"Task {self.request.id}:     >>> Added 1 proposal from SINGLE ProposedModificationResponse.")
@@ -554,15 +554,13 @@ def run_script_collaborator_chat_task(self, script_id: int, user_message: str,
                         if tool_output.error:
                              logger.warning(f"Task {self.request.id}:     Tool stage_character_description_update reported an error: {tool_output.error}")
                     elif isinstance(tool_output, (ScriptContextResponse, GetLineDetailsResponse, UpdateCharacterDescriptionResponse)):
-                         pass # Expected tool outputs, no specific action needed
+                         pass 
                     else:
                          logger.warning(f"Task {self.request.id}:     ToolCallOutputItem.output was not a recognized Pydantic model or dict. Type: {type(tool_output).__name__}")
-
                 elif isinstance(actual_item, MessageOutputItem):
-                     pass # Already handled via final_output
+                     pass 
                 else:
                     logger.warning(f"Task {self.request.id}: Unhandled item type in new_items: {item_type_name}")
-                # --- End Fix --- 
 
         logger.info(f"Task {self.request.id}: Completed. Proposals: {len(proposed_modifications_list)}, StagedDesc: {staged_description_update_result is not None}")
         return {
@@ -574,8 +572,6 @@ def run_script_collaborator_chat_task(self, script_id: int, user_message: str,
 
     except Exception as e:
         logger.exception(f"Task {self.request.id}: Error running ScriptCollaboratorAgent task for script {script_id}: {e}")
-        # Optionally save error to history?
-        # Raise the exception so Celery marks the task as FAILURE
         raise
     finally:
         if db and db.is_active:

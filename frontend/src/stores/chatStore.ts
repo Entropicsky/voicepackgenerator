@@ -4,6 +4,7 @@ import { ProposedModificationDetail, StagedCharacterDescriptionData, ScriptNoteD
 export interface ChatMessage {
     role: 'user' | 'assistant';
     content: string;
+    imagePreviewUrl?: string | null;
     // We might add more fields later, like proposals or timestamps
 }
 

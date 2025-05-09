@@ -1,5 +1,5 @@
 import { Text, Stack, Textarea, Button, Group, ScrollArea, Paper, Loader, Alert, Card, ActionIcon, Box, Tooltip, Grid, Tabs, Modal, Code } from '@mantine/core';
-import { IconSend, IconX, IconBulb, IconCheck, IconEdit, IconTrash, IconAlertCircle, IconClearAll, IconMessage, IconNotebook } from '@tabler/icons-react';
+import { IconSend, IconX, IconBulb, IconCheck, IconEdit, IconTrash, IconAlertCircle, IconClearAll, IconMessage, IconNotebook, IconPhoto } from '@tabler/icons-react';
 import { useChatStore, ChatState, ChatMessage, getChatHistoryForContext } from '../../stores/chatStore';
 import { ChatTaskResult, ProposedModificationDetail, ModificationType, VoScriptLineData, InitiateChatPayload, ChatHistoryItem, StagedCharacterDescriptionData, ScriptNoteData, VoScriptCategoryData, VoScript } from '../../types';
 import { api } from '../../api';
@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { notifications } from '@mantine/notifications';
 import { ScratchpadModal } from './ScratchpadModal';
+import { CodeHighlight } from '@mantine/code-highlight';
 
 const POLLING_INTERVAL = 3000;
 const MAX_POLLING_ATTEMPTS = 40; // Approx 2 minutes (40 attempts * 3 seconds/attempt)
@@ -69,6 +70,11 @@ export function ChatPanelContent(/* { voScriptData }: ChatPanelContentProps */) 
 
     const [isScratchpadOpen, setIsScratchpadOpen] = useState(false);
 
+    // NEW: State for selected image file and its preview URL
+    const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
+    const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null); // Ref for hidden file input
+
     useEffect(() => {
         if (viewport.current) {
             viewport.current.scrollTo({ top: viewport.current.scrollHeight, behavior: 'smooth' });
@@ -112,27 +118,61 @@ export function ChatPanelContent(/* { voScriptData }: ChatPanelContentProps */) 
     }, [currentFocus.scriptId, setChatDisplayHistory, setActiveProposals]);
 
     const handleSendMessage = async () => {
-        if (!currentMessage.trim() || isLoading || isHistoryLoading || isLoadingVoScript || !currentFocus.scriptId) return;
+        if ((!currentMessage.trim() && !selectedImageFile) || isLoading || isHistoryLoading || isLoadingVoScript || !currentFocus.scriptId) return;
+        
         const userMessageText = currentMessage.trim();
-        const userMessage: ChatMessage = { role: 'user', content: userMessageText };
-        addMessageToHistory(userMessage); // Optimistic UI update
+        let imageBase64Data: string | null = null;
+        let localImagePreviewForHistory: string | null = imagePreviewUrl; // Capture current preview for history
+
+        if (selectedImageFile) {
+            imageBase64Data = await new Promise<string | null>((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.onerror = () => resolve(null);
+                reader.readAsDataURL(selectedImageFile);
+            });
+            if (!imageBase64Data) {
+                notifications.show({ title: 'Image Error', message: 'Could not process image file.', color: 'red' });
+                setLoading(false);
+                return;
+            }
+        }
+
+        const messageToSend = userMessageText || (imageBase64Data ? "[Image uploaded]" : "");
+        if (!messageToSend && !localImagePreviewForHistory) return; // Ensure there's something to send/show
+
+        // Add to history with image preview if available
+        const userMessageForHistory: ChatMessage = { 
+            role: 'user', 
+            content: messageToSend || "", // Ensure content is always string
+            imagePreviewUrl: localImagePreviewForHistory // Add preview URL to history item
+        };
+        addMessageToHistory(userMessageForHistory); 
+        
         setCurrentMessage('');
+        setSelectedImageFile(null);
+        if (imagePreviewUrl) { // Keep this to revoke the current main preview
+            URL.revokeObjectURL(imagePreviewUrl);
+            setImagePreviewUrl(null);
+        }
+
         setLoading(true);
         setError(null);
         setActiveProposals([]);
-        setCurrentProgressMessage(null); // Clear previous progress message
+        setCurrentProgressMessage(null);
 
         try {
             const payload: InitiateChatPayload = {
-                user_message: userMessageText,
-                current_context: { category_id: currentFocus.categoryId, line_id: currentFocus.lineId }
+                user_message: messageToSend || "", // Ensure content is always string for payload
+                current_context: { category_id: currentFocus.categoryId, line_id: currentFocus.lineId },
+                image_base64_data: imageBase64Data
             };
-            const response = await api.initiateChatSession(currentFocus.scriptId, payload);
+            const response = await api.initiateChatSession(currentFocus.scriptId!, payload);
             setCurrentAgentTaskID(response.task_id);
         } catch (err: any) {
             setError(err.message || 'Failed to send message.');
             setLoading(false);
-            setCurrentProgressMessage(null); // Clear on error too
+            setCurrentProgressMessage(null);
         }
     };
 
@@ -616,7 +656,13 @@ export function ChatPanelContent(/* { voScriptData }: ChatPanelContentProps */) 
                     <Paper key={index} shadow={msg.role === 'user' ? "xs" : "sm"} p="sm" mb="xs" radius="md" withBorder bg={msg.role === 'user' ? 'blue.0' : 'gray.0'}
                         style={{ marginLeft: msg.role === 'user' ? 'auto' : undefined, marginRight: msg.role === 'assistant' ? 'auto' : undefined, maxWidth: '80%',
                             borderBottomLeftRadius: msg.role === 'user' ? 'md' : 'sm', borderBottomRightRadius: msg.role === 'assistant' ? 'md' : 'sm' }}>
-                       <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</Text>
+                       {msg.content && <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</Text>}
+                       {/* NEW: Render image preview from history if available */}
+                       {msg.role === 'user' && msg.imagePreviewUrl && (
+                           <Box mt={msg.content ? "xs" : undefined} mb="xs">
+                               <img src={msg.imagePreviewUrl} alt="Uploaded content" style={{ display: 'block', maxWidth: '200px', maxHeight: '200px', borderRadius: 'var(--mantine-radius-sm)' }} />
+                           </Box>
+                       )}
                         <Text size="xs" c="dimmed" ta={msg.role === 'user' ? 'right' : 'left'} mt={3}>
                             {msg.role === 'user' ? 'You' : 'AI Assistant'}
                         </Text>
@@ -724,6 +770,34 @@ export function ChatPanelContent(/* { voScriptData }: ChatPanelContentProps */) 
             )}
 
             <Group wrap="nowrap" gap="xs" style={{padding: 'var(--mantine-spacing-xs)', borderTop: '1px solid var(--mantine-color-gray-3)'}}>
+                {/* Hidden file input */}
+                <input 
+                    type="file" 
+                    accept="image/*" 
+                    style={{ display: 'none' }} 
+                    ref={fileInputRef} 
+                    onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) {
+                            setSelectedImageFile(file);
+                            // Create object URL for preview
+                            if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl); // Revoke old one
+                            setImagePreviewUrl(URL.createObjectURL(file));
+                        }
+                        event.target.value = '' // Reset input to allow same file selection again
+                    }}
+                />
+                {/* Image Attach Button */}
+                <Tooltip label="Attach Image">
+                    <ActionIcon 
+                        onClick={() => fileInputRef.current?.click()} 
+                        variant="subtle" 
+                        disabled={isLoading || isHistoryLoading || isLoadingVoScript}
+                    >
+                        <IconPhoto size={18} />
+                    </ActionIcon>
+                </Tooltip>
+                
                 <Textarea 
                     placeholder="Type your message..." 
                     value={currentMessage} 
@@ -743,6 +817,13 @@ export function ChatPanelContent(/* { voScriptData }: ChatPanelContentProps */) 
                     <IconSend size={18} />
                 </Button>
             </Group>
+            
+            {imagePreviewUrl && (
+                <Paper withBorder p="xs" radius="sm" mt="xs" shadow="xs" style={{maxWidth: '50%', alignSelf: 'flex-end'}}>
+                    <img src={imagePreviewUrl} alt="Selected preview" style={{ display: 'block', maxWidth: '100px', maxHeight: '100px', borderRadius: 'var(--mantine-radius-sm)' }} />
+                    <Text size="xs" c="dimmed" ta="right" mt={3}>Attached Image</Text>
+                </Paper>
+            )}
             
             <ScratchpadModal 
                 opened={isScratchpadOpen} 

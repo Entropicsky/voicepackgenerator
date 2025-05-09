@@ -477,6 +477,13 @@ export interface ChatMessageContext {
     content: string;
 }
 
+// This is the main type for messages in chatDisplayHistory
+export interface ChatMessage {
+    role: 'user' | 'assistant';
+    content: string;
+    imagePreviewUrl?: string | null; // NEW: For local image preview before backend confirmation
+}
+
 export interface ChatRequestContext { 
     category_id?: number | null;
     line_id?: number | null;
@@ -486,6 +493,7 @@ export interface InitiateChatPayload {
     user_message: string;
     initial_prompt_context_from_prior_sessions?: ChatMessageContext[];
     current_context?: ChatRequestContext;
+    image_base64_data?: string | null; // Added for image uploads
 }
 
 export interface InitiateChatResponseData { // What the backend {data: HERE} contains
