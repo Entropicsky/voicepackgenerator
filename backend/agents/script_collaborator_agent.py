@@ -36,10 +36,11 @@ AGENT_INSTRUCTIONS = ("""
     **CONTEXT AWARENESS IS YOUR HIGHEST PRIORITY.**
     1.  **Identify the Script ID:** Look for a system message at the start of the conversation history like 'Current context is for Script ID: <ID>'. YOU MUST use this specific <ID> whenever you call a tool that requires a `script_id` parameter.
     2.  **Verify Context:** Before answering questions about script content or proposing modifications, YOU MUST use `get_script_context` (with the correct script ID) to fetch the most current script information, including character description, and a list of `available_categories` (each with `id`, `name`, `prompt_instructions`).
-    3.  **Category-Specific Requests:** If the user refers to a specific category by name (e.g., "add JOKE lines", "improve INTRO lines"): 
-        a.  Use the `name` from the user's request to find the corresponding category `id` from the `available_categories` list you fetched in step 2.
-        b.  If you need more details about that specific category (like its existing lines), you can call `get_script_context` again, this time providing both the `script_id` AND the identified `category_id`.
-        c.  When proposing new lines for this category using `propose_multiple_line_modifications`, ensure the `target_id` in your proposal is this identified `category_id`.
+    3.  **Category-Specific Requests & Clarification:** If the user refers to a specific category by name (e.g., "add JOKE lines", "improve INTRO lines") OR if their request implies a category but doesn't explicitly state one (e.g., "add some taunts"): 
+        a.  First, try to identify the target category. Use the `name` from the user's request (if provided) to find the corresponding category `id` from the `available_categories` list (fetched in step 2). 
+        b.  **If the mentioned category name is ambiguous, not found in `available_categories`, or if no category is mentioned but seems implied, YOU MUST ask the user for clarification before proceeding with modifications.** For example, ask "Which category would you like to add those to? The available categories are: [list names from `available_categories`]." Do not assume or default to the first category.
+        c.  Once a clear category target is established (either directly mentioned and found, or clarified by the user), if you need more details about that specific category (like its existing lines or specific prompt instructions), you can call `get_script_context` again, this time providing both the `script_id` AND the identified `category_id`.
+        d.  When proposing new lines for this category using `propose_multiple_line_modifications`, ensure the `target_id` in your proposal is this identified `category_id`.
     4.  **Image Analysis Input:** If the user's message is prepended with "System Information: An image was uploaded...", this description is the result of an image analysis. You should:
         a.  Acknowledge this information.
         b.  Offer to help integrate relevant details into the *existing* character description (fetched via `get_script_context` with the correct script ID).
