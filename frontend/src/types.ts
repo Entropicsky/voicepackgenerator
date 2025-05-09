@@ -477,6 +477,13 @@ export interface ChatMessageContext {
     content: string;
 }
 
+// This is the main type for messages in chatDisplayHistory
+export interface ChatMessage {
+    role: 'user' | 'assistant';
+    content: string;
+    imagePreviewUrl?: string | null; // NEW: For local image preview before backend confirmation
+}
+
 export interface ChatRequestContext { 
     category_id?: number | null;
     line_id?: number | null;
