@@ -434,12 +434,13 @@ def generate_category_lines(self,
                 pass 
 
 @celery.task(bind=True, name='run_script_collaborator_chat')
-def run_script_collaborator_chat_task(self, script_id: int, user_message: str, initial_prompt_context_from_prior_sessions: Optional[List[Dict]] = None, current_context: Optional[Dict] = None):
-    """Celery task to run the AI script collaborator agent."""
-    logger.info(f"Starting ScriptCollaboratorAgent task SID: {script_id}, TaskID: {self.request.id}, Msg: '{user_message[:50]}...'")
+def run_script_collaborator_chat_task(self, script_id: int, user_message: str, 
+                                     initial_prompt_context_from_prior_sessions: Optional[List[Dict]] = None, 
+                                     current_context: Optional[Dict] = None, 
+                                     image_base64_data: Optional[str] = None):
+    logger.info(f"Starting ScriptCollaboratorAgent task SID: {script_id}, TaskID: {self.request.id}, Msg: '{user_message[:50]}...', Image Provided: {image_base64_data is not None}")
     logger.info(f"Context: CategoryID: {current_context.get('category_id') if current_context else 'N/A'}, LineID: {current_context.get('line_id') if current_context else 'N/A'}")
     
-    # Initialize state
     ai_response_text = ""
     proposed_modifications_list = []
     scratchpad_updates_list = []
@@ -447,9 +448,15 @@ def run_script_collaborator_chat_task(self, script_id: int, user_message: str, i
     
     db: Optional[Session] = None
     try:
-        # --- Instantiate Agent --- 
+        # --- Instantiate Agent --- # RE-ADD THIS BLOCK
         logger.info(f"Task {self.request.id}: Instantiating ScriptCollaboratorAgent with default client settings.")
         agent = ScriptCollaboratorAgent()
+        # --- End Instantiate Agent ---
+
+        effective_user_message = user_message
+        if image_base64_data:
+            logger.info(f"Task {self.request.id}: Image data provided, attempting to get description.")
+            # ... (rest of image handling)
 
         # --- Prepare Input History --- 
         db = next(models.get_db())
@@ -471,7 +478,7 @@ def run_script_collaborator_chat_task(self, script_id: int, user_message: str, i
         # Add historical messages
         full_input_history.extend(db_history_messages)
         # Add the latest user message
-        full_input_history.append({"role": "user", "content": user_message})
+        full_input_history.append({"role": "user", "content": effective_user_message})
 
         logger.info(f"Running Agent with {len(full_input_history)} total messages in input history.")
         # Update task state to PROGRESS
@@ -485,7 +492,7 @@ def run_script_collaborator_chat_task(self, script_id: int, user_message: str, i
         # --- Save History --- 
         # Save the user message and the final AI response to the DB history
         try:
-            user_msg_record = models.ChatMessageHistory(vo_script_id=script_id, role='user', content=user_message)
+            user_msg_record = models.ChatMessageHistory(vo_script_id=script_id, role='user', content=effective_user_message)
             ai_msg_record = models.ChatMessageHistory(vo_script_id=script_id, role='assistant', content=agent_run_result.final_output)
             db.add_all([user_msg_record, ai_msg_record])
             db.commit()
