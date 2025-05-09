@@ -79,7 +79,7 @@ export function ChatPanelContent(/* { voScriptData }: ChatPanelContentProps */) 
         if (viewport.current) {
             viewport.current.scrollTo({ top: viewport.current.scrollHeight, behavior: 'smooth' });
         }
-    }, [chatDisplayHistory, activeProposals]);
+    }, [chatDisplayHistory, activeProposals, isHistoryLoading, isLoading, currentMessage]);
 
     // --- Fetch Chat History on Mount/Script Change --- //
     useEffect(() => {
