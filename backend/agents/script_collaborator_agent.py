@@ -35,54 +35,52 @@ OPENAI_AGENT_MODEL = os.getenv("OPENAI_AGENT_MODEL", "gpt-4o")
 AGENT_INSTRUCTIONS = ("""
     **CONTEXT AWARENESS IS YOUR HIGHEST PRIORITY.**
     1.  **Identify the Script ID:** Look for a system message at the start of the conversation history like 'Current context is for Script ID: <ID>'. YOU MUST use this specific <ID> whenever you call a tool that requires a `script_id` parameter.
-    2.  **Verify Context:** Before answering questions about script content (lines, categories, overall script) or proposing modifications, YOU MUST use the available tools (`get_script_context` with the correct script ID identified in step 1, `get_line_details`) to fetch the most current information from the database. Do not rely on prior turn memory for specific line text or script structure; always fetch fresh data if the query pertains to it.
-    3.  **Image Analysis Input:** If the user's message is prepended with "System Information: An image was uploaded... Its AI-generated description is: '...'", this description is the result of an image analysis. You should:
-        a.  Acknowledge this information in your response (e.g., "Thanks for the image! The analysis suggests...").
-        b.  Offer to help the user integrate relevant details from this image description into the *existing* character description for the current script.
-        c.  If the user agrees, or if their initial prompt implies this, first use `get_script_context` (with the correct script ID) to fetch the current character description.
-        d.  Then, formulate a new, comprehensive character description that intelligently *supplements* the original with relevant details from the image analysis. Aim for a natural blend, not just appending.
-        e.  Use the `stage_character_description_update` tool to propose this new, combined description for the user's review. Your reasoning for the tool call should mention it's based on the uploaded image and aims to supplement the existing description.
+    2.  **Verify Context:** Before answering questions about script content or proposing modifications, YOU MUST use `get_script_context` (with the correct script ID) to fetch the most current script information, including character description, and a list of `available_categories` (each with `id`, `name`, `prompt_instructions`).
+    3.  **Category-Specific Requests:** If the user refers to a specific category by name (e.g., "add JOKE lines", "improve INTRO lines"): 
+        a.  Use the `name` from the user's request to find the corresponding category `id` from the `available_categories` list you fetched in step 2.
+        b.  If you need more details about that specific category (like its existing lines), you can call `get_script_context` again, this time providing both the `script_id` AND the identified `category_id`.
+        c.  When proposing new lines for this category using `propose_multiple_line_modifications`, ensure the `target_id` in your proposal is this identified `category_id`.
+    4.  **Image Analysis Input:** If the user's message is prepended with "System Information: An image was uploaded...", this description is the result of an image analysis. You should:
+        a.  Acknowledge this information.
+        b.  Offer to help integrate relevant details into the *existing* character description (fetched via `get_script_context` with the correct script ID).
+        c.  Formulate a new, combined character description.
+        d.  Use `stage_character_description_update` to propose this new description.
 
     You are an expert scriptwriting assistant, designed to be a highly capable and context-aware collaborator for game designers working on voice-over scripts. Your primary goal is to help them draft, refine, and brainstorm script content effectively, always using the correct script ID from the context.
 
     **Core Principles (Continued):**
-    4.  **Informed Proposals:** When using `propose_script_modification` (for lines) or when suggesting a character description change, ensure your suggestions are based on the context you've actively fetched using the correct script ID.
-    5.  **Proactive Information Gathering:** If a user's request is about a specific part of the script or character, use your tools (with the correct script ID) to get that information first.
-    6.  **Character Consistency & Evolution:** The character description is vital. 
+    5.  **Informed Proposals:** When using `propose_script_modification` (for lines) or when suggesting a character description change, ensure your suggestions are based on the context you've actively fetched using the correct script ID.
+    6.  **Proactive Information Gathering:** If a user's request is about a specific part of the script or character, use your tools (with the correct script ID) to get that information first.
+    7.  **Character Consistency & Evolution:** The character description is vital. 
         *   Always use `get_script_context` (with the correct script ID) to understand the current character description when generating new lines or refining existing ones.
         *   If the user wishes to update the character description, or if through collaboration you arrive at a refined description (including after an image analysis), YOU SHOULD PREFER to use the `stage_character_description_update` tool. This allows the user to review your proposed description before it's saved.
         *   Only use the `update_character_description` tool for direct updates if the user explicitly bypasses the staging/review step or if they are confirming a previously staged update that you are now re-confirming for some reason (though this latter case should be rare).
-    7.  **Tool Usage & Change Workflow:**
-        *   `get_script_context`: Fetches script details for the **correct script ID**. Args MUST be in a `params` object.
-        *   `get_line_details`: Fetches details for a single line. Args MUST be in a `params` object.
-        *   `propose_multiple_line_modifications` **(Preferred for multiple lines):** Use this tool to submit multiple formulated line changes/additions at once for user review. Args MUST be in a `params` object containing the **correct script ID** and a `proposals` list. DO NOT ask for confirmation again after the user has requested the changes.
-        *   `propose_script_modification` **(Use only for SINGLE line changes/additions):** Use this only if you need to propose a change for exactly one line. Arguments MUST be in a `params` object containing the **correct script ID**.
+    8.  **Tool Usage & Change Workflow:**
+        *   `get_script_context`: Fetches script details, including `available_categories`. Args: `script_id`, optional `category_id`, `line_id`.
+        *   `get_line_details`: Fetches details for a single line. Args: `line_id`.
+        *   `propose_multiple_line_modifications`: For multiple lines. Args: `script_id`, `proposals` list. For `NEW_LINE_IN_CATEGORY`, `target_id` MUST be the **category ID**.
+        *   `propose_script_modification`: For single line. Args: `script_id`, etc. For `NEW_LINE_IN_CATEGORY`, `target_id` MUST be the **category ID**.
         
         **Proposing Line Changes/Additions:**
-        *   **Trigger:** When the user asks to change/add lines (e.g., "make lines grittier", "add a greeting line").
+        *   **Trigger:** User asks to change/add lines, possibly mentioning a category name.
         *   **Action:** 
-            1. Use `get_script_context` to understand current lines, keys, categories, and order indices.
-            2. Formulate the `new_text` for the line(s).
-            3. For **changes** to existing lines, use `modification_type: REPLACE_LINE` and the existing line's ID as `target_id`.
-            4. For **additions** of new lines:
-                a. Determine the target category. Use `get_script_context` if needed to see available categories.
-                b. Generate a new, unique `suggested_line_key` that logically follows the pattern of existing keys in that category (e.g., `GREETING_003` if `GREETING_001`, `GREETING_002` exist).
-                c. Determine the desired `suggested_order_index`. For simplicity, you can aim to add to the end of the category by suggesting a high index like 999, or place it after a specific line by suggesting an index like `target_line_index + 0.5` (the backend/frontend might adjust this).
-                d. Use `modification_type: NEW_LINE_IN_CATEGORY` and provide the **category ID** as the `target_id`.
-                e. Provide the `new_text`, `suggested_line_key`, and `suggested_order_index`.
-            5. Use the appropriate proposal tool (`propose_multiple_line_modifications` or `propose_script_modification`) to submit ALL formulated changes/additions for this request.
-            6. **DO NOT ask for user confirmation again.** Your final text response should confirm submission.
+            1. Use `get_script_context` (with script ID) to get `available_categories` and current lines/character description.
+            2. If a category name is mentioned by the user, find its `id` from `available_categories`. If not found, ask for clarification or list available categories.
+            3. If adding to a specific category, use its `id` as `target_id` for `NEW_LINE_IN_CATEGORY` proposals.
+            4. Formulate `new_text`, `suggested_line_key`, `suggested_order_index`.
+            5. Use `propose_multiple_line_modifications`.
+            6. DO NOT ask for confirmation.
             
         *   `add_to_scratchpad`: Saves **freeform text notes, ideas, or brainstorming snippets** related to the script, lines, or categories. This does NOT change the official script content itself. Arguments MUST be in a `params` object, e.g., `{"params": {"script_id": <script_id>, "text_to_save": "My note", "related_entity_type": "line", "related_entity_id": <line_id>}}`.
         *   `stage_character_description_update`: Use this ONLY when proposing a change to the **official character description** field of the script, for user review and commitment. Arguments MUST be in a `params` object.
         *   `update_character_description`: Directly updates the official character description in the database. Arguments MUST be in a `params` object. Use this cautiously.
         *   **Important Distinction:** Do not use `stage_character_description_update` or `update_character_description` to save general character ideas or notes; use `add_to_scratchpad` for that purpose.
-    8.  **Interaction Style:**
+    9.  **Interaction Style:**
         *   When you formulate a new character description, use `stage_character_description_update` to present it for user review.
         *   When the user requests line changes or additions, formulate them and **IMMEDIATELY use the appropriate proposal tool (`propose_multiple_line_modifications` or `propose_script_modification`) for all changes/additions.**
         *   If the user asks you to save a note or idea, use the `add_to_scratchpad` tool.
 
-    **VERY IMPORTANT:** When calling *any* tool that requires a `script_id`, **always** use the ID of the script currently being discussed in the conversation. Do not assume a default ID or reuse IDs from examples meant for other tools.
+    **VERY IMPORTANT:** When calling *any* tool that requires a `script_id` or `category_id`, **always** use the correct ID derived from the conversation context or the `available_categories` list. Do not assume default IDs.
 
     Always aim to act like an intelligent assistant who can independently use the provided tools to gather necessary data and submit concrete, actionable changes for the user's review to fulfill their request comprehensively.
 """)
@@ -122,6 +120,7 @@ class ScriptContextResponse(BaseModel):
     
     # If no specific category/line, or for overall context, list all lines (could be flat or grouped by unincluded category headers)
     all_script_lines: Optional[List[LineDetail]] = None 
+    available_categories: Optional[List[Dict[str, Any]]] = None # NEW: To list all category names and IDs
     
     target_line: Optional[LineDetail] = None # Populated if line_id is given
     surrounding_before: Optional[List[LineDetail]] = None
@@ -146,7 +145,7 @@ def get_script_context(params: GetScriptContextParams) -> ScriptContextResponse:
     num_surrounding = params.include_surrounding_lines if params.include_surrounding_lines is not None else 3
     num_surrounding = max(0, min(num_surrounding, 10))
 
-    response_kwargs = {"script_id": params.script_id, "error": None} # Initialize error as None
+    response_kwargs = {"script_id": params.script_id, "error": None, "available_categories": []} # Initialize new field
     final_response_obj = None
     try:
         script = db.query(models.VoScript).options(joinedload(models.VoScript.template)).filter(models.VoScript.id == params.script_id).first()
@@ -157,6 +156,21 @@ def get_script_context(params: GetScriptContextParams) -> ScriptContextResponse:
         response_kwargs["character_description"] = script.character_description
         if script.template:
             response_kwargs["template_global_hint"] = script.template.prompt_hint
+
+        # Populate available_categories if no specific category/line is focused
+        if not params.category_id and not params.line_id and script.template_id:
+            # Fetch all categories associated with the script's template
+            categories_db = db.query(models.VoScriptTemplateCategory).filter(
+                models.VoScriptTemplateCategory.template_id == script.template_id,
+                models.VoScriptTemplateCategory.is_deleted == False # Assuming you only want active categories
+            ).order_by(models.VoScriptTemplateCategory.name).all()
+            
+            if categories_db:
+                response_kwargs["available_categories"] = [
+                    {"id": cat.id, "name": cat.name, "prompt_instructions": cat.prompt_instructions} 
+                    for cat in categories_db
+                ]
+            logger.info(f"[get_script_context] Populated available_categories with {len(response_kwargs['available_categories'])} items for script {params.script_id}")
 
         # Determine base query for lines
         lines_query = db.query(models.VoScriptLine).options(
@@ -252,9 +266,11 @@ def get_script_context(params: GetScriptContextParams) -> ScriptContextResponse:
         
         elif not params.category_id: # Only script_id given, fetch all lines (flat list for now)
             all_lines_db = lines_query.order_by(models.VoScriptLine.category_id, models.VoScriptLine.order_index, models.VoScriptLine.id).all()
-            # To get category name for each line, we might need a more complex query or iterate and fetch
-            # For simplicity in this pass, category_name_for_line might be None if not easily available
-            # TODO: Enhance this to efficiently fetch category names for all_script_lines
+            # Ensure category names are efficiently fetched for all_script_lines
+            # This part might be simplified if available_categories is primary source for category listing
+            # We can pre-fetch all category names for the script's template
+            category_names_map = {cat["id"]: cat["name"] for cat in response_kwargs.get("available_categories", [])}
+
             response_kwargs["all_script_lines"] = [
                 LineDetail(
                     id=l.id, line_key=l.line_key or (l.template_line.line_key if l.template_line else None),
@@ -262,10 +278,19 @@ def get_script_context(params: GetScriptContextParams) -> ScriptContextResponse:
                     vo_script_line_prompt_hint=l.prompt_hint,
                     template_line_prompt_hint=l.template_line.prompt_hint if l.template_line else None,
                     category_id_for_line=l.category_id,
-                    category_name_for_line=l.template_line.category.name if (l.template_line and l.template_line.category) else None # Example
+                    category_name_for_line=category_names_map.get(l.category_id) if l.category_id else (l.template_line.category.name if (l.template_line and l.template_line.category) else None)
                 ) for l in all_lines_db
             ]
-            
+            # If available_categories is empty but all_lines_db has lines with category_ids, populate available_categories from all_lines_db unique categories
+            if not response_kwargs.get("available_categories") and all_lines_db:
+                unique_cats = {}
+                for l_detail in response_kwargs["all_script_lines"]:
+                    if l_detail.category_id_for_line and l_detail.category_name_for_line:
+                        unique_cats[l_detail.category_id_for_line] = l_detail.category_name_for_line
+                if unique_cats:
+                    response_kwargs["available_categories"] = [{"id": cat_id, "name": cat_name} for cat_id, cat_name in unique_cats.items()]
+                    logger.info(f"[get_script_context] Populated available_categories from distinct line categories, found {len(response_kwargs['available_categories'])}.")
+
         # --- Add detailed logging before returning --- 
         logger.info(f"[get_script_context] Raw response_kwargs before creating ScriptContextResponse: {response_kwargs}")
         final_response_obj = ScriptContextResponse(**response_kwargs)
