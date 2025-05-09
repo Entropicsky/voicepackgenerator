@@ -558,3 +558,51 @@
     *   **Status:** `Pending`
 
 ---
+
+**Phase X: Chat Image Analysis & Character Description Supplement (TODO)**
+**Goal:** Allow users to upload an image in chat, get an AI-generated description, and have the agent help supplement the existing character description with details from the image.
+
+*Sub-Phase X.1: Backend - Image Description Generation (TODO)*
+    - [ ] **`types.ts`**: Add optional image fields (e.g., `image_base64_data: string`) to `InitiateChatPayload`.
+    - [ ] **`utils_openai.py`**: Create new function `get_image_description(image_base64: str, model_name: str)` that calls OpenAI API (using `OPENAI_IMAGE_MODEL`) with the image data and returns a text description. Handle errors.
+    - [ ] **`script_tasks.py` (`run_script_collaborator_chat_task`):**
+        - [ ] Modify to accept optional image data in its parameters.
+        - [ ] If image data is present, call `utils_openai.get_image_description` *before* running the agent.
+        - [ ] Prepend the returned image description to the `user_message` that is passed to the agent (e.g., "System Information: An image was uploaded by the user. Its AI-generated description is: '{description_from_gpt4o}'.\n\nOriginal user message: {original_user_message}").
+    - [ ] **`vo_script_routes.py` (`/chat` POST endpoint):**
+        - [ ] Modify to accept optional image data (e.g., base64 string) in the JSON payload.
+        - [ ] Pass this image data to the Celery task.
+
+*Sub-Phase X.2: Agent Logic - Handling Image Descriptions (TODO)*
+    - [ ] **`script_collaborator_agent.py` (AGENT_INSTRUCTIONS):**
+        - [ ] Update instructions to guide the agent on how to react when a user message contains a prepended image description.
+        - [ ] Instruct agent to:
+            - Acknowledge the image description.
+            - Offer to help supplement the *existing* character description.
+            - If user agrees, use `get_script_context` to fetch the current character description.
+            - Formulate a *new, combined* character description.
+            - Use the `stage_character_description_update` tool to propose this new combined description.
+
+*Sub-Phase X.3: Frontend - Image Upload & Display (TODO)*
+    - [ ] **`ChatDrawer.tsx` (`ChatPanelContent`):**
+        - [ ] Add state to hold a selected image file (`File | null`).
+        - [ ] Add an `<ActionIcon>` with an image/clip icon to the chat input area.
+        - [ ] Clicking the icon triggers a hidden `<input type="file" accept="image/*">`.
+        - [ ] On file selection, convert the file to a base64 data URL and store it in state. Create an object URL for immediate preview.
+    - [ ] **`ChatDrawer.tsx` (Message Sending):**
+        - [ ] When sending a message, if an image is selected (base64 data exists), include it in the payload to `api.initiateChatSession`.
+        - [ ] Clear the selected image state after sending.
+    - [ ] **`ChatDrawer.tsx` (Message Display):**
+        - [ ] Modify `chatDisplayHistory` mapping. If a user message corresponds to an image upload (e.g., by checking a temporary flag set during sending or a convention in the message content), render an `<img>` tag using the stored object URL for preview.
+        - [ ] Ensure the assistant's response (which will contain the description and proposal logic) renders correctly. The existing `stagedDescriptionUpdate` UI should handle the proposal part.
+    - [ ] **`api.ts` (`initiateChatSession`):**
+        - [ ] Update `InitiateChatPayload` type and the function to send the optional image data (e.g., base64 string).
+
+*Sub-Phase X.4: Testing & Refinement (TODO)*
+    - [ ] Test image upload (various types/sizes).
+    - [ ] Test image description generation.
+    - [ ] Test agent's proposal to supplement character description.
+    - [ ] Test UI flow for editing and committing/dismissing the description update.
+    - [ ] Test error handling (invalid image, API errors).
+
+---

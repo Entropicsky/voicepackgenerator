@@ -486,6 +486,7 @@ export interface InitiateChatPayload {
     user_message: string;
     initial_prompt_context_from_prior_sessions?: ChatMessageContext[];
     current_context?: ChatRequestContext;
+    image_base64_data?: string | null; // Added for image uploads
 }
 
 export interface InitiateChatResponseData { // What the backend {data: HERE} contains

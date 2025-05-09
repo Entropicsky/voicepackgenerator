@@ -2333,6 +2333,7 @@ def instantiate_target_lines(script_id: int):
 class ChatRequestBody(BaseModel):
     user_message: str
     current_context: Optional[Dict[str, Any]] = None # Keep this for focus
+    image_base64_data: Optional[str] = None # NEW: Added for image uploads
 
 # --- Pydantic model for Chat History Response Item ---
 class ChatHistoryItem(BaseModel):
@@ -2370,7 +2371,8 @@ def handle_chat_interaction(script_id: int):
             script_id=script_id,
             user_message=request_data.user_message,
             initial_prompt_context_from_prior_sessions=None, # Pass None or empty list, it's ignored by task now
-            current_context=request_data.current_context or {}
+            current_context=request_data.current_context or {},
+            image_base64_data=request_data.image_base64_data # NEW: Pass image data
         )
         
         current_app.logger.info(f"Dispatched AI Chat Collaborator task {task.id} for script ID {script_id}")
