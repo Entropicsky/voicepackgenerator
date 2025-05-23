@@ -1,1 +1,5 @@
-{}
+{
+  "dependencies": {
+    "@mantine/code-highlight": "^8.0.1"
+  }
+}

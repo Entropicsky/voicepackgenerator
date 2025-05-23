@@ -1412,16 +1412,16 @@ const VoScriptDetailView: React.FC = () => {
                                     const hasUnsavedChanges = isLineTextChanged(line);
                                     const isBeingModified = (savingLineId === line.id || deletingLineId === line.id || refiningLineId === line.id || togglingLockLineId === line.id);
                                     return (
-                                        <Table.Tr key={line.id} style={{ backgroundColor: line.is_locked ? 'var(--mantine-color-gray-1)' : undefined }}>
+                                        <Table.Tr key={line.id} style={{ backgroundColor: line.is_locked ? 'var(--mantine-color-gray-2)' : undefined }}>
                                             <Table.Td ta="center">
                                                 <Tooltip label={line.is_locked ? "Unlock Line" : "Lock Line (prevents AI edits)"}>
                                                     <ActionIcon 
                                                         size="sm" 
                                                         variant="subtle" 
-                                                        title="Toggle Lock"
+                                                        color={line.is_locked ? "orange.8" : "gray"}
                                                         onClick={() => handleToggleLock(line.id)}
-                                                        disabled={isBeingModified} 
                                                         loading={togglingLockLineId === line.id}
+                                                        title={line.is_locked ? "Unlock Line" : "Lock Line (prevents AI edits)"}
                                                     >
                                                         {line.is_locked ? <IconLock size={14}/> : <IconLockOpen size={14}/>}
                                                     </ActionIcon>

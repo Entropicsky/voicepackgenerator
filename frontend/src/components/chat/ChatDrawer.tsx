@@ -130,6 +130,10 @@ export function ChatPanelContent(/* { voScriptData }: ChatPanelContentProps */) 
         let imageBase64Data: string | null = null;
         let localImagePreviewForHistory: string | null = imagePreviewUrl; // Capture current preview for history
 
+        setLoading(true);
+        setError(null);
+        setCurrentProgressMessage("Preparing your message..."); // Initial progress
+
         if (selectedImageFile) {
             imageBase64Data = await new Promise<string | null>((resolve) => {
                 const reader = new FileReader();
@@ -140,43 +144,69 @@ export function ChatPanelContent(/* { voScriptData }: ChatPanelContentProps */) 
             if (!imageBase64Data) {
                 notifications.show({ title: 'Image Error', message: 'Could not process image file.', color: 'red' });
                 setLoading(false);
+                setCurrentProgressMessage(null);
                 return;
             }
         }
 
         const messageToSend = userMessageText || (imageBase64Data ? "[Image uploaded]" : "");
-        if (!messageToSend && !localImagePreviewForHistory) return; // Ensure there's something to send/show
+        if (!messageToSend && !localImagePreviewForHistory) {
+            setLoading(false); // Nothing to send
+            setCurrentProgressMessage(null);
+            return;
+        }
 
-        // Add to history with image preview if available
         const userMessageForHistory: ChatMessage = { 
             role: 'user', 
-            content: messageToSend || "", // Ensure content is always string
-            imagePreviewUrl: localImagePreviewForHistory // Add preview URL to history item
+            content: messageToSend || "",
+            imagePreviewUrl: localImagePreviewForHistory
         };
         addMessageToHistory(userMessageForHistory); 
         
         setCurrentMessage('');
         setSelectedImageFile(null);
-        if (imagePreviewUrl) { // Keep this to revoke the current main preview
+        if (imagePreviewUrl) {
             URL.revokeObjectURL(imagePreviewUrl);
             setImagePreviewUrl(null);
         }
 
-        setLoading(true);
-        setError(null);
         setActiveProposals([]);
-        setCurrentProgressMessage(null);
 
-        try {
-            const payload: InitiateChatPayload = {
-                user_message: messageToSend || "", // Ensure content is always string for payload
-                current_context: { category_id: currentFocus.categoryId, line_id: currentFocus.lineId },
-                image_base64_data: imageBase64Data
-            };
-            const response = await api.initiateChatSession(currentFocus.scriptId!, payload);
-            setCurrentAgentTaskID(response.task_id);
-        } catch (err: any) {
-            setError(err.message || 'Failed to send message.');
+        const MAX_SEND_ATTEMPTS = 3;
+        let sendAttempts = 0;
+
+        while (sendAttempts < MAX_SEND_ATTEMPTS) {
+            try {
+                sendAttempts++;
+                setCurrentProgressMessage(sendAttempts > 1 ? `Sending message (attempt ${sendAttempts}/${MAX_SEND_ATTEMPTS})...` : "Sending message...");
+                const payload: InitiateChatPayload = {
+                    user_message: messageToSend || "",
+                    current_context: { category_id: currentFocus.categoryId, line_id: currentFocus.lineId },
+                    image_base64_data: imageBase64Data
+                };
+                const response = await api.initiateChatSession(currentFocus.scriptId!, payload);
+                setCurrentAgentTaskID(response.task_id);
+                // setCurrentProgressMessage(null); // Polling will handle further progress messages
+                return; // Exit loop on success
+            } catch (err: any) {
+                if (err.response && err.response.status === 503 && sendAttempts < MAX_SEND_ATTEMPTS) {
+                    setError(`Server busy. Retrying message attempt ${sendAttempts}/${MAX_SEND_ATTEMPTS}...`);
+                    await new Promise(resolve => setTimeout(resolve, 2000 * sendAttempts)); // Exponential backoff (simplified)
+                } else {
+                    const finalErrorMessage = err.response?.data?.detail || err.message || 'Failed to send message.';
+                    setError(finalErrorMessage);
+                    addMessageToHistory({role: 'assistant', content: `Error sending message: ${finalErrorMessage}`});
+                    setLoading(false);
+                    setCurrentProgressMessage(null);
+                    return; // Exit loop on non-503 error or max attempts reached
+                }
+            }
+        }
+        // If loop finishes due to max attempts for 503
+        if (sendAttempts === MAX_SEND_ATTEMPTS) {
+            const finalErrorMessage = "Server is busy after multiple retries. Please try again shortly.";
+            setError(finalErrorMessage);
+            addMessageToHistory({role: 'assistant', content: finalErrorMessage});
             setLoading(false);
             setCurrentProgressMessage(null);
         }
@@ -192,6 +222,8 @@ export function ChatPanelContent(/* { voScriptData }: ChatPanelContentProps */) 
         };
         let attempts = 0; 
         let initialDelayTimer: NodeJS.Timeout | null = null;
+        let consecutivePollFailures = 0; // NEW: Track consecutive poll failures
+        const MAX_CONSECUTIVE_POLL_FAILURES = 3;
 
         if (currentAgentTaskID) {
             const taskIdBeingPolled = currentAgentTaskID; 
@@ -203,7 +235,6 @@ export function ChatPanelContent(/* { voScriptData }: ChatPanelContentProps */) 
             // --- Add Initial Delay --- 
             initialDelayTimer = setTimeout(() => {
                 console.log(`[ChatPanelContent] Initial delay finished for ${taskIdBeingPolled}. Starting interval polling.`);
-                // Start the interval polling ONLY after the delay
                 pollingIntervalRef.current = setInterval(async () => {
                     // Early exit if the task ID has changed or cleared 
                     if (useChatStore.getState().currentAgentTaskID !== taskIdBeingPolled || !taskIdBeingPolled) {
@@ -228,9 +259,11 @@ export function ChatPanelContent(/* { voScriptData }: ChatPanelContentProps */) 
                     try {
                         console.log(`[ChatPanelContent] Polling task: ${taskIdBeingPolled}, Attempt: ${attempts}`); 
                         const statusResponse = await api.getChatTaskStatus(taskIdBeingPolled);
-                        console.log(`[ChatPanelContent] Poll response for ${taskIdBeingPolled}:`, statusResponse); // Log response
+                        console.log(`[ChatPanelContent] Poll response for ${taskIdBeingPolled}:`, statusResponse); 
                         
-                        // Re-check task ID after await 
+                        consecutivePollFailures = 0; // Reset on successful poll
+                        setCurrentProgressMessage(null); // Clear any previous retry/error messages from polling
+
                         if (useChatStore.getState().currentAgentTaskID !== taskIdBeingPolled) {
                             console.log(`[ChatPanelContent] Task ID changed during poll for ${taskIdBeingPolled}, aborting processing.`);
                             stopPolling();
@@ -315,19 +348,29 @@ export function ChatPanelContent(/* { voScriptData }: ChatPanelContentProps */) 
                              // setCurrentAgentTaskID(null);
                         }
                     } catch (err: any) {
-                        console.error(`[ChatPanelContent] Error polling task ${taskIdBeingPolled}:`, err); // Add logging
-                        // --- Re-check task ID after await/error --- 
+                        console.error(`[ChatPanelContent] Error polling task ${taskIdBeingPolled}:`, err); 
                         if (useChatStore.getState().currentAgentTaskID !== taskIdBeingPolled) {
                              console.log(`[ChatPanelContent] Task ID changed during error handling for ${taskIdBeingPolled}, aborting state update.`);
-                             stopPolling(); // Stop this interval
+                             stopPolling(); 
                              return;
                         }
-                        // --- End Re-check --- 
-                        stopPolling(); 
-                        setLoading(false); 
-                        setCurrentAgentTaskID(null);
-                        setError(err.message || 'Failed to get task update.');
-                        setCurrentProgressMessage(null); // Clear on error
+                        
+                        consecutivePollFailures++;
+                        setCurrentProgressMessage(`Connection issue (attempt ${consecutivePollFailures}/${MAX_CONSECUTIVE_POLL_FAILURES}). Retrying...`);
+
+                        if (consecutivePollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+                            stopPolling(); 
+                            setLoading(false); 
+                            setCurrentAgentTaskID(null);
+                            const pollFailMessage = "Lost connection while waiting for response. Please try sending your message again.";
+                            setError(pollFailMessage);
+                            addMessageToHistory({role: 'assistant', content: pollFailMessage});
+                            setCurrentProgressMessage(null); 
+                        } else {
+                            // Optional: await a short delay before next poll attempt in setInterval
+                            // await new Promise(resolve => setTimeout(resolve, 1000)); 
+                            // However, setInterval already has its own delay. We are just tracking failures.
+                        }
                     }
                 }, POLLING_INTERVAL);
             }, 500); // Start polling after 500ms delay

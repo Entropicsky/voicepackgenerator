@@ -3,10 +3,10 @@
 
 # Stage 1: Build the React application
 FROM node:20-slim as builder
-WORKDIR /app/frontend
-COPY frontend/package*.json ./
+WORKDIR /app
+COPY package*.json ./
 RUN npm cache clean --force && rm -rf node_modules && npm install
-COPY frontend/ .
+COPY . .
 # Ensure dist dir is removed before build
 RUN rm -rf dist
 RUN npm run build
@@ -15,7 +15,7 @@ RUN npm run build
 FROM nginx:alpine as final
 
 # Copy built static files from the builder stage
-COPY --from=builder /app/frontend/dist /usr/share/nginx/html
+COPY --from=builder /app/dist /usr/share/nginx/html
 
 # Copy the Nginx config *template*
 COPY nginx.template.conf /etc/nginx/nginx.template.conf
